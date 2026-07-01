@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# build_py.sh <file.py> <LHOST> <LPORT>
+
 set -e
 
 if [ -z "$3" ]; then
