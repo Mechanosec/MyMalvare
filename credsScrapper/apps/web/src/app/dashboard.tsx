@@ -3,20 +3,36 @@
 import { useState } from 'react';
 import { FindingsTable } from '../components/findings-table';
 import { ProgressPanel } from '../components/progress-panel';
+import { ScannedReposTable } from '../components/scanned-repos-table';
 import { ScanControls } from '../components/scan-controls';
+import { StatTile } from '../components/stat-tile';
+import { Tabs } from '../components/tabs';
 import { EScanStatus } from '../lib/constant/scan-status.constant';
 import { IFinding } from '../lib/types/finding.type';
 import { IQueueStatus } from '../lib/types/queue-status.type';
+import { IScannedRepo } from '../lib/types/scanned-repo.type';
 
 interface IDashboardProps {
   readonly initialQueueStatus: IQueueStatus | null;
   readonly initialFindings: IFinding[];
+  readonly initialScannedRepos: IScannedRepo[];
 }
 
-export function Dashboard({ initialQueueStatus, initialFindings }: IDashboardProps) {
+const TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'findings', label: 'Findings' },
+  { id: 'repositories', label: 'Repositories' },
+] as const;
+
+export function Dashboard({
+  initialQueueStatus,
+  initialFindings,
+  initialScannedRepos,
+}: IDashboardProps) {
+  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]['id']>('overview');
   const [jobId, setJobId] = useState<string | null>(null);
-  // Bumped whenever a job finishes, so the findings table re-fetches
-  // without needing its own job-completion logic.
+  // Bumped whenever a job starts, so the findings/repos tables re-fetch
+  // without needing their own job-completion logic.
   const [refreshKey, setRefreshKey] = useState(0);
 
   function handleJobStarted(id: string) {
@@ -24,40 +40,66 @@ export function Dashboard({ initialQueueStatus, initialFindings }: IDashboardPro
     setRefreshKey((key) => key + 1);
   }
 
+  const totalFindings = initialScannedRepos.reduce((sum, r) => sum + r.findingsCount, 0);
+
   return (
-    <main className="mx-auto max-w-4xl space-y-8 p-8">
-      <h1 className="text-2xl font-semibold">credsScrapper</h1>
+    <main className="min-h-full">
+      <header className="border-b border-line px-6 py-4">
+        <div className="mx-auto flex max-w-6xl items-center gap-3">
+          <span
+            className={`h-2 w-2 rounded-full ${initialQueueStatus ? 'bg-accent' : 'bg-critical'}`}
+          />
+          <h1 className="text-base font-semibold">credsScrapper</h1>
+          <span className="text-sm text-text-dim">GitHub secret scanner</span>
+        </div>
+      </header>
 
-      <section>
-        <h2 className="mb-2 text-lg font-medium">Queue status</h2>
-        {initialQueueStatus ? (
-          <ul className="text-sm text-gray-700">
-            <li>Pending candidates: {initialQueueStatus.pendingCandidates}</li>
-            {Object.values(EScanStatus).map((status) => (
-              <li key={status}>
-                {status}: {initialQueueStatus.scannedByStatus[status] ?? 0}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-sm text-red-600">Could not reach the API.</p>
-        )}
-      </section>
+      <div className="mx-auto max-w-6xl px-6 py-6">
+        <Tabs tabs={TABS} activeId={activeTab} onChange={(id) => setActiveTab(id as typeof activeTab)} />
 
-      <section>
-        <h2 className="mb-2 text-lg font-medium">Controls</h2>
-        <ScanControls onJobStarted={handleJobStarted} />
-      </section>
+        <div className="mt-6 space-y-6">
+          {activeTab === 'overview' && (
+            <>
+              {initialQueueStatus ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                  <StatTile label="Pending" value={initialQueueStatus.pendingCandidates} />
+                  <StatTile
+                    label="Scanning"
+                    value={initialQueueStatus.scannedByStatus[EScanStatus.IN_PROGRESS] ?? 0}
+                    tone="warning"
+                  />
+                  <StatTile
+                    label="Done"
+                    value={initialQueueStatus.scannedByStatus[EScanStatus.DONE] ?? 0}
+                    tone="accent"
+                  />
+                  <StatTile
+                    label="Failed"
+                    value={initialQueueStatus.scannedByStatus[EScanStatus.FAILED] ?? 0}
+                    tone="critical"
+                  />
+                  <StatTile label="Findings" value={totalFindings} tone={totalFindings > 0 ? 'critical' : 'default'} />
+                </div>
+              ) : (
+                <p className="border border-critical/50 bg-critical/10 px-4 py-3 text-sm text-critical">
+                  Could not reach the API at {process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}.
+                </p>
+              )}
 
-      <section>
-        <h2 className="mb-2 text-lg font-medium">Progress</h2>
-        <ProgressPanel key={jobId} jobId={jobId} />
-      </section>
+              <ScanControls onJobStarted={handleJobStarted} />
+              <ProgressPanel key={jobId} jobId={jobId} />
+            </>
+          )}
 
-      <section>
-        <h2 className="mb-2 text-lg font-medium">Findings</h2>
-        <FindingsTable initialFindings={initialFindings} refreshKey={refreshKey} />
-      </section>
+          {activeTab === 'findings' && (
+            <FindingsTable initialFindings={initialFindings} refreshKey={refreshKey} />
+          )}
+
+          {activeTab === 'repositories' && (
+            <ScannedReposTable initialRepos={initialScannedRepos} refreshKey={refreshKey} />
+          )}
+        </div>
+      </div>
     </main>
   );
 }

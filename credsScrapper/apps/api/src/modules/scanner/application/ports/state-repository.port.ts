@@ -2,6 +2,7 @@ import { ESecretType } from '../../domain/constant/secret-type.constant';
 import { IFindingRecord, IFindingsFilter } from '../../domain/types/finding-record.type';
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
+import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type';
 
 // Abstract class rather than an interface: the class itself doubles as
 // the NestJS DI token (`{ provide: StateRepositoryPort, useClass: ... }`),
@@ -43,4 +44,7 @@ export abstract class StateRepositoryPort {
   abstract getQueueStatus(): Promise<IQueueStatus>;
 
   abstract listFindings(filter: IFindingsFilter): Promise<IFindingRecord[]>;
+
+  /** Most recently scanned repos first, newest attempt (started/scanned) on top. */
+  abstract listScannedRepos(limit: number): Promise<IScannedRepoRecord[]>;
 }

@@ -4,6 +4,7 @@ import { EScanStatus } from '../../domain/constant/scan-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 import { IFindingRecord } from '../../domain/types/finding-record.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
+import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type';
 
 // Prisma models never leave this file's callers within infrastructure -
 // use-cases and controllers only ever see plain domain types. SQLite has
@@ -44,4 +45,22 @@ export function toFindingRecord(row: TPrismaFinding): IFindingRecord {
 
 export function scannedRepoStatus(row: TPrismaScannedRepo): EScanStatus {
   return toScanStatus(row.status);
+}
+
+export function toScannedRepoRecord(
+  row: TPrismaScannedRepo,
+  findingsCount: number,
+): IScannedRepoRecord {
+  return {
+    repoId: row.repoId,
+    owner: row.owner,
+    name: row.name,
+    status: toScanStatus(row.status),
+    lastCommitSha: row.lastCommitSha,
+    startedAt: row.startedAt,
+    scannedAt: row.scannedAt,
+    failReason: row.failReason,
+    retryCount: row.retryCount,
+    findingsCount,
+  };
 }

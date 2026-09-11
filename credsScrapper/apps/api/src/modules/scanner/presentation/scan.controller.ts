@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { GetScannedReposUseCase } from '../application/use-cases/get-scanned-repos.use-case';
 import { GetScanStatusUseCase } from '../application/use-cases/get-scan-status.use-case';
 import { RunScanLoopUseCase } from '../application/use-cases/run-scan-loop.use-case';
 import { EJobType } from '../domain/constant/job-status.constant';
 import { IQueueStatus } from '../domain/types/queue-status.type';
 import { IRepoRef } from '../domain/types/repo-ref.type';
+import { IScannedRepoRecord } from '../domain/types/scanned-repo-record.type';
 import { InMemoryJobRunner } from '../infrastructure/jobs/in-memory-job-runner';
 import { StartScanDto } from './dto/start-scan.dto';
 
@@ -21,6 +23,7 @@ export class ScanController {
   constructor(
     private readonly runScanLoop: RunScanLoopUseCase,
     private readonly getScanStatus: GetScanStatusUseCase,
+    private readonly getScannedRepos: GetScannedReposUseCase,
     private readonly jobRunner: InMemoryJobRunner,
   ) {}
 
@@ -42,5 +45,10 @@ export class ScanController {
   @Get('status')
   async status(): Promise<IQueueStatus> {
     return this.getScanStatus.execute();
+  }
+
+  @Get('repos')
+  async repos(@Query('limit') limit?: string): Promise<IScannedRepoRecord[]> {
+    return this.getScannedRepos.execute(limit ? Number(limit) : undefined);
   }
 }

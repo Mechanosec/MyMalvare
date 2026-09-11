@@ -6,8 +6,9 @@ import { ESecretType } from '../../domain/constant/secret-type.constant';
 import { IFindingRecord, IFindingsFilter } from '../../domain/types/finding-record.type';
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
+import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type';
 import { PrismaService } from './prisma.service';
-import { toFindingRecord, toRepoRef, toScanStatus } from './prisma-state.mapper';
+import { toFindingRecord, toRepoRef, toScannedRepoRecord, toScanStatus } from './prisma-state.mapper';
 
 // Implements the same resumability semantics as
 // credsScrapper/app/state/repository.py: candidates -> scanned_repos
@@ -163,5 +164,22 @@ export class PrismaStateRepository extends StateRepositoryPort {
       skip: filter.offset ?? 0,
     });
     return rows.map(toFindingRecord);
+  }
+
+  async listScannedRepos(limit: number): Promise<IScannedRepoRecord[]> {
+    const rows = await this.prisma.scannedRepo.findMany({
+      orderBy: [{ scannedAt: 'desc' }, { startedAt: 'desc' }],
+      take: limit,
+    });
+    // No Prisma relation between scanned_repos and findings (repoId is a
+    // plain column, not a foreign key) - one groupBy for all rows in this
+    // page avoids an N+1 count-per-row.
+    const counts = await this.prisma.finding.groupBy({
+      by: ['repoId'],
+      where: { repoId: { in: rows.map((row) => row.repoId) } },
+      _count: { repoId: true },
+    });
+    const countByRepoId = new Map(counts.map((row) => [row.repoId, row._count.repoId]));
+    return rows.map((row) => toScannedRepoRecord(row, countByRepoId.get(row.repoId) ?? 0));
   }
 }

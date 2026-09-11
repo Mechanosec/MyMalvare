@@ -48,6 +48,6 @@ describe('FindingsTable', () => {
   it('shows an empty state when there are no findings', () => {
     vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue([]);
     render(<FindingsTable initialFindings={[]} refreshKey={0} />);
-    expect(screen.getByText('No findings yet.')).toBeInTheDocument();
+    expect(screen.getByText('No findings match this filter.')).toBeInTheDocument();
   });
 });

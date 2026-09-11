@@ -2,6 +2,7 @@ import { ESecretType } from './constant/secret-type.constant';
 import { IFinding } from './types/finding.type';
 import { IJobState } from './types/job-progress-event.type';
 import { IQueueStatus } from './types/queue-status.type';
+import { IScannedRepo } from './types/scanned-repo.type';
 
 // Public on purpose: this API has no auth/token yet, so there is nothing
 // sensitive to keep out of the browser bundle (see the frontend design
@@ -60,4 +61,8 @@ export function startScan(body: IStartScanBody): Promise<{ jobId: string }> {
 
 export function fetchJob(jobId: string): Promise<IJobState> {
   return get<IJobState>(`/jobs/${jobId}`);
+}
+
+export function fetchScannedRepos(limit = 100): Promise<IScannedRepo[]> {
+  return get<IScannedRepo[]>(`/scan/repos?limit=${limit}`);
 }

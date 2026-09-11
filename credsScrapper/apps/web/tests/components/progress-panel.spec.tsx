@@ -47,6 +47,19 @@ describe('ProgressPanel', () => {
       });
     });
 
-    expect(screen.getByText('[running] processed 5 (5 processed)')).toBeInTheDocument();
+    expect(screen.getByText(/\[running\] processed 5 \(5 processed\)/)).toBeInTheDocument();
+  });
+
+  it('accumulates multiple events into a scrolling log instead of replacing the last one', () => {
+    render(<ProgressPanel jobId="job-1" />);
+
+    act(() => {
+      handlers.get('job:job-1')?.({ jobId: 'job-1', status: EJobStatus.RUNNING, message: 'processed 5', processed: 5 });
+      handlers.get('job:job-1')?.({ jobId: 'job-1', status: EJobStatus.RUNNING, message: 'processed 10', processed: 10 });
+    });
+
+    expect(screen.getByText(/processed 5 \(5 processed\)/)).toBeInTheDocument();
+    expect(screen.getByText(/processed 10 \(10 processed\)/)).toBeInTheDocument();
+    expect(screen.getByText('2 lines')).toBeInTheDocument();
   });
 });

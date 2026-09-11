@@ -20,7 +20,7 @@ export function ScanControls({ onJobStarted }: IScanControlsProps) {
       const { jobId } = await startDiscover();
       onJobStarted(jobId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'discover failed');
+      setError(err instanceof Error ? err.message : 'Discover failed');
     } finally {
       setPending(false);
     }
@@ -36,42 +36,43 @@ export function ScanControls({ onJobStarted }: IScanControlsProps) {
       });
       onJobStarted(jobId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'scan failed');
+      setError(err instanceof Error ? err.message : 'Scan failed');
     } finally {
       setPending(false);
     }
   }
 
   return (
-    <div className="flex flex-wrap items-end gap-4">
+    <div className="flex flex-wrap items-end gap-3 border border-line bg-surface p-4">
       <button
         type="button"
         onClick={runDiscover}
         disabled={pending}
-        className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
+        className="bg-accent px-4 py-2 text-sm font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
       >
         Discover
       </button>
 
-      <label className="flex flex-col text-sm">
+      <label className="flex flex-col gap-1 text-xs text-text-dim">
         Workers
         <input
           type="number"
           min={1}
           value={workers}
           onChange={(e) => setWorkers(Number(e.target.value))}
-          className="w-20 rounded border px-2 py-1"
+          className="w-20 border border-line bg-surface-2 px-2 py-1.5 font-mono text-sm text-text outline-none focus:border-accent"
         />
       </label>
 
-      <label className="flex flex-col text-sm">
+      <label className="flex flex-col gap-1 text-xs text-text-dim">
         Max repos (optional)
         <input
           type="number"
           min={1}
+          placeholder="no limit"
           value={maxRepos}
           onChange={(e) => setMaxRepos(e.target.value)}
-          className="w-28 rounded border px-2 py-1"
+          className="w-28 border border-line bg-surface-2 px-2 py-1.5 font-mono text-sm text-text outline-none placeholder:text-text-dim focus:border-accent"
         />
       </label>
 
@@ -79,12 +80,12 @@ export function ScanControls({ onJobStarted }: IScanControlsProps) {
         type="button"
         onClick={runScan}
         disabled={pending}
-        className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
+        className="border border-accent px-4 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-40"
       >
         Scan
       </button>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-critical">{error}</p>}
     </div>
   );
 }

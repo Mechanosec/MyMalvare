@@ -5,6 +5,7 @@ import { ESecretType } from '../../../../src/modules/scanner/domain/constant/sec
 import { IFindingRecord, IFindingsFilter } from '../../../../src/modules/scanner/domain/types/finding-record.type';
 import { IQueueStatus } from '../../../../src/modules/scanner/domain/types/queue-status.type';
 import { IRepoRef } from '../../../../src/modules/scanner/domain/types/repo-ref.type';
+import { IScannedRepoRecord } from '../../../../src/modules/scanner/domain/types/scanned-repo-record.type';
 
 interface CandidateRow extends IRepoRef {
   status: ECandidateStatus;
@@ -13,6 +14,10 @@ interface CandidateRow extends IRepoRef {
 interface ScannedRow extends IRepoRef {
   status: EScanStatus;
   startedAt?: Date;
+  scannedAt?: Date;
+  lastCommitSha?: string;
+  failReason?: string;
+  retryCount?: number;
 }
 
 /** In-memory fake used by unit tests instead of a real database. */
@@ -135,5 +140,20 @@ export class FakeStateRepository extends StateRepositoryPort {
     return this.findings
       .filter((f) => !filter.secretType || f.secretType === filter.secretType)
       .map((f, i) => ({ id: i, foundAt: new Date(), ...f }));
+  }
+
+  async listScannedRepos(limit: number): Promise<IScannedRepoRecord[]> {
+    return [...this.scanned.values()].slice(0, limit).map((row) => ({
+      repoId: row.repoId,
+      owner: row.owner,
+      name: row.name,
+      status: row.status,
+      lastCommitSha: row.lastCommitSha ?? null,
+      startedAt: row.startedAt ?? null,
+      scannedAt: row.scannedAt ?? null,
+      failReason: row.failReason ?? null,
+      retryCount: row.retryCount ?? 0,
+      findingsCount: this.findings.filter((f) => f.repoId === row.repoId).length,
+    }));
   }
 }
