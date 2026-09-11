@@ -1,6 +1,8 @@
 # credsScrapper Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **No git commits or pushes at any point in this plan** — the user requires explicit in-the-moment permission before any `git add`/`git commit`/`git push`. Do the work, run the tests, leave changes unstaged.
 
 **Goal:** Build a resumable Python CLI that discovers public GitHub repositories, clones them, and scans both current file contents and full commit history for leaked secrets, storing findings in SQLite.
 
@@ -27,7 +29,7 @@
 credsScrapper/
   pyproject.toml
   requirements-dev.txt
-  credsscrapper/
+  app/
     __init__.py
     __main__.py
     cli.py
@@ -70,10 +72,10 @@ credsScrapper/
 **Files:**
 - Create: `credsScrapper/pyproject.toml`
 - Create: `credsScrapper/requirements-dev.txt`
-- Create: `credsScrapper/credsscrapper/__init__.py`
-- Create: `credsScrapper/credsscrapper/state/__init__.py`
-- Create: `credsScrapper/credsscrapper/state/db.py`
-- Create: `credsScrapper/credsscrapper/state/repository.py`
+- Create: `credsScrapper/app/__init__.py`
+- Create: `credsScrapper/app/state/__init__.py`
+- Create: `credsScrapper/app/state/db.py`
+- Create: `credsScrapper/app/state/repository.py`
 - Test: `credsScrapper/tests/__init__.py`
 - Test: `credsScrapper/tests/conftest.py`
 - Test: `credsScrapper/tests/test_db.py`
@@ -81,16 +83,16 @@ credsScrapper/
 
 **Interfaces:**
 - Produces (used by every later task):
-  - `credsscrapper.state.db.init_db(path: str) -> sqlite3.Connection` — creates tables if missing, returns a connection with `row_factory = sqlite3.Row`, foreign keys off (single-file, no FKs needed).
-  - `credsscrapper.state.repository.RepoRef` — `@dataclass(frozen=True)` with fields `repo_id: int`, `owner: str`, `name: str`.
-  - `credsscrapper.state.repository.add_candidate(conn, repo_id: int, owner: str, name: str) -> bool` — returns `True` if a new row was inserted, `False` if `repo_id` already exists in `candidates` or `scanned_repos`.
-  - `credsscrapper.state.repository.is_known(conn, repo_id: int) -> bool`
-  - `credsscrapper.state.repository.claim_next(conn) -> RepoRef | None` — atomically picks one pending unit of work (a `candidates` row with `status='pending'`, or a `scanned_repos` row with `status='pending'` from a requeue), moves/creates the corresponding `scanned_repos` row to `status='in_progress'` with `started_at=<utc now iso>`, removes/marks the `candidates` row `status='claimed'`, and returns the `RepoRef`. Returns `None` if nothing pending.
-  - `credsscrapper.state.repository.mark_done(conn, repo_id: int, last_commit_sha: str) -> None`
-  - `credsscrapper.state.repository.mark_failed(conn, repo_id: int, reason: str) -> None` — increments `retry_count`.
-  - `credsscrapper.state.repository.requeue_stale(conn, timeout_seconds: int) -> int` — sets `scanned_repos.status` from `'in_progress'` to `'pending'` where `started_at` is older than `timeout_seconds`; returns count of rows changed.
-  - `credsscrapper.state.repository.add_finding(conn, repo_id: int, owner: str, name: str, file_path: str, commit_sha: str, secret_type: str, secret_value: str, line_number: int) -> None`
-  - `credsscrapper.state.repository.count_findings(conn, repo_id: int) -> int` — test helper, also useful for CLI summaries later.
+  - `app.state.db.init_db(path: str) -> sqlite3.Connection` — creates tables if missing, returns a connection with `row_factory = sqlite3.Row`, foreign keys off (single-file, no FKs needed).
+  - `app.state.repository.RepoRef` — `@dataclass(frozen=True)` with fields `repo_id: int`, `owner: str`, `name: str`.
+  - `app.state.repository.add_candidate(conn, repo_id: int, owner: str, name: str) -> bool` — returns `True` if a new row was inserted, `False` if `repo_id` already exists in `candidates` or `scanned_repos`.
+  - `app.state.repository.is_known(conn, repo_id: int) -> bool`
+  - `app.state.repository.claim_next(conn) -> RepoRef | None` — atomically picks one pending unit of work (a `candidates` row with `status='pending'`, or a `scanned_repos` row with `status='pending'` from a requeue), moves/creates the corresponding `scanned_repos` row to `status='in_progress'` with `started_at=<utc now iso>`, removes/marks the `candidates` row `status='claimed'`, and returns the `RepoRef`. Returns `None` if nothing pending.
+  - `app.state.repository.mark_done(conn, repo_id: int, last_commit_sha: str) -> None`
+  - `app.state.repository.mark_failed(conn, repo_id: int, reason: str) -> None` — increments `retry_count`.
+  - `app.state.repository.requeue_stale(conn, timeout_seconds: int) -> int` — sets `scanned_repos.status` from `'in_progress'` to `'pending'` where `started_at` is older than `timeout_seconds`; returns count of rows changed.
+  - `app.state.repository.add_finding(conn, repo_id: int, owner: str, name: str, file_path: str, commit_sha: str, secret_type: str, secret_value: str, line_number: int) -> None`
+  - `app.state.repository.count_findings(conn, repo_id: int) -> int` — test helper, also useful for CLI summaries later.
 
 - [ ] **Step 1: Create venv and install pytest**
 
@@ -107,7 +109,7 @@ echo "pytest==8.3.3" > requirements-dev.txt
 `credsScrapper/pyproject.toml`:
 ```toml
 [project]
-name = "credsscrapper"
+name = "app"
 version = "0.1.0"
 requires-python = ">=3.10"
 
@@ -115,14 +117,14 @@ requires-python = ">=3.10"
 testpaths = ["tests"]
 ```
 
-Create empty `credsscrapper/__init__.py`, `credsscrapper/state/__init__.py`, `tests/__init__.py`.
+Create empty `app/__init__.py`, `app/state/__init__.py`, `tests/__init__.py`.
 
 - [ ] **Step 3: Write failing tests for `init_db`**
 
 `tests/test_db.py`:
 ```python
 import sqlite3
-from credsscrapper.state.db import init_db
+from app.state.db import init_db
 
 
 def test_init_db_creates_tables(tmp_path):
@@ -150,9 +152,9 @@ def test_init_db_row_factory_is_row(tmp_path):
 - [ ] **Step 4: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_db.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'credsscrapper.state.db'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.state.db'`
 
-- [ ] **Step 5: Implement `credsscrapper/state/db.py`**
+- [ ] **Step 5: Implement `app/state/db.py`**
 
 ```python
 import sqlite3
@@ -206,22 +208,12 @@ def init_db(path: str) -> sqlite3.Connection:
 Run: `.venv/bin/pytest tests/test_db.py -v`
 Expected: PASS (2 tests)
 
-- [ ] **Step 7: Commit**
-
-```bash
-git add credsScrapper/pyproject.toml credsScrapper/requirements-dev.txt \
-  credsScrapper/credsscrapper/__init__.py credsScrapper/credsscrapper/state/__init__.py \
-  credsScrapper/credsscrapper/state/db.py credsScrapper/tests/__init__.py \
-  credsScrapper/tests/test_db.py
-git commit -m "feat: add SQLite schema init for credsScrapper state store"
-```
-
-- [ ] **Step 8: Write `tests/conftest.py` shared fixture**
+- [ ] **Step 7: Write `tests/conftest.py` shared fixture**
 
 ```python
 import pytest
 
-from credsscrapper.state.db import init_db
+from app.state.db import init_db
 
 
 @pytest.fixture
@@ -229,13 +221,13 @@ def conn(tmp_path):
     return init_db(str(tmp_path / "state.db"))
 ```
 
-- [ ] **Step 9: Write failing tests for repository functions**
+- [ ] **Step 8: Write failing tests for repository functions**
 
 `tests/test_repository.py`:
 ```python
 from datetime import datetime, timedelta, timezone
 
-from credsscrapper.state import repository as repo
+from app.state import repository as repo
 
 
 def test_add_candidate_new_returns_true(conn):
@@ -363,12 +355,12 @@ def test_add_finding_and_count(conn):
     assert repo.count_findings(conn, 1) == 1
 ```
 
-- [ ] **Step 10: Run tests to verify they fail**
+- [ ] **Step 9: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_repository.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'credsscrapper.state.repository'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.state.repository'`
 
-- [ ] **Step 11: Implement `credsscrapper/state/repository.py`**
+- [ ] **Step 10: Implement `app/state/repository.py`**
 
 ```python
 import sqlite3
@@ -496,36 +488,28 @@ def count_findings(conn: sqlite3.Connection, repo_id: int) -> int:
     return row["n"]
 ```
 
-- [ ] **Step 12: Run tests to verify they pass**
+- [ ] **Step 11: Run tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_repository.py -v`
 Expected: PASS (14 tests)
-
-- [ ] **Step 13: Commit**
-
-```bash
-git add credsScrapper/credsscrapper/state/repository.py credsScrapper/tests/conftest.py \
-  credsScrapper/tests/test_repository.py
-git commit -m "feat: add resumable candidate/scan-state repository"
-```
 
 ---
 
 ### Task 2: Detection engine — regex patterns
 
 **Files:**
-- Create: `credsscrapper/detection/__init__.py`
-- Create: `credsscrapper/detection/patterns.py`
+- Create: `app/detection/__init__.py`
+- Create: `app/detection/patterns.py`
 - Test: `tests/test_patterns.py`
 
 **Interfaces:**
-- Produces: `credsscrapper.detection.patterns.PATTERNS: list[tuple[str, re.Pattern]]` — `(secret_type_name, compiled_regex)` pairs. Consumed by Task 4's `engine.py`.
+- Produces: `app.detection.patterns.PATTERNS: list[tuple[str, re.Pattern]]` — `(secret_type_name, compiled_regex)` pairs. Consumed by Task 4's `engine.py`.
 
 - [ ] **Step 1: Write failing tests**
 
 `tests/test_patterns.py`:
 ```python
-from credsscrapper.detection.patterns import PATTERNS
+from app.detection.patterns import PATTERNS
 
 
 def _match_any(text):
@@ -561,9 +545,9 @@ def test_no_false_positive_on_normal_code():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_patterns.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'credsscrapper.detection'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.detection'`
 
-- [ ] **Step 3: Implement `credsscrapper/detection/patterns.py`**
+- [ ] **Step 3: Implement `app/detection/patterns.py`**
 
 ```python
 import re
@@ -575,37 +559,29 @@ PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 ```
 
-Create empty `credsscrapper/detection/__init__.py`.
+Create empty `app/detection/__init__.py`.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_patterns.py -v`
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add credsScrapper/credsscrapper/detection/__init__.py \
-  credsScrapper/credsscrapper/detection/patterns.py credsScrapper/tests/test_patterns.py
-git commit -m "feat: add regex secret patterns"
-```
-
 ---
 
 ### Task 3: Detection engine — Shannon entropy
 
 **Files:**
-- Create: `credsscrapper/detection/entropy.py`
+- Create: `app/detection/entropy.py`
 - Test: `tests/test_entropy.py`
 
 **Interfaces:**
-- Produces: `credsscrapper.detection.entropy.shannon_entropy(s: str) -> float`; `credsscrapper.detection.entropy.ENTROPY_THRESHOLD: float = 4.0`; `credsscrapper.detection.entropy.GENERIC_TOKEN_RE: re.Pattern` (matches `[A-Za-z0-9+/=]{32,}`); `credsscrapper.detection.entropy.find_high_entropy_tokens(text: str) -> list[str]`. Consumed by Task 4's `engine.py`.
+- Produces: `app.detection.entropy.shannon_entropy(s: str) -> float`; `app.detection.entropy.ENTROPY_THRESHOLD: float = 4.0`; `app.detection.entropy.GENERIC_TOKEN_RE: re.Pattern` (matches `[A-Za-z0-9+/=]{32,}`); `app.detection.entropy.find_high_entropy_tokens(text: str) -> list[str]`. Consumed by Task 4's `engine.py`.
 
 - [ ] **Step 1: Write failing tests**
 
 `tests/test_entropy.py`:
 ```python
-from credsscrapper.detection.entropy import (
+from app.detection.entropy import (
     find_high_entropy_tokens,
     shannon_entropy,
 )
@@ -642,9 +618,9 @@ def test_find_high_entropy_tokens_skips_low_entropy_long_token():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_entropy.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'credsscrapper.detection.entropy'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.detection.entropy'`
 
-- [ ] **Step 3: Implement `credsscrapper/detection/entropy.py`**
+- [ ] **Step 3: Implement `app/detection/entropy.py`**
 
 ```python
 import math
@@ -676,30 +652,23 @@ def find_high_entropy_tokens(text: str) -> list[str]:
 Run: `.venv/bin/pytest tests/test_entropy.py -v`
 Expected: PASS (6 tests)
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add credsScrapper/credsscrapper/detection/entropy.py credsScrapper/tests/test_entropy.py
-git commit -m "feat: add Shannon entropy detector for generic secrets"
-```
-
 ---
 
 ### Task 4: Detection engine — combined scan with line numbers
 
 **Files:**
-- Create: `credsscrapper/detection/engine.py`
+- Create: `app/detection/engine.py`
 - Test: `tests/test_engine.py`
 
 **Interfaces:**
-- Consumes: `credsscrapper.detection.patterns.PATTERNS` (Task 2), `credsscrapper.detection.entropy.find_high_entropy_tokens` (Task 3).
-- Produces: `credsscrapper.detection.engine.Finding` — `@dataclass(frozen=True)` with `secret_type: str`, `secret_value: str`, `line_number: int`. `credsscrapper.detection.engine.scan_text(text: str) -> list[Finding]`. Consumed by Task 6's `orchestrator.py`.
+- Consumes: `app.detection.patterns.PATTERNS` (Task 2), `app.detection.entropy.find_high_entropy_tokens` (Task 3).
+- Produces: `app.detection.engine.Finding` — `@dataclass(frozen=True)` with `secret_type: str`, `secret_value: str`, `line_number: int`. `app.detection.engine.scan_text(text: str) -> list[Finding]`. Consumed by Task 6's `orchestrator.py`.
 
 - [ ] **Step 1: Write failing tests**
 
 `tests/test_engine.py`:
 ```python
-from credsscrapper.detection.engine import Finding, scan_text
+from app.detection.engine import Finding, scan_text
 
 
 def test_scan_text_finds_pattern_match_with_line_number():
@@ -731,15 +700,15 @@ def test_scan_text_does_not_double_count_pattern_match_as_entropy_hit():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_engine.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'credsscrapper.detection.engine'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.detection.engine'`
 
-- [ ] **Step 3: Implement `credsscrapper/detection/engine.py`**
+- [ ] **Step 3: Implement `app/detection/engine.py`**
 
 ```python
 from dataclasses import dataclass
 
-from credsscrapper.detection.entropy import find_high_entropy_tokens
-from credsscrapper.detection.patterns import PATTERNS
+from app.detection.entropy import find_high_entropy_tokens
+from app.detection.patterns import PATTERNS
 
 
 @dataclass(frozen=True)
@@ -778,29 +747,22 @@ def scan_text(text: str) -> list[Finding]:
 Run: `.venv/bin/pytest tests/test_engine.py -v`
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add credsScrapper/credsscrapper/detection/engine.py credsScrapper/tests/test_engine.py
-git commit -m "feat: combine pattern and entropy detectors into scan_text"
-```
-
 ---
 
 ### Task 5: Git operations wrapper
 
 **Files:**
-- Create: `credsscrapper/scan/__init__.py`
-- Create: `credsscrapper/scan/git_ops.py`
+- Create: `app/scan/__init__.py`
+- Create: `app/scan/git_ops.py`
 - Test: `tests/test_git_ops.py`
 
 **Interfaces:**
 - Produces (consumed by Task 6's `orchestrator.py`):
-  - `credsscrapper.scan.git_ops.clone_bare(source: str, dest_dir: str) -> None`
-  - `credsscrapper.scan.git_ops.get_head_commit(repo_path: str) -> str`
-  - `credsscrapper.scan.git_ops.list_files_at_head(repo_path: str) -> list[str]`
-  - `credsscrapper.scan.git_ops.read_file_at_head(repo_path: str, file_path: str) -> str`
-  - `credsscrapper.scan.git_ops.iter_commit_diffs(repo_path: str) -> Iterator[tuple[str, str]]` — yields `(commit_sha, diff_text)` for every commit in the repo, oldest details included, via `git log -p`.
+  - `app.scan.git_ops.clone_bare(source: str, dest_dir: str) -> None`
+  - `app.scan.git_ops.get_head_commit(repo_path: str) -> str`
+  - `app.scan.git_ops.list_files_at_head(repo_path: str) -> list[str]`
+  - `app.scan.git_ops.read_file_at_head(repo_path: str, file_path: str) -> str`
+  - `app.scan.git_ops.iter_commit_diffs(repo_path: str) -> Iterator[tuple[str, str]]` — yields `(commit_sha, diff_text)` for every commit in the repo, oldest details included, via `git log -p`.
 
 - [ ] **Step 1: Write failing tests using a local fixture repo**
 
@@ -810,7 +772,7 @@ import subprocess
 
 import pytest
 
-from credsscrapper.scan.git_ops import (
+from app.scan.git_ops import (
     clone_bare,
     get_head_commit,
     iter_commit_diffs,
@@ -886,9 +848,9 @@ def test_iter_commit_diffs_yields_three_commits(bare_clone):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_git_ops.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'credsscrapper.scan'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.scan'`
 
-- [ ] **Step 3: Implement `credsscrapper/scan/git_ops.py`**
+- [ ] **Step 3: Implement `app/scan/git_ops.py`**
 
 ```python
 import re
@@ -933,34 +895,26 @@ def iter_commit_diffs(repo_path: str) -> Iterator[tuple[str, str]]:
         yield sha, output[start:end]
 ```
 
-Create empty `credsscrapper/scan/__init__.py`.
+Create empty `app/scan/__init__.py`.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/pytest tests/test_git_ops.py -v`
 Expected: PASS (6 tests)
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add credsScrapper/credsscrapper/scan/__init__.py credsScrapper/credsscrapper/scan/git_ops.py \
-  credsScrapper/tests/test_git_ops.py
-git commit -m "feat: add git_ops wrapper for bare clone, tree, and history diffs"
-```
-
 ---
 
 ### Task 6: Scan orchestrator
 
 **Files:**
-- Create: `credsscrapper/scan/orchestrator.py`
+- Create: `app/scan/orchestrator.py`
 - Test: `tests/test_orchestrator.py`
 
 **Interfaces:**
-- Consumes: `credsscrapper.state.repository.{RepoRef, claim_next, mark_done, mark_failed, requeue_stale, add_finding}` (Task 1), `credsscrapper.detection.engine.scan_text` (Task 4), `credsscrapper.scan.git_ops.{clone_bare, get_head_commit, list_files_at_head, read_file_at_head, iter_commit_diffs}` (Task 5).
+- Consumes: `app.state.repository.{RepoRef, claim_next, mark_done, mark_failed, requeue_stale, add_finding}` (Task 1), `app.detection.engine.scan_text` (Task 4), `app.scan.git_ops.{clone_bare, get_head_commit, list_files_at_head, read_file_at_head, iter_commit_diffs}` (Task 5).
 - Produces (consumed by Task 8's `cli.py`):
-  - `credsscrapper.scan.orchestrator.scan_repository(conn, repo_ref, clone_source: str, workdir: str) -> None` — clones `clone_source` into `workdir`, scans HEAD tree and full history, writes findings, calls `mark_done`/`mark_failed`.
-  - `credsscrapper.scan.orchestrator.run_scan_loop(conn, workdir_root: str, source_url_fn, stale_timeout_seconds: int = 3600, max_repos: int | None = None) -> int` — calls `requeue_stale` once, then repeatedly `claim_next` + `scan_repository` until no work remains or `max_repos` reached; `source_url_fn(repo_ref) -> str` builds the clone URL/path for a `RepoRef` (kept injectable so tests don't need real GitHub URLs). Returns count of repos processed.
+  - `app.scan.orchestrator.scan_repository(conn, repo_ref, clone_source: str, workdir: str) -> None` — clones `clone_source` into `workdir`, scans HEAD tree and full history, writes findings, calls `mark_done`/`mark_failed`.
+  - `app.scan.orchestrator.run_scan_loop(conn, workdir_root: str, source_url_fn, stale_timeout_seconds: int = 3600, max_repos: int | None = None) -> int` — calls `requeue_stale` once, then repeatedly `claim_next` + `scan_repository` until no work remains or `max_repos` reached; `source_url_fn(repo_ref) -> str` builds the clone URL/path for a `RepoRef` (kept injectable so tests don't need real GitHub URLs). Returns count of repos processed.
 
 - [ ] **Step 1: Write failing tests using a local fixture repo as the clone source**
 
@@ -970,8 +924,8 @@ import subprocess
 
 import pytest
 
-from credsscrapper.scan.orchestrator import run_scan_loop, scan_repository
-from credsscrapper.state import repository as repo
+from app.scan.orchestrator import run_scan_loop, scan_repository
+from app.state import repository as repo
 
 
 def _run(cmd, cwd):
@@ -1048,25 +1002,25 @@ def test_run_scan_loop_does_not_rescan_done_repo(conn, source_repo, tmp_path):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_orchestrator.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'credsscrapper.scan.orchestrator'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.scan.orchestrator'`
 
-- [ ] **Step 3: Implement `credsscrapper/scan/orchestrator.py`**
+- [ ] **Step 3: Implement `app/scan/orchestrator.py`**
 
 ```python
 import os
 import shutil
 from typing import Callable
 
-from credsscrapper.detection.engine import scan_text
-from credsscrapper.scan.git_ops import (
+from app.detection.engine import scan_text
+from app.scan.git_ops import (
     clone_bare,
     get_head_commit,
     iter_commit_diffs,
     list_files_at_head,
     read_file_at_head,
 )
-from credsscrapper.state import repository as repo
-from credsscrapper.state.repository import RepoRef
+from app.state import repository as repo
+from app.state.repository import RepoRef
 
 
 def scan_repository(conn, repo_ref: RepoRef, clone_source: str, workdir: str) -> None:
@@ -1141,30 +1095,23 @@ def run_scan_loop(
 Run: `.venv/bin/pytest tests/test_orchestrator.py -v`
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add credsScrapper/credsscrapper/scan/orchestrator.py credsScrapper/tests/test_orchestrator.py
-git commit -m "feat: add resumable scan orchestrator"
-```
-
 ---
 
 ### Task 7: Discovery worker (GH Archive)
 
 **Files:**
-- Create: `credsscrapper/discovery/__init__.py`
-- Create: `credsscrapper/discovery/gharchive.py`
-- Create: `credsscrapper/discovery/worker.py`
+- Create: `app/discovery/__init__.py`
+- Create: `app/discovery/gharchive.py`
+- Create: `app/discovery/worker.py`
 - Test: `tests/test_gharchive.py`
 - Test: `tests/test_worker.py`
 
 **Interfaces:**
-- Consumes: `credsscrapper.state.repository.{add_candidate, is_known}` (Task 1).
+- Consumes: `app.state.repository.{add_candidate, is_known}` (Task 1).
 - Produces (consumed by Task 8's `cli.py`):
-  - `credsscrapper.discovery.gharchive.parse_push_events(lines: Iterable[str]) -> Iterator[tuple[int, str, str]]` — yields `(repo_id, owner, name)` for every `PushEvent` JSON line; skips malformed lines and non-PushEvent lines.
-  - `credsscrapper.discovery.gharchive.fetch_hour_lines(dt: datetime) -> Iterator[str]` — downloads `https://data.gharchive.org/{YYYY-MM-DD-H}.json.gz` and yields decoded JSON lines. Thin I/O wrapper, not unit-tested against the network (per Global Constraints).
-  - `credsscrapper.discovery.worker.run_discovery_once(conn, event_lines: Iterable[str]) -> int` — parses events, adds unknown repos as candidates, returns count added.
+  - `app.discovery.gharchive.parse_push_events(lines: Iterable[str]) -> Iterator[tuple[int, str, str]]` — yields `(repo_id, owner, name)` for every `PushEvent` JSON line; skips malformed lines and non-PushEvent lines.
+  - `app.discovery.gharchive.fetch_hour_lines(dt: datetime) -> Iterator[str]` — downloads `https://data.gharchive.org/{YYYY-MM-DD-H}.json.gz` and yields decoded JSON lines. Thin I/O wrapper, not unit-tested against the network (per Global Constraints).
+  - `app.discovery.worker.run_discovery_once(conn, event_lines: Iterable[str]) -> int` — parses events, adds unknown repos as candidates, returns count added.
 
 - [ ] **Step 1: Write failing tests for parsing**
 
@@ -1172,7 +1119,7 @@ git commit -m "feat: add resumable scan orchestrator"
 ```python
 import json
 
-from credsscrapper.discovery.gharchive import parse_push_events
+from app.discovery.gharchive import parse_push_events
 
 
 def _push_event(repo_id, full_name):
@@ -1203,9 +1150,9 @@ def test_parse_push_events_handles_multiple_lines():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_gharchive.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'credsscrapper.discovery'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.discovery'`
 
-- [ ] **Step 3: Implement `credsscrapper/discovery/gharchive.py`**
+- [ ] **Step 3: Implement `app/discovery/gharchive.py`**
 
 ```python
 import gzip
@@ -1240,7 +1187,7 @@ def fetch_hour_lines(dt: datetime) -> Iterator[str]:
                 yield raw_line.decode("utf-8")
 ```
 
-Create empty `credsscrapper/discovery/__init__.py`.
+Create empty `app/discovery/__init__.py`.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1253,8 +1200,8 @@ Expected: PASS (4 tests)
 ```python
 import json
 
-from credsscrapper.discovery.worker import run_discovery_once
-from credsscrapper.state import repository as repo
+from app.discovery.worker import run_discovery_once
+from app.state import repository as repo
 
 
 def _push_event(repo_id, full_name):
@@ -1279,15 +1226,15 @@ def test_run_discovery_once_skips_already_known_repo(conn):
 - [ ] **Step 6: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_worker.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'credsscrapper.discovery.worker'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.discovery.worker'`
 
-- [ ] **Step 7: Implement `credsscrapper/discovery/worker.py`**
+- [ ] **Step 7: Implement `app/discovery/worker.py`**
 
 ```python
 from typing import Iterable
 
-from credsscrapper.discovery.gharchive import parse_push_events
-from credsscrapper.state import repository as repo
+from app.discovery.gharchive import parse_push_events
+from app.state import repository as repo
 
 
 def run_discovery_once(conn, event_lines: Iterable[str]) -> int:
@@ -1303,26 +1250,18 @@ def run_discovery_once(conn, event_lines: Iterable[str]) -> int:
 Run: `.venv/bin/pytest tests/test_worker.py -v`
 Expected: PASS (2 tests)
 
-- [ ] **Step 9: Commit**
-
-```bash
-git add credsScrapper/credsscrapper/discovery/ credsScrapper/tests/test_gharchive.py \
-  credsScrapper/tests/test_worker.py
-git commit -m "feat: add GH Archive discovery parsing and worker"
-```
-
 ---
 
 ### Task 8: CLI wiring
 
 **Files:**
-- Create: `credsscrapper/cli.py`
-- Create: `credsscrapper/__main__.py`
+- Create: `app/cli.py`
+- Create: `app/__main__.py`
 - Test: `tests/test_cli.py`
 
 **Interfaces:**
-- Consumes: `credsscrapper.state.db.init_db` (Task 1), `credsscrapper.scan.orchestrator.run_scan_loop` (Task 6), `credsscrapper.discovery.gharchive.fetch_hour_lines` (Task 7), `credsscrapper.discovery.worker.run_discovery_once` (Task 7).
-- Produces: `credsscrapper.cli.build_clone_url(repo_ref) -> str` — `https://github.com/{owner}/{name}.git`. `credsscrapper.cli.main(argv: list[str] | None = None) -> int` — argparse entry point with subcommands `discover` and `scan`; both take `--db PATH` (default `state.db`) and `--workdir PATH` (default `workdir`, scan-only); `scan` also takes `--max-repos N` (default: no limit) and `--stale-timeout SECONDS` (default 3600).
+- Consumes: `app.state.db.init_db` (Task 1), `app.scan.orchestrator.run_scan_loop` (Task 6), `app.discovery.gharchive.fetch_hour_lines` (Task 7), `app.discovery.worker.run_discovery_once` (Task 7).
+- Produces: `app.cli.build_clone_url(repo_ref) -> str` — `https://github.com/{owner}/{name}.git`. `app.cli.main(argv: list[str] | None = None) -> int` — argparse entry point with subcommands `discover` and `scan`; both take `--db PATH` (default `state.db`) and `--workdir PATH` (default `workdir`, scan-only); `scan` also takes `--max-repos N` (default: no limit) and `--stale-timeout SECONDS` (default 3600).
 
 - [ ] **Step 1: Write failing tests**
 
@@ -1332,10 +1271,10 @@ import subprocess
 
 import pytest
 
-from credsscrapper.cli import build_clone_url, main
-from credsscrapper.state import repository as repo
-from credsscrapper.state.db import init_db
-from credsscrapper.state.repository import RepoRef
+from app.cli import build_clone_url, main
+from app.state import repository as repo
+from app.state.db import init_db
+from app.state.repository import RepoRef
 
 
 def _run(cmd, cwd):
@@ -1362,7 +1301,7 @@ def test_scan_command_processes_pending_candidates(tmp_path, monkeypatch):
     repo.add_candidate(conn, 1, "octocat", "hello-world")
     conn.close()
 
-    monkeypatch.setattr("credsscrapper.cli.build_clone_url", lambda ref: str(source_repo))
+    monkeypatch.setattr("app.cli.build_clone_url", lambda ref: str(source_repo))
 
     exit_code = main([
         "scan",
@@ -1384,20 +1323,20 @@ def test_main_requires_a_subcommand():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/pytest tests/test_cli.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'credsscrapper.cli'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'app.cli'`
 
-- [ ] **Step 3: Implement `credsscrapper/cli.py`**
+- [ ] **Step 3: Implement `app/cli.py`**
 
 ```python
 import argparse
 import sys
 from datetime import datetime, timedelta, timezone
 
-from credsscrapper.discovery.gharchive import fetch_hour_lines
-from credsscrapper.discovery.worker import run_discovery_once
-from credsscrapper.scan.orchestrator import run_scan_loop
-from credsscrapper.state.db import init_db
-from credsscrapper.state.repository import RepoRef
+from app.discovery.gharchive import fetch_hour_lines
+from app.discovery.worker import run_discovery_once
+from app.scan.orchestrator import run_scan_loop
+from app.state.db import init_db
+from app.state.repository import RepoRef
 
 
 def build_clone_url(repo_ref: RepoRef) -> str:
@@ -1416,7 +1355,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
     conn = init_db(args.db)
     # source_url_fn is a lambda that looks up build_clone_url dynamically (via the
     # module namespace) rather than binding the function object directly, so tests
-    # can monkeypatch credsscrapper.cli.build_clone_url and have it take effect.
+    # can monkeypatch app.cli.build_clone_url and have it take effect.
     processed = run_scan_loop(
         conn,
         args.workdir,
@@ -1429,7 +1368,7 @@ def _cmd_scan(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="credsscrapper")
+    parser = argparse.ArgumentParser(prog="app")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     discover = subparsers.add_parser("discover")
@@ -1461,12 +1400,12 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 4: Implement `credsscrapper/__main__.py`**
+- [ ] **Step 4: Implement `app/__main__.py`**
 
 ```python
 import sys
 
-from credsscrapper.cli import main
+from app.cli import main
 
 if __name__ == "__main__":
     sys.exit(main())
@@ -1482,14 +1421,6 @@ Expected: PASS (3 tests)
 Run: `.venv/bin/pytest -v`
 Expected: PASS (all tests across every task)
 
-- [ ] **Step 7: Commit**
-
-```bash
-git add credsScrapper/credsscrapper/cli.py credsScrapper/credsscrapper/__main__.py \
-  credsScrapper/tests/test_cli.py
-git commit -m "feat: wire discover/scan CLI commands"
-```
-
 ---
 
 ## Manual Verification (not part of automated tests)
@@ -1499,14 +1430,14 @@ After Task 8, do one real end-to-end smoke test against an actual small public r
 ```bash
 cd /home/mechanosec/PetProjects/MyMalvare/credsScrapper
 .venv/bin/python -c "
-from credsscrapper.state.db import init_db
-from credsscrapper.state import repository as repo
+from app.state.db import init_db
+from app.state import repository as repo
 conn = init_db('smoke.db')
 repo.add_candidate(conn, 1, 'octocat', 'Hello-World')
 "
-.venv/bin/python -m credsscrapper scan --db smoke.db --workdir smoke_work --max-repos 1
+.venv/bin/python -m app scan --db smoke.db --workdir smoke_work --max-repos 1
 .venv/bin/python -c "
-from credsscrapper.state.db import init_db
+from app.state.db import init_db
 conn = init_db('smoke.db')
 for row in conn.execute('SELECT * FROM scanned_repos'):
     print(dict(row))
