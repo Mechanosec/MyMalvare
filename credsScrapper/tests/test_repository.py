@@ -1,6 +1,8 @@
+import threading
 from datetime import datetime, timedelta, timezone
 
 from app.state import repository as repo
+from app.state.db import init_db
 
 
 def test_add_candidate_new_returns_true(conn):
@@ -126,3 +128,35 @@ def test_add_finding_and_count(conn):
         line_number=12,
     )
     assert repo.count_findings(conn, 1) == 1
+
+
+def test_claim_next_no_double_claim_under_concurrent_threads(tmp_path):
+    db_file = str(tmp_path / "state.db")
+    setup_conn = init_db(db_file)
+    for i in range(1, 21):
+        repo.add_candidate(setup_conn, i, "octocat", f"repo{i}")
+    setup_conn.close()
+
+    claimed: list[int] = []
+    claimed_lock = threading.Lock()
+
+    def worker():
+        thread_conn = init_db(db_file)
+        try:
+            while True:
+                ref = repo.claim_next(thread_conn)
+                if ref is None:
+                    break
+                with claimed_lock:
+                    claimed.append(ref.repo_id)
+        finally:
+            thread_conn.close()
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sorted(claimed) == list(range(1, 21))
+    assert len(claimed) == len(set(claimed))

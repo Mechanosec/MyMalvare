@@ -1,8 +1,11 @@
 import gzip
 import json
+import logging
 import urllib.request
 from collections.abc import Iterable, Iterator
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def parse_push_events(lines: Iterable[str]) -> Iterator[tuple[int, str, str]]:
@@ -24,7 +27,12 @@ def parse_push_events(lines: Iterable[str]) -> Iterator[tuple[int, str, str]]:
 
 def fetch_hour_lines(dt: datetime) -> Iterator[str]:
     url = f"https://data.gharchive.org/{dt.strftime('%Y-%m-%d-%-H')}.json.gz"
-    with urllib.request.urlopen(url) as response:
+    logger.info("discovery: downloading %s", url)
+    # GH Archive's CDN returns 403 for the default urllib User-Agent
+    # ("Python-urllib/x.y"), so a browser-like one is required here.
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request) as response:
+        logger.info("discovery: download connected, streaming events")
         with gzip.GzipFile(fileobj=response) as gz:
             for raw_line in gz:
                 yield raw_line.decode("utf-8")

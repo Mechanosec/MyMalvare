@@ -39,6 +39,17 @@ CREATE TABLE IF NOT EXISTS findings (
 def init_db(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    # WAL lets readers proceed while a writer holds the lock, and
+    # busy_timeout makes a blocked writer wait instead of erroring
+    # immediately - both needed once multiple scan workers share one
+    # SQLite file (each worker opens its own connection via init_db).
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.executescript(SCHEMA)
     conn.commit()
     return conn
+
+
+def db_path(conn: sqlite3.Connection) -> str:
+    row = conn.execute("PRAGMA database_list").fetchone()
+    return row["file"]

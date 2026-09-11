@@ -36,35 +36,46 @@ def is_known(conn: sqlite3.Connection, repo_id: int) -> bool:
 
 
 def claim_next(conn: sqlite3.Connection) -> RepoRef | None:
-    row = conn.execute(
-        "SELECT repo_id, owner, name FROM candidates WHERE status = 'pending' "
-        "ORDER BY discovered_at LIMIT 1"
-    ).fetchone()
-    if row is not None:
+    # BEGIN IMMEDIATE grabs the write lock before the SELECT runs, so two
+    # connections (e.g. two scan worker threads, each with their own
+    # connection) can never both read the same pending row and both try
+    # to claim it - the second one blocks (up to busy_timeout) until the
+    # first commits, then sees the row already claimed.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT repo_id, owner, name FROM candidates WHERE status = 'pending' "
+            "ORDER BY discovered_at LIMIT 1"
+        ).fetchone()
+        if row is not None:
+            conn.execute(
+                "UPDATE candidates SET status = 'claimed' WHERE repo_id = ?",
+                (row["repo_id"],),
+            )
+            conn.execute(
+                "INSERT INTO scanned_repos (repo_id, owner, name, status, started_at, retry_count) "
+                "VALUES (?, ?, ?, 'in_progress', ?, 0)",
+                (row["repo_id"], row["owner"], row["name"], _now()),
+            )
+            conn.commit()
+            return RepoRef(row["repo_id"], row["owner"], row["name"])
+
+        row = conn.execute(
+            "SELECT repo_id, owner, name FROM scanned_repos WHERE status = 'pending' "
+            "ORDER BY repo_id LIMIT 1"
+        ).fetchone()
+        if row is None:
+            conn.commit()
+            return None
         conn.execute(
-            "UPDATE candidates SET status = 'claimed' WHERE repo_id = ?",
-            (row["repo_id"],),
-        )
-        conn.execute(
-            "INSERT INTO scanned_repos (repo_id, owner, name, status, started_at, retry_count) "
-            "VALUES (?, ?, ?, 'in_progress', ?, 0)",
-            (row["repo_id"], row["owner"], row["name"], _now()),
+            "UPDATE scanned_repos SET status = 'in_progress', started_at = ? WHERE repo_id = ?",
+            (_now(), row["repo_id"]),
         )
         conn.commit()
         return RepoRef(row["repo_id"], row["owner"], row["name"])
-
-    row = conn.execute(
-        "SELECT repo_id, owner, name FROM scanned_repos WHERE status = 'pending' "
-        "ORDER BY repo_id LIMIT 1"
-    ).fetchone()
-    if row is None:
-        return None
-    conn.execute(
-        "UPDATE scanned_repos SET status = 'in_progress', started_at = ? WHERE repo_id = ?",
-        (_now(), row["repo_id"]),
-    )
-    conn.commit()
-    return RepoRef(row["repo_id"], row["owner"], row["name"])
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def mark_done(conn: sqlite3.Connection, repo_id: int, last_commit_sha: str) -> None:

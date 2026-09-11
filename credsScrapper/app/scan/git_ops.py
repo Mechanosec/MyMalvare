@@ -19,8 +19,12 @@ def get_head_commit(repo_path: str) -> str:
 
 
 def list_files_at_head(repo_path: str) -> list[str]:
-    output = _run(["git", "-C", repo_path, "ls-tree", "-r", "--name-only", "HEAD"])
-    return [line for line in output.splitlines() if line]
+    # -z gives NUL-separated, unquoted paths. Without it, git quotes any
+    # path containing non-ASCII bytes (wrapping it in "..." with \NNN
+    # octal escapes) and that quoted text can't be fed back into
+    # `git show HEAD:<path>` as a real path.
+    output = _run(["git", "-C", repo_path, "ls-tree", "-r", "-z", "--name-only", "HEAD"])
+    return [name for name in output.split("\0") if name]
 
 
 def read_file_at_head(repo_path: str, file_path: str) -> str:

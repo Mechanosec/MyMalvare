@@ -75,3 +75,38 @@ def test_run_scan_loop_does_not_rescan_done_repo(conn, source_repo, tmp_path):
     )
 
     assert processed_second_run == 0
+
+
+def test_run_scan_loop_with_workers_processes_all_pending_exactly_once(
+    conn, source_repo, tmp_path
+):
+    for i in range(1, 11):
+        repo.add_candidate(conn, i, "octocat", f"repo{i}")
+
+    processed = run_scan_loop(
+        conn,
+        str(tmp_path / "work"),
+        source_url_fn=lambda ref: str(source_repo),
+        workers=4,
+    )
+
+    assert processed == 10
+    rows = conn.execute(
+        "SELECT COUNT(*) AS n FROM scanned_repos WHERE status = 'done'"
+    ).fetchone()
+    assert rows["n"] == 10
+
+
+def test_run_scan_loop_with_workers_respects_max_repos(conn, source_repo, tmp_path):
+    for i in range(1, 11):
+        repo.add_candidate(conn, i, "octocat", f"repo{i}")
+
+    processed = run_scan_loop(
+        conn,
+        str(tmp_path / "work"),
+        source_url_fn=lambda ref: str(source_repo),
+        workers=4,
+        max_repos=3,
+    )
+
+    assert processed == 3

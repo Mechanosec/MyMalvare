@@ -38,6 +38,7 @@ def test_scan_command_processes_pending_candidates(tmp_path, monkeypatch):
         "scan",
         "--db", str(db_path),
         "--workdir", str(tmp_path / "work"),
+        "--log-file", str(tmp_path / "scan.log"),
     ])
 
     assert exit_code == 0

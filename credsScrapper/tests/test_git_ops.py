@@ -64,6 +64,37 @@ def test_read_file_at_head_reflects_final_state(bare_clone):
     assert "SAFE" in content
 
 
+@pytest.fixture
+def unicode_filename_repo(tmp_path):
+    repo_dir = tmp_path / "unicode_source"
+    repo_dir.mkdir()
+    _run(["git", "init"], repo_dir)
+    _run(["git", "config", "user.email", "test@example.com"], repo_dir)
+    _run(["git", "config", "user.name", "Test"], repo_dir)
+
+    filename = "公告：头条.md"
+    (repo_dir / filename).write_text("AWS_KEY = 'AKIAABCDEFGH12345678'\n", encoding="utf-8")
+    _run(["git", "add", filename], repo_dir)
+    _run(["git", "commit", "-m", "add unicode filename"], repo_dir)
+
+    return repo_dir, filename
+
+
+def test_list_files_at_head_returns_unquoted_unicode_filename(unicode_filename_repo, tmp_path):
+    repo_dir, filename = unicode_filename_repo
+    dest = tmp_path / "unicode_bare"
+    clone_bare(str(repo_dir), str(dest))
+    assert list_files_at_head(str(dest)) == [filename]
+
+
+def test_read_file_at_head_works_with_unicode_filename(unicode_filename_repo, tmp_path):
+    repo_dir, filename = unicode_filename_repo
+    dest = tmp_path / "unicode_bare2"
+    clone_bare(str(repo_dir), str(dest))
+    content = read_file_at_head(str(dest), filename)
+    assert "AKIAABCDEFGH12345678" in content
+
+
 def test_iter_commit_diffs_includes_removed_secret(bare_clone):
     all_diff_text = "\n".join(diff for _, diff in iter_commit_diffs(str(bare_clone)))
     assert "AKIAABCDEFGH12345678" in all_diff_text
