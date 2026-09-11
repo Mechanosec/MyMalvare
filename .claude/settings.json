@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | { read -r f; case \"$f\" in */credsScrapper/apps/api/src/*.ts) credsScrapper/node_modules/.bin/prettier --write \"$f\" && (cd credsScrapper && node_modules/.bin/tsc --noEmit -p apps/api/tsconfig.json) ;; esac; } 2>&1",
+            "timeout": 60,
+            "statusMessage": "Formatting + type-checking apps/api..."
+          }
+        ]
+      }
+    ]
+  }
+}
