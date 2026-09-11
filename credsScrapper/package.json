@@ -1,0 +1,5 @@
+{
+  "name": "credsscrapper-monorepo",
+  "private": true,
+  "workspaces": ["apps/*"]
+}

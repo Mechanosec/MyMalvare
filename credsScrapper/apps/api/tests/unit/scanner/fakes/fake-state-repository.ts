@@ -1,0 +1,139 @@
+import { StateRepositoryPort } from '../../../../src/modules/scanner/application/ports/state-repository.port';
+import { ECandidateStatus } from '../../../../src/modules/scanner/domain/constant/candidate-status.constant';
+import { EScanStatus } from '../../../../src/modules/scanner/domain/constant/scan-status.constant';
+import { ESecretType } from '../../../../src/modules/scanner/domain/constant/secret-type.constant';
+import { IFindingRecord, IFindingsFilter } from '../../../../src/modules/scanner/domain/types/finding-record.type';
+import { IQueueStatus } from '../../../../src/modules/scanner/domain/types/queue-status.type';
+import { IRepoRef } from '../../../../src/modules/scanner/domain/types/repo-ref.type';
+
+interface CandidateRow extends IRepoRef {
+  status: ECandidateStatus;
+}
+
+interface ScannedRow extends IRepoRef {
+  status: EScanStatus;
+  startedAt?: Date;
+}
+
+/** In-memory fake used by unit tests instead of a real database. */
+export class FakeStateRepository extends StateRepositoryPort {
+  readonly candidates = new Map<number, CandidateRow>();
+  readonly scanned = new Map<number, ScannedRow>();
+  readonly findings: Array<{
+    repoId: number;
+    owner: string;
+    name: string;
+    filePath: string;
+    commitSha: string;
+    secretType: ESecretType;
+    secretValue: string;
+    lineNumber: number;
+    context: string | null;
+  }> = [];
+
+  async addCandidate(repoId: number, owner: string, name: string): Promise<boolean> {
+    if (await this.isKnown(repoId)) {
+      return false;
+    }
+    this.candidates.set(repoId, { repoId, owner, name, status: ECandidateStatus.PENDING });
+    return true;
+  }
+
+  async isKnown(repoId: number): Promise<boolean> {
+    return this.candidates.has(repoId) || this.scanned.has(repoId);
+  }
+
+  async claimNext(): Promise<IRepoRef | null> {
+    for (const candidate of this.candidates.values()) {
+      if (candidate.status === ECandidateStatus.PENDING) {
+        candidate.status = ECandidateStatus.CLAIMED;
+        this.scanned.set(candidate.repoId, {
+          repoId: candidate.repoId,
+          owner: candidate.owner,
+          name: candidate.name,
+          status: EScanStatus.IN_PROGRESS,
+          startedAt: new Date(),
+        });
+        return { repoId: candidate.repoId, owner: candidate.owner, name: candidate.name };
+      }
+    }
+    for (const row of this.scanned.values()) {
+      if (row.status === EScanStatus.PENDING) {
+        row.status = EScanStatus.IN_PROGRESS;
+        row.startedAt = new Date();
+        return { repoId: row.repoId, owner: row.owner, name: row.name };
+      }
+    }
+    return null;
+  }
+
+  async markDone(repoId: number): Promise<void> {
+    const row = this.scanned.get(repoId);
+    if (row) {
+      row.status = EScanStatus.DONE;
+    }
+  }
+
+  async markFailed(repoId: number): Promise<void> {
+    const row = this.scanned.get(repoId);
+    if (row) {
+      row.status = EScanStatus.FAILED;
+    }
+  }
+
+  async requeueStale(): Promise<number> {
+    let count = 0;
+    for (const row of this.scanned.values()) {
+      if (row.status === EScanStatus.IN_PROGRESS) {
+        row.status = EScanStatus.PENDING;
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  async addFinding(
+    repoId: number,
+    owner: string,
+    name: string,
+    filePath: string,
+    commitSha: string,
+    secretType: ESecretType,
+    secretValue: string,
+    lineNumber: number,
+    context: string | null,
+  ): Promise<void> {
+    this.findings.push({
+      repoId,
+      owner,
+      name,
+      filePath,
+      commitSha,
+      secretType,
+      secretValue,
+      lineNumber,
+      context,
+    });
+  }
+
+  async countFindings(repoId: number): Promise<number> {
+    return this.findings.filter((f) => f.repoId === repoId).length;
+  }
+
+  async getQueueStatus(): Promise<IQueueStatus> {
+    const scannedByStatus: Partial<Record<EScanStatus, number>> = {};
+    for (const row of this.scanned.values()) {
+      scannedByStatus[row.status] = (scannedByStatus[row.status] ?? 0) + 1;
+    }
+    const pendingCandidates = [...this.candidates.values()].filter(
+      (c) => c.status === ECandidateStatus.PENDING,
+    ).length;
+    return { pendingCandidates, scannedByStatus };
+  }
+
+  async listFindings(filter: IFindingsFilter): Promise<IFindingRecord[]> {
+    return this.findings
+      .filter((f) => !filter.secretType || f.secretType === filter.secretType)
+      .map((f, i) => ({ id: i, foundAt: new Date(), ...f }));
+  }
+}

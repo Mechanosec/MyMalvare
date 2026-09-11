@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Mirrors credsScrapper/app/state/db.py's schema shape (candidates,
+// scanned_repos, findings) - same resumability model, ported to Prisma.
+//
+// Status/secretType columns are String, not Prisma `enum`, because
+// SQLite has no native enum type (Prisma errors if you declare `enum`
+// against the sqlite connector). The domain layer still owns real
+// TypeScript enums for these (ECandidateStatus, EScanStatus,
+// ESecretType) - the infrastructure-layer mapper in
+// prisma-state-repository.ts is the only place that casts a raw column
+// string into one of those enums. Values here must stay in sync with
+// the enum members by convention (Prisma's own migration only checks
+// SQL types, not string content, in this connector).
+model Candidate {
+  repoId       Int      @id @map("repo_id")
+  owner        String
+  name         String
+  discoveredAt DateTime @default(now()) @map("discovered_at")
+  status       String   @default("pending") // ECandidateStatus: pending | claimed
+
+  @@map("candidates")
+}
+
+model ScannedRepo {
+  repoId        Int       @id @map("repo_id")
+  owner         String
+  name          String
+  lastCommitSha String?   @map("last_commit_sha")
+  status        String // EScanStatus: pending | in_progress | done | failed
+  startedAt     DateTime? @map("started_at")
+  scannedAt     DateTime? @map("scanned_at")
+  failReason    String?   @map("fail_reason")
+  retryCount    Int       @default(0) @map("retry_count")
+
+  @@map("scanned_repos")
+}
+
+model Finding {
+  id          Int      @id @default(autoincrement())
+  repoId      Int      @map("repo_id")
+  owner       String
+  name        String
+  filePath    String   @map("file_path")
+  commitSha   String   @map("commit_sha")
+  secretType  String   @map("secret_type") // ESecretType
+  secretValue String   @map("secret_value")
+  lineNumber  Int?     @map("line_number")
+  foundAt     DateTime @default(now()) @map("found_at")
+  context     String?
+
+  @@map("findings")
+}

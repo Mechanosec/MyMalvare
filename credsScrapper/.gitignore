@@ -6,3 +6,10 @@ __pycache__/
 *.db-wal
 *.log
 workdir/
+
+# apps/* (npm workspaces monorepo)
+node_modules/
+apps/*/dist/
+apps/*/coverage/
+apps/*/.env
+apps/*/*.tsbuildinfo

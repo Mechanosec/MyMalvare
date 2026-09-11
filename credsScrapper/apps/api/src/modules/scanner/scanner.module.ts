@@ -1,0 +1,73 @@
+import { Module } from '@nestjs/common';
+import { provideUseCase } from '../../shared/di/provide-use-case';
+import { DiscoveryFeedPort } from './application/ports/discovery-feed.port';
+import { GitOperationsPort } from './application/ports/git-operations.port';
+import { LoggerPort } from './application/ports/logger.port';
+import { ProgressPort } from './application/ports/progress.port';
+import { StateRepositoryPort } from './application/ports/state-repository.port';
+import { WorkdirCleanerPort } from './application/ports/workdir-cleaner.port';
+import { WorkdirJoinerPort } from './application/ports/workdir-joiner.port';
+import { DiscoverReposUseCase } from './application/use-cases/discover-repos.use-case';
+import { GetFindingsUseCase } from './application/use-cases/get-findings.use-case';
+import { GetScanStatusUseCase } from './application/use-cases/get-scan-status.use-case';
+import { RunScanLoopUseCase } from './application/use-cases/run-scan-loop.use-case';
+import { ScanRepositoryUseCase } from './application/use-cases/scan-repository.use-case';
+import { GhArchiveHttpAdapter } from './infrastructure/discovery/gharchive-http-adapter';
+import { FsWorkdirCleanerAdapter } from './infrastructure/fs/fs-workdir-cleaner.adapter';
+import { FsWorkdirJoinerAdapter } from './infrastructure/fs/fs-workdir-joiner.adapter';
+import { GitCliAdapter } from './infrastructure/git/git-cli-adapter';
+import { InMemoryJobRunner } from './infrastructure/jobs/in-memory-job-runner';
+import { NestLoggerAdapter } from './infrastructure/logging/nest-logger.adapter';
+import { PrismaService } from './infrastructure/persistence/prisma.service';
+import { PrismaStateRepository } from './infrastructure/persistence/prisma-state-repository';
+import { ProgressGateway } from './infrastructure/websocket/progress.gateway';
+import { DiscoverController } from './presentation/discover.controller';
+import { FindingsController } from './presentation/findings.controller';
+import { JobsController } from './presentation/jobs.controller';
+import { ScanController } from './presentation/scan.controller';
+
+// This is the one file in the module allowed to know every concrete
+// adapter - it binds each application/ports abstract class to its
+// infrastructure implementation, and wires the framework-free use-cases
+// into Nest's DI container via provideUseCase.
+@Module({
+  controllers: [DiscoverController, ScanController, FindingsController, JobsController],
+  providers: [
+    PrismaService,
+    { provide: StateRepositoryPort, useClass: PrismaStateRepository },
+    { provide: GitOperationsPort, useClass: GitCliAdapter },
+    { provide: DiscoveryFeedPort, useClass: GhArchiveHttpAdapter },
+    { provide: LoggerPort, useClass: NestLoggerAdapter },
+    { provide: ProgressPort, useClass: ProgressGateway },
+    { provide: WorkdirCleanerPort, useClass: FsWorkdirCleanerAdapter },
+    { provide: WorkdirJoinerPort, useClass: FsWorkdirJoinerAdapter },
+    InMemoryJobRunner,
+    provideUseCase(
+      DiscoverReposUseCase,
+      [DiscoveryFeedPort, StateRepositoryPort, LoggerPort],
+      (feed, state, logger) => new DiscoverReposUseCase(feed, state, logger),
+    ),
+    provideUseCase(
+      ScanRepositoryUseCase,
+      [GitOperationsPort, StateRepositoryPort, LoggerPort, WorkdirCleanerPort],
+      (git, state, logger, cleaner) => new ScanRepositoryUseCase(git, state, logger, cleaner),
+    ),
+    provideUseCase(
+      RunScanLoopUseCase,
+      [StateRepositoryPort, ScanRepositoryUseCase, LoggerPort, WorkdirJoinerPort],
+      (state, scanRepository, logger, joiner) =>
+        new RunScanLoopUseCase(state, scanRepository, logger, joiner),
+    ),
+    provideUseCase(
+      GetFindingsUseCase,
+      [StateRepositoryPort],
+      (state) => new GetFindingsUseCase(state),
+    ),
+    provideUseCase(
+      GetScanStatusUseCase,
+      [StateRepositoryPort],
+      (state) => new GetScanStatusUseCase(state),
+    ),
+  ],
+})
+export class ScannerModule {}
