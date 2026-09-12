@@ -32,7 +32,7 @@ export function toFindingStatus(raw: string): EFindingStatus {
   return raw as EFindingStatus;
 }
 
-function parseLeakCommits(raw: string): string[] {
+export function parseLeakCommits(raw: string): string[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];

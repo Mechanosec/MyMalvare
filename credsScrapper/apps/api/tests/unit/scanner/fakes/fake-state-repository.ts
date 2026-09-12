@@ -12,6 +12,7 @@ import {
 import { IQueueStatus } from '../../../../src/modules/scanner/domain/types/queue-status.type';
 import { IRepoRef } from '../../../../src/modules/scanner/domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../../../src/modules/scanner/domain/types/scanned-repo-record.type';
+import { parseLeakCommits } from '../../../../src/modules/scanner/infrastructure/persistence/prisma-state.mapper';
 
 interface CandidateRow extends IRepoRef {
   status: ECandidateStatus;
@@ -168,21 +169,12 @@ export class FakeStateRepository extends StateRepositoryPort {
           (f.context ?? '').toLowerCase().includes(search),
       )
       .map(({ f, id }) => {
-        const leakCommits = this.parseLeakCommits(f.leakCommits);
+        const leakCommits = parseLeakCommits(f.leakCommits);
         return { id, foundAt: new Date(), ...f, leakCommits };
       });
     const offset = filter.offset ?? 0;
     const limit = filter.limit ?? 100;
     return { items: matching.slice(offset, offset + limit), total: matching.length };
-  }
-
-  private parseLeakCommits(raw: string): readonly string[] {
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
-    } catch {
-      return [];
-    }
   }
 
   async listFindingsRepoOptions(limit: number): Promise<IFindingsRepoOption[]> {
