@@ -24,4 +24,26 @@ describe('MyReposPanel', () => {
 
     await waitFor(() => expect(apiClient.submitRepoAuthorization).toHaveBeenCalledWith('acme', 'gadgets', undefined));
   });
+
+  it('splits a pasted "owner/name" out of the Repository name field', async () => {
+    render(<MyReposPanel />);
+    await waitFor(() => expect(screen.getByText('widgets')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Owner'), { target: { value: 'whatever-gets-overridden' } });
+    fireEvent.change(screen.getByLabelText('Repository name'), { target: { value: 'acme/gadgets' } });
+    fireEvent.click(screen.getByText('Submit request'));
+
+    await waitFor(() => expect(apiClient.submitRepoAuthorization).toHaveBeenCalledWith('acme', 'gadgets', undefined));
+  });
+
+  it('splits a pasted "owner/name" out of the Owner field when Repository name has no slash', async () => {
+    render(<MyReposPanel />);
+    await waitFor(() => expect(screen.getByText('widgets')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Owner'), { target: { value: 'acme/gadgets' } });
+    fireEvent.change(screen.getByLabelText('Repository name'), { target: { value: '' } });
+    fireEvent.click(screen.getByText('Submit request'));
+
+    await waitFor(() => expect(apiClient.submitRepoAuthorization).toHaveBeenCalledWith('acme', 'gadgets', undefined));
+  });
 });

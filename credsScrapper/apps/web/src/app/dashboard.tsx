@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AdminPanel } from '../components/admin-panel';
 import { FindingsTable } from '../components/findings-table';
 import { LoginForm } from '../components/login-form';
@@ -67,19 +67,21 @@ export function Dashboard({
     ...(user ? [{ id: 'my-repos', label: 'My Repos' } as const] : []),
     ...(user?.role === 'admin' ? [{ id: 'admin', label: 'Admin' } as const] : []),
   ];
-  // Lazy initializer, not an effect: reading localStorage is a pure
-  // (if side-effect-adjacent) computation of the initial value, not a
-  // subscription to an external system, so it belongs in useState's
-  // initializer rather than a setState-in-effect that would cause an
-  // extra render. Guarded for SSR, where `window` doesn't exist yet.
-  const [jobId, setJobId] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
+  // Starts null (matching the server-rendered HTML) and is populated from
+  // localStorage in an effect - a lazy initializer would read localStorage
+  // during the client's first render too, which happens before hydration
+  // reconciles against the server markup and produces a mismatch (SSR
+  // always sees null, since there's no localStorage server-side).
+  const [jobId, setJobId] = useState<string | null>(null);
+
+  useEffect(() => {
     try {
-      return localStorage.getItem(LAST_JOB_ID_KEY);
+      const stored = localStorage.getItem(LAST_JOB_ID_KEY);
+      if (stored) setJobId(stored);
     } catch {
-      return null; // localStorage unavailable (private mode, etc.)
+      /* localStorage unavailable (private mode, etc.) - fine, stay null */
     }
-  });
+  }, []);
   // Bumped whenever a job starts, so the findings/repos tables re-fetch
   // without needing their own job-completion logic.
   const [refreshKey, setRefreshKey] = useState(0);

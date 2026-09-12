@@ -22,9 +22,21 @@ export function MyReposPanel() {
 
   useEffect(refresh, []);
 
+  // Splits a pasted "owner/name" out of whichever field it landed in, so
+  // pasting the full slug from the Findings/Repositories tab into either
+  // box still submits the correct owner/name pair instead of a literal
+  // slash-containing name that can never match a scanned repo.
+  function splitOwnerName(rawOwner: string, rawName: string): { owner: string; name: string } {
+    const slashIn = rawName.includes('/') ? rawName : rawOwner.includes('/') ? rawOwner : null;
+    if (!slashIn) return { owner: rawOwner, name: rawName };
+    const [splitOwner, ...rest] = slashIn.split('/');
+    return { owner: splitOwner, name: rest.join('/') };
+  }
+
   async function submit() {
-    if (!owner || !name) return;
-    await submitRepoAuthorization(owner, name, note || undefined);
+    const normalized = splitOwnerName(owner.trim(), name.trim());
+    if (!normalized.owner || !normalized.name) return;
+    await submitRepoAuthorization(normalized.owner, normalized.name, note || undefined);
     setOwner('');
     setName('');
     setNote('');
@@ -53,7 +65,8 @@ export function MyReposPanel() {
             id="repo-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-48 border border-line bg-surface-2 px-2 py-1.5 text-sm text-text outline-none focus:border-accent"
+            placeholder="name or owner/name"
+            className="w-48 border border-line bg-surface-2 px-2 py-1.5 text-sm text-text outline-none placeholder:text-text-dim focus:border-accent"
           />
         </div>
         <div>
