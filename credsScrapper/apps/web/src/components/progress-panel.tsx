@@ -11,12 +11,14 @@ interface IProgressPanelProps {
 }
 
 const DOT_TONE: Record<EJobStatus, string> = {
+  [EJobStatus.QUEUED]: 'bg-line',
   [EJobStatus.RUNNING]: 'bg-warning animate-pulse',
   [EJobStatus.DONE]: 'bg-accent',
   [EJobStatus.FAILED]: 'bg-critical',
 };
 
 const LINE_TONE: Record<EJobStatus, string> = {
+  [EJobStatus.QUEUED]: 'text-text-dim',
   [EJobStatus.RUNNING]: 'text-text',
   [EJobStatus.DONE]: 'text-accent',
   [EJobStatus.FAILED]: 'text-critical',
