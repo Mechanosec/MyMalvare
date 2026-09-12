@@ -1,4 +1,8 @@
-import type { Finding as TPrismaFinding, ScannedRepo as TPrismaScannedRepo } from '@prisma/client';
+import type {
+  Finding as TPrismaFinding,
+  Prisma,
+  ScannedRepo as TPrismaScannedRepo,
+} from '@prisma/client';
 import { ECandidateStatus } from '../../domain/constant/candidate-status.constant';
 import { EScanStatus } from '../../domain/constant/scan-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
@@ -41,6 +45,32 @@ export function toFindingRecord(row: TPrismaFinding): IFindingRecord {
     context: row.context,
     foundAt: row.foundAt,
   };
+}
+
+// SQLite's LIKE (what Prisma's `contains` compiles to on this connector)
+// is already case-insensitive for ASCII by default - there is no `mode:
+// "insensitive"` option to pass here (SQLite doesn't support it via
+// Prisma, unlike Postgres/MySQL).
+export function buildSearchConditions(search: string): Prisma.FindingWhereInput[] {
+  const conditions: Prisma.FindingWhereInput[] = [
+    { filePath: { contains: search } },
+    { context: { contains: search } },
+  ];
+
+  const slashIndex = search.indexOf('/');
+  if (slashIndex === -1) {
+    conditions.push({ owner: { contains: search } }, { name: { contains: search } });
+  } else {
+    // "owner/name" style queries (how repos are shown in the UI) - match
+    // each half against its own column rather than one column containing
+    // the whole "owner/name" string, which no single column holds.
+    conditions.push({
+      owner: { contains: search.slice(0, slashIndex) },
+      name: { contains: search.slice(slashIndex + 1) },
+    });
+  }
+
+  return conditions;
 }
 
 export function scannedRepoStatus(row: TPrismaScannedRepo): EScanStatus {

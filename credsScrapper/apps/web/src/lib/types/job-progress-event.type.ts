@@ -15,4 +15,7 @@ export interface IJobState {
   readonly processed: number;
   readonly message: string;
   readonly error?: string;
+  // Every event emitted for this job so far - lets a client that (re)connects
+  // after the job already started (e.g. a page reload) replay the full log.
+  readonly log: readonly IJobProgressEvent[];
 }

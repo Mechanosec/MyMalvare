@@ -13,8 +13,16 @@ export class DiscoverReposUseCase {
     private readonly logger: LoggerPort,
   ) {}
 
-  async execute(date: Date = new Date(Date.now() - 60 * 60 * 1000)): Promise<number> {
-    this.logger.log('discovery: starting to read events');
+  async execute(
+    date: Date = new Date(Date.now() - 60 * 60 * 1000),
+    onProgress?: (message: string) => void,
+  ): Promise<number> {
+    const report = (message: string) => {
+      this.logger.log(message);
+      onProgress?.(message);
+    };
+
+    report('discovery: starting to read events');
     let seen = 0;
     let added = 0;
     for await (const ref of parsePushEvents(this.feed.fetchHourLines(date))) {
@@ -23,14 +31,10 @@ export class DiscoverReposUseCase {
         added += 1;
       }
       if (seen % 2000 === 0) {
-        this.logger.log(
-          `discovery: processed ${seen} push events, ${added} new candidates so far`,
-        );
+        report(`discovery: processed ${seen} push events, ${added} new candidates so far`);
       }
     }
-    this.logger.log(
-      `discovery: finished, ${seen} push events processed, ${added} new candidates added`,
-    );
+    report(`discovery: finished, ${seen} push events processed, ${added} new candidates added`);
     return added;
   }
 }

@@ -8,13 +8,13 @@ import { ScanControls } from '../components/scan-controls';
 import { StatTile } from '../components/stat-tile';
 import { Tabs } from '../components/tabs';
 import { EScanStatus } from '../lib/constant/scan-status.constant';
-import { IFinding } from '../lib/types/finding.type';
+import { IFindingsPage } from '../lib/types/finding.type';
 import { IQueueStatus } from '../lib/types/queue-status.type';
 import { IScannedRepo } from '../lib/types/scanned-repo.type';
 
 interface IDashboardProps {
   readonly initialQueueStatus: IQueueStatus | null;
-  readonly initialFindings: IFinding[];
+  readonly initialFindingsPage: IFindingsPage;
   readonly initialScannedRepos: IScannedRepo[];
 }
 
@@ -24,13 +24,31 @@ const TABS = [
   { id: 'repositories', label: 'Repositories' },
 ] as const;
 
+// A viewer's own convenience, not shared state (see the Artifact/browser-
+// storage guidance this codebase follows elsewhere): remembers the last
+// job id in this browser so a page reload can resume watching it instead
+// of showing "No job running" while the scan keeps going server-side.
+const LAST_JOB_ID_KEY = 'credsscrapper:lastJobId';
+
 export function Dashboard({
   initialQueueStatus,
-  initialFindings,
+  initialFindingsPage,
   initialScannedRepos,
 }: IDashboardProps) {
   const [activeTab, setActiveTab] = useState<(typeof TABS)[number]['id']>('overview');
-  const [jobId, setJobId] = useState<string | null>(null);
+  // Lazy initializer, not an effect: reading localStorage is a pure
+  // (if side-effect-adjacent) computation of the initial value, not a
+  // subscription to an external system, so it belongs in useState's
+  // initializer rather than a setState-in-effect that would cause an
+  // extra render. Guarded for SSR, where `window` doesn't exist yet.
+  const [jobId, setJobId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      return localStorage.getItem(LAST_JOB_ID_KEY);
+    } catch {
+      return null; // localStorage unavailable (private mode, etc.)
+    }
+  });
   // Bumped whenever a job starts, so the findings/repos tables re-fetch
   // without needing their own job-completion logic.
   const [refreshKey, setRefreshKey] = useState(0);
@@ -38,6 +56,11 @@ export function Dashboard({
   function handleJobStarted(id: string) {
     setJobId(id);
     setRefreshKey((key) => key + 1);
+    try {
+      localStorage.setItem(LAST_JOB_ID_KEY, id);
+    } catch {
+      /* per-viewer convenience only - fine if it can't be saved */
+    }
   }
 
   const totalFindings = initialScannedRepos.reduce((sum, r) => sum + r.findingsCount, 0);
@@ -92,7 +115,7 @@ export function Dashboard({
           )}
 
           {activeTab === 'findings' && (
-            <FindingsTable initialFindings={initialFindings} refreshKey={refreshKey} />
+            <FindingsTable initialPage={initialFindingsPage} refreshKey={refreshKey} />
           )}
 
           {activeTab === 'repositories' && (

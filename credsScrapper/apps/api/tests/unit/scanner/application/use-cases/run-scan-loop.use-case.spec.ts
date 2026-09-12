@@ -17,9 +17,11 @@ class RecordingScanner {
   readonly scanned: IRepoRef[] = [];
   constructor(private readonly state: FakeStateRepository) {}
 
-  execute = async (ref: IRepoRef): Promise<void> => {
+  execute = async (ref: IRepoRef, _source: string, _workdir: string, onProgress?: (message: string) => void): Promise<void> => {
+    onProgress?.(`scan: ${ref.owner}/${ref.name} - cloning`);
     this.scanned.push(ref);
     await this.state.markDone(ref.repoId);
+    onProgress?.(`scan: ${ref.owner}/${ref.name} - done, 0 findings total`);
   };
 }
 
@@ -91,5 +93,28 @@ describe('RunScanLoopUseCase', () => {
     const secondRun = await useCase.execute({ workdirRoot: 'w', sourceUrlFn: () => 'x' });
 
     expect(secondRun).toBe(0);
+  });
+
+  it('forwards per-repo progress messages from the scanner, not just a final count', async () => {
+    const state = new FakeStateRepository();
+    await state.addCandidate(1, 'octocat', 'repo1');
+    const scanner = new RecordingScanner(state);
+    const useCase = new RunScanLoopUseCase(
+      state,
+      scanner as never,
+      new FakeLogger(),
+      new FakeWorkdirJoiner(),
+    );
+    const messages: string[] = [];
+
+    await useCase.execute({
+      workdirRoot: 'w',
+      sourceUrlFn: () => 'x',
+      onProgress: (message) => messages.push(message),
+    });
+
+    expect(messages).toContain('scan: octocat/repo1 - cloning');
+    expect(messages).toContain('scan: octocat/repo1 - done, 0 findings total');
+    expect(messages).toContain('scan: loop finished, 1 repos processed this run');
   });
 });

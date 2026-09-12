@@ -1,14 +1,26 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { StateRepositoryPort } from '../../application/ports/state-repository.port';
 import { ECandidateStatus } from '../../domain/constant/candidate-status.constant';
 import { EScanStatus } from '../../domain/constant/scan-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
-import { IFindingRecord, IFindingsFilter } from '../../domain/types/finding-record.type';
+import {
+  IFindingsFilter,
+  IFindingsPage,
+  IFindingsRepoOption,
+  ISecretTypeCount,
+} from '../../domain/types/finding-record.type';
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type';
 import { PrismaService } from './prisma.service';
-import { toFindingRecord, toRepoRef, toScannedRepoRecord, toScanStatus } from './prisma-state.mapper';
+import {
+  buildSearchConditions,
+  toFindingRecord,
+  toRepoRef,
+  toScannedRepoRecord,
+  toScanStatus,
+} from './prisma-state.mapper';
 
 // Implements the same resumability semantics as
 // credsScrapper/app/state/repository.py: candidates -> scanned_repos
@@ -152,18 +164,48 @@ export class PrismaStateRepository extends StateRepositoryPort {
     return { pendingCandidates, scannedByStatus };
   }
 
-  async listFindings(filter: IFindingsFilter): Promise<IFindingRecord[]> {
-    const rows = await this.prisma.finding.findMany({
-      where: {
-        secretType: filter.secretType,
-        owner: filter.owner,
-        name: filter.name,
-      },
-      orderBy: { foundAt: 'desc' },
-      take: filter.limit ?? 100,
-      skip: filter.offset ?? 0,
+  async listFindings(filter: IFindingsFilter): Promise<IFindingsPage> {
+    const where: Prisma.FindingWhereInput = {
+      secretType: filter.secretTypes?.length ? { in: [...filter.secretTypes] } : undefined,
+      repoId: filter.repoIds?.length ? { in: [...filter.repoIds] } : undefined,
+      ...(filter.search ? { OR: buildSearchConditions(filter.search) } : {}),
+    };
+    const [rows, total] = await Promise.all([
+      this.prisma.finding.findMany({
+        where,
+        orderBy: { foundAt: 'desc' },
+        take: filter.limit ?? 100,
+        skip: filter.offset ?? 0,
+      }),
+      this.prisma.finding.count({ where }),
+    ]);
+    return { items: rows.map(toFindingRecord), total };
+  }
+
+  async listFindingsRepoOptions(limit: number): Promise<IFindingsRepoOption[]> {
+    const rows = await this.prisma.finding.groupBy({
+      by: ['repoId', 'owner', 'name'],
+      _count: { _all: true },
+      orderBy: { _count: { repoId: 'desc' } },
+      take: limit,
     });
-    return rows.map(toFindingRecord);
+    return rows.map((row) => ({
+      repoId: row.repoId,
+      owner: row.owner,
+      name: row.name,
+      count: row._count._all,
+    }));
+  }
+
+  async listFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]> {
+    const rows = await this.prisma.finding.groupBy({
+      by: ['secretType'],
+      _count: { _all: true },
+    });
+    return rows.map((row) => ({
+      secretType: row.secretType as ESecretType,
+      count: row._count._all,
+    }));
   }
 
   async listScannedRepos(limit: number): Promise<IScannedRepoRecord[]> {

@@ -2,7 +2,12 @@ import { StateRepositoryPort } from '../../../../src/modules/scanner/application
 import { ECandidateStatus } from '../../../../src/modules/scanner/domain/constant/candidate-status.constant';
 import { EScanStatus } from '../../../../src/modules/scanner/domain/constant/scan-status.constant';
 import { ESecretType } from '../../../../src/modules/scanner/domain/constant/secret-type.constant';
-import { IFindingRecord, IFindingsFilter } from '../../../../src/modules/scanner/domain/types/finding-record.type';
+import {
+  IFindingsFilter,
+  IFindingsPage,
+  IFindingsRepoOption,
+  ISecretTypeCount,
+} from '../../../../src/modules/scanner/domain/types/finding-record.type';
 import { IQueueStatus } from '../../../../src/modules/scanner/domain/types/queue-status.type';
 import { IRepoRef } from '../../../../src/modules/scanner/domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../../../src/modules/scanner/domain/types/scanned-repo-record.type';
@@ -136,10 +141,43 @@ export class FakeStateRepository extends StateRepositoryPort {
     return { pendingCandidates, scannedByStatus };
   }
 
-  async listFindings(filter: IFindingsFilter): Promise<IFindingRecord[]> {
-    return this.findings
-      .filter((f) => !filter.secretType || f.secretType === filter.secretType)
+  async listFindings(filter: IFindingsFilter): Promise<IFindingsPage> {
+    const search = filter.search?.toLowerCase();
+    const matching = this.findings
+      .filter((f) => !filter.secretTypes?.length || filter.secretTypes.includes(f.secretType))
+      .filter((f) => !filter.repoIds?.length || filter.repoIds.includes(f.repoId))
+      .filter(
+        (f) =>
+          !search ||
+          `${f.owner}/${f.name}`.toLowerCase().includes(search) ||
+          f.filePath.toLowerCase().includes(search) ||
+          (f.context ?? '').toLowerCase().includes(search),
+      )
       .map((f, i) => ({ id: i, foundAt: new Date(), ...f }));
+    const offset = filter.offset ?? 0;
+    const limit = filter.limit ?? 100;
+    return { items: matching.slice(offset, offset + limit), total: matching.length };
+  }
+
+  async listFindingsRepoOptions(limit: number): Promise<IFindingsRepoOption[]> {
+    const counts = new Map<number, IFindingsRepoOption>();
+    for (const f of this.findings) {
+      const existing = counts.get(f.repoId);
+      if (existing) {
+        counts.set(f.repoId, { ...existing, count: existing.count + 1 });
+      } else {
+        counts.set(f.repoId, { repoId: f.repoId, owner: f.owner, name: f.name, count: 1 });
+      }
+    }
+    return [...counts.values()].slice(0, limit);
+  }
+
+  async listFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]> {
+    const counts = new Map<ESecretType, number>();
+    for (const f of this.findings) {
+      counts.set(f.secretType, (counts.get(f.secretType) ?? 0) + 1);
+    }
+    return [...counts.entries()].map(([secretType, count]) => ({ secretType, count }));
   }
 
   async listScannedRepos(limit: number): Promise<IScannedRepoRecord[]> {

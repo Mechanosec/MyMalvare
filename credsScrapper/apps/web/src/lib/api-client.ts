@@ -1,5 +1,5 @@
 import { ESecretType } from './constant/secret-type.constant';
-import { IFinding } from './types/finding.type';
+import { IFindingsPage, IFindingsRepoOption, ISecretTypeCount } from './types/finding.type';
 import { IJobState } from './types/job-progress-event.type';
 import { IQueueStatus } from './types/queue-status.type';
 import { IScannedRepo } from './types/scanned-repo.type';
@@ -35,15 +35,31 @@ export function fetchQueueStatus(): Promise<IQueueStatus> {
 }
 
 export interface IFindingsQuery {
-  secretType?: ESecretType;
+  secretTypes?: ESecretType[];
+  repoIds?: number[];
+  search?: string;
   limit?: number;
+  offset?: number;
 }
 
-export function fetchFindings(query: IFindingsQuery = {}): Promise<IFinding[]> {
+export const FINDINGS_PAGE_SIZE = 50;
+
+export function fetchFindings(query: IFindingsQuery = {}): Promise<IFindingsPage> {
   const params = new URLSearchParams();
-  if (query.secretType) params.set('secretType', query.secretType);
-  params.set('limit', String(query.limit ?? 50));
-  return get<IFinding[]>(`/findings?${params.toString()}`);
+  if (query.secretTypes?.length) params.set('secretTypes', query.secretTypes.join(','));
+  if (query.repoIds?.length) params.set('repoIds', query.repoIds.join(','));
+  if (query.search) params.set('search', query.search);
+  params.set('limit', String(query.limit ?? FINDINGS_PAGE_SIZE));
+  params.set('offset', String(query.offset ?? 0));
+  return get<IFindingsPage>(`/findings?${params.toString()}`);
+}
+
+export function fetchFindingsRepoOptions(limit?: number): Promise<IFindingsRepoOption[]> {
+  return get<IFindingsRepoOption[]>(`/findings/repos${limit ? `?limit=${limit}` : ''}`);
+}
+
+export function fetchFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]> {
+  return get<ISecretTypeCount[]>('/findings/secret-type-counts');
 }
 
 export function startDiscover(): Promise<{ jobId: string }> {

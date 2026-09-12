@@ -12,7 +12,9 @@ export class DiscoverController {
 
   @Post()
   start(): { jobId: string } {
-    const jobId = this.jobRunner.start(EJobType.DISCOVER, () => this.discoverRepos.execute());
+    const jobId = this.jobRunner.start(EJobType.DISCOVER, (onProgress) =>
+      this.discoverRepos.execute(undefined, onProgress),
+    );
     return { jobId };
   }
 }

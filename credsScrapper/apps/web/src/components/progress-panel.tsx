@@ -35,6 +35,22 @@ export function ProgressPanel({ jobId }: IProgressPanelProps) {
 
   useEffect(() => {
     if (!jobId) return;
+    let cancelled = false;
+
+    // A page reload loses all in-memory React state, but the job keeps
+    // running server-side - GET /jobs/:id.log replays everything emitted
+    // so far, before the WebSocket below picks up anything new. Without
+    // this, a reload made an in-progress job look like it had produced
+    // no output at all.
+    fetchJob(jobId)
+      .then((job) => {
+        if (!cancelled && job.log.length > 0) {
+          setEvents([...job.log]);
+        }
+      })
+      .catch(() => {
+        /* job not found (e.g. server restarted) - fall through to live updates */
+      });
 
     const socket = io(API_URL);
     let connected = false;
@@ -68,6 +84,7 @@ export function ProgressPanel({ jobId }: IProgressPanelProps) {
     }, 1000);
 
     return () => {
+      cancelled = true;
       socket.disconnect();
       clearInterval(poll);
     };

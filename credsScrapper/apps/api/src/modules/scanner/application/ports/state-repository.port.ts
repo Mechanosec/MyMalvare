@@ -1,5 +1,10 @@
 import { ESecretType } from '../../domain/constant/secret-type.constant';
-import { IFindingRecord, IFindingsFilter } from '../../domain/types/finding-record.type';
+import {
+  IFindingsFilter,
+  IFindingsPage,
+  IFindingsRepoOption,
+  ISecretTypeCount,
+} from '../../domain/types/finding-record.type';
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type';
@@ -43,7 +48,14 @@ export abstract class StateRepositoryPort {
 
   abstract getQueueStatus(): Promise<IQueueStatus>;
 
-  abstract listFindings(filter: IFindingsFilter): Promise<IFindingRecord[]>;
+  /** total counts every row matching the filter, ignoring limit/offset - what pagination needs. */
+  abstract listFindings(filter: IFindingsFilter): Promise<IFindingsPage>;
+
+  /** Distinct repos that have at least one finding, with their finding count - options for the repo filter dropdown. */
+  abstract listFindingsRepoOptions(limit: number): Promise<IFindingsRepoOption[]>;
+
+  /** Finding count per secret type, only for types with at least one finding. */
+  abstract listFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]>;
 
   /** Most recently scanned repos first, newest attempt (started/scanned) on top. */
   abstract listScannedRepos(limit: number): Promise<IScannedRepoRecord[]>;

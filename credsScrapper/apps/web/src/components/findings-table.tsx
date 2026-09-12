@@ -1,15 +1,22 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { fetchFindings } from '../lib/api-client';
+import {
+  fetchFindings,
+  fetchFindingsRepoOptions,
+  fetchFindingsSecretTypeCounts,
+  FINDINGS_PAGE_SIZE,
+} from '../lib/api-client';
 import { ESecretType } from '../lib/constant/secret-type.constant';
-import { IFinding } from '../lib/types/finding.type';
+import { IFinding, IFindingsPage, IFindingsRepoOption, ISecretTypeCount } from '../lib/types/finding.type';
+import { MultiSelect } from './multi-select';
+import { Pagination } from './pagination';
 import { SecretTypeBadge } from './secret-type-badge';
 import { SecretValue } from './secret-value';
 import { SortableHeader } from './sortable-header';
 
 interface IFindingsTableProps {
-  readonly initialFindings: IFinding[];
+  readonly initialPage: IFindingsPage;
   readonly refreshKey: number;
 }
 
@@ -28,31 +35,54 @@ function sortValue(finding: IFinding, key: TSortKey): string | number {
   }
 }
 
-function matchesSearch(finding: IFinding, query: string): boolean {
-  const haystack = [
-    finding.owner,
-    finding.name,
-    finding.filePath,
-    finding.secretType,
-    finding.context ?? '',
-  ]
-    .join(' ')
-    .toLowerCase();
-  return haystack.includes(query.toLowerCase());
+const FILTER_DEBOUNCE_MS = 300;
+
+interface ICommittedFilters {
+  readonly secretTypes: ESecretType[];
+  readonly repoIds: number[];
+  readonly search: string;
 }
 
-export function FindingsTable({ initialFindings, refreshKey }: IFindingsTableProps) {
-  const [secretType, setSecretType] = useState<ESecretType | ''>('');
-  const [findings, setFindings] = useState(initialFindings);
+const NO_FILTERS: ICommittedFilters = { secretTypes: [], repoIds: [], search: '' };
+
+export function FindingsTable({ initialPage, refreshKey }: IFindingsTableProps) {
+  const [secretTypes, setSecretTypes] = useState<ESecretType[]>([]);
+  const [repoIds, setRepoIds] = useState<number[]>([]);
+  const [repoOptions, setRepoOptions] = useState<IFindingsRepoOption[]>([]);
+  const [secretTypeCounts, setSecretTypeCounts] = useState<ISecretTypeCount[]>([]);
   const [search, setSearch] = useState('');
+  // Only this debounced snapshot drives fetches, so rapid checkbox clicks
+  // or keystrokes coalesce into one request instead of firing (and racing)
+  // one per click/keystroke.
+  const [committed, setCommitted] = useState<ICommittedFilters>(NO_FILTERS);
+  const [page, setPage] = useState(0);
+  const [findingsPage, setFindingsPage] = useState(initialPage);
   const [sortKey, setSortKey] = useState<TSortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
-    fetchFindings({ secretType: secretType || undefined })
-      .then(setFindings)
-      .catch(() => setFindings([]));
-  }, [secretType, refreshKey]);
+    fetchFindingsRepoOptions().then(setRepoOptions).catch(() => setRepoOptions([]));
+    fetchFindingsSecretTypeCounts().then(setSecretTypeCounts).catch(() => setSecretTypeCounts([]));
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setCommitted({ secretTypes, repoIds, search });
+      setPage(0);
+    }, FILTER_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [secretTypes, repoIds, search]);
+
+  useEffect(() => {
+    fetchFindings({
+      secretTypes: committed.secretTypes.length ? committed.secretTypes : undefined,
+      repoIds: committed.repoIds.length ? committed.repoIds : undefined,
+      search: committed.search || undefined,
+      offset: page * FINDINGS_PAGE_SIZE,
+    })
+      .then(setFindingsPage)
+      .catch(() => setFindingsPage({ items: [], total: 0 }));
+  }, [committed, page, refreshKey]);
 
   function toggleSort(key: TSortKey) {
     if (key === sortKey) {
@@ -64,9 +94,8 @@ export function FindingsTable({ initialFindings, refreshKey }: IFindingsTablePro
   }
 
   const visible = useMemo(() => {
-    const filtered = search ? findings.filter((f) => matchesSearch(f, search)) : findings;
-    if (!sortKey) return filtered;
-    const sorted = [...filtered].sort((a, b) => {
+    if (!sortKey) return findingsPage.items;
+    const sorted = [...findingsPage.items].sort((a, b) => {
       const va = sortValue(a, sortKey);
       const vb = sortValue(b, sortKey);
       if (va < vb) return -1;
@@ -74,40 +103,52 @@ export function FindingsTable({ initialFindings, refreshKey }: IFindingsTablePro
       return 0;
     });
     return sortDir === 'asc' ? sorted : sorted.reverse();
-  }, [findings, search, sortKey, sortDir]);
+  }, [findingsPage, sortKey, sortDir]);
+
+  const pageCount = Math.max(1, Math.ceil(findingsPage.total / FINDINGS_PAGE_SIZE));
+  const firstRow = findingsPage.total === 0 ? 0 : page * FINDINGS_PAGE_SIZE + 1;
+  const lastRow = Math.min(findingsPage.total, (page + 1) * FINDINGS_PAGE_SIZE);
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-2 text-sm text-text-dim">
-          Secret type
-          <select
-            value={secretType}
-            onChange={(e) => setSecretType(e.target.value as ESecretType | '')}
-            className="border border-line bg-surface-2 px-2 py-1.5 text-sm text-text outline-none focus:border-accent"
-          >
-            <option value="">All</option>
-            {Object.values(ESecretType).map((value) => (
-              <option key={value} value={value}>
-                {value.replace(/_/g, ' ')}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="flex flex-wrap items-end gap-2">
+        <MultiSelect
+          label="Secret type"
+          options={Object.values(ESecretType).map((value) => ({
+            value,
+            label: value.replace(/_/g, ' '),
+            count: secretTypeCounts.find((c) => c.secretType === value)?.count,
+          }))}
+          selected={secretTypes}
+          onChange={setSecretTypes}
+        />
+
+        <MultiSelect
+          label="Repository"
+          options={repoOptions.map((repo) => ({
+            value: repo.repoId,
+            label: `${repo.owner}/${repo.name}`,
+            count: repo.count,
+          }))}
+          selected={repoIds}
+          onChange={setRepoIds}
+        />
 
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search repo, file, context…"
+          placeholder="Search all findings…"
           aria-label="Search findings"
           className="w-64 border border-line bg-surface-2 px-2 py-1.5 text-sm text-text outline-none placeholder:text-text-dim focus:border-accent"
         />
 
         <span className="ml-auto font-mono text-xs text-text-dim">
-          {visible.length} of {findings.length} rows
+          {firstRow}-{lastRow} of {findingsPage.total} rows
         </span>
       </div>
+
+      <Pagination page={page} pageCount={pageCount} onChange={setPage} />
 
       {visible.length === 0 ? (
         <p className="border border-line bg-surface px-4 py-6 text-center text-sm text-text-dim">
@@ -149,6 +190,8 @@ export function FindingsTable({ initialFindings, refreshKey }: IFindingsTablePro
           </table>
         </div>
       )}
+
+      <Pagination page={page} pageCount={pageCount} onChange={setPage} />
     </div>
   );
 }

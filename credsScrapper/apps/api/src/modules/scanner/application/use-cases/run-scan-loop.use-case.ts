@@ -10,7 +10,7 @@ export interface RunScanLoopOptions {
   readonly staleTimeoutSeconds?: number;
   readonly maxRepos?: number;
   readonly workers?: number;
-  readonly onProgress?: (processed: number) => void;
+  readonly onProgress?: (message: string, processed: number) => void;
 }
 
 // Ported from credsScrapper/app/scan/orchestrator.py's run_scan_loop.
@@ -40,13 +40,18 @@ export class RunScanLoopUseCase {
       onProgress,
     } = options;
 
+    let processed = 0;
+    const report = (message: string) => {
+      this.logger.log(message);
+      onProgress?.(message, processed);
+    };
+
     const requeued = await this.state.requeueStale(staleTimeoutSeconds);
     if (requeued > 0) {
-      this.logger.log(`scan: requeued ${requeued} stale in-progress repos`);
+      report(`scan: requeued ${requeued} stale in-progress repos`);
     }
     await this.workdirJoiner.ensureDir(workdirRoot);
 
-    let processed = 0;
     let reserved = 0;
 
     const workerLoop = async (): Promise<void> => {
@@ -61,17 +66,24 @@ export class RunScanLoopUseCase {
           return;
         }
         const workdir = this.workdirJoiner.join(workdirRoot, `repo-${ref.repoId}`);
-        await this.scanRepository.execute(ref, sourceUrlFn(ref), workdir);
+        // scanRepository reports its own per-repo progress (cloning,
+        // cloned, working tree done, done/failed) through this same
+        // onProgress channel, tagged with the count completed so far -
+        // without this, the UI only ever saw "processed N" once per
+        // whole repo, which looked idle during a slow clone/scan.
+        await this.scanRepository.execute(ref, sourceUrlFn(ref), workdir, (message) =>
+          onProgress?.(message, processed),
+        );
         processed += 1;
-        onProgress?.(processed);
+        onProgress?.(`scan: ${processed} repos processed so far`, processed);
       }
     };
 
     const workerCount = Math.max(1, workers);
-    this.logger.log(`scan: starting ${workerCount} concurrent workers`);
+    report(`scan: starting ${workerCount} concurrent workers`);
     await Promise.all(Array.from({ length: workerCount }, () => workerLoop()));
 
-    this.logger.log(`scan: loop finished, ${processed} repos processed this run`);
+    report(`scan: loop finished, ${processed} repos processed this run`);
     return processed;
   }
 }

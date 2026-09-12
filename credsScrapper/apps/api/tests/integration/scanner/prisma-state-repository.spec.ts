@@ -89,4 +89,22 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
 
     await prisma.$disconnect();
   });
+
+  it('groups repo options and secret-type counts correctly against a real DB', async () => {
+    const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+    await repo.addFinding(1, 'octocat', 'repo1', 'a.py', 'sha', 'AWS_ACCESS_KEY_ID' as never, 'v', 1, null);
+    await repo.addFinding(1, 'octocat', 'repo1', 'b.py', 'sha', 'AWS_ACCESS_KEY_ID' as never, 'v', 1, null);
+    await repo.addFinding(2, 'someone', 'repo2', 'c.py', 'sha', 'GITHUB_PAT' as never, 'v', 1, null);
+
+    const repoOptions = await repo.listFindingsRepoOptions(10);
+    expect(repoOptions).toContainEqual({ repoId: 1, owner: 'octocat', name: 'repo1', count: 2 });
+    expect(repoOptions).toContainEqual({ repoId: 2, owner: 'someone', name: 'repo2', count: 1 });
+
+    const secretTypeCounts = await repo.listFindingsSecretTypeCounts();
+    expect(secretTypeCounts).toContainEqual({ secretType: 'AWS_ACCESS_KEY_ID', count: 2 });
+    expect(secretTypeCounts).toContainEqual({ secretType: 'GITHUB_PAT', count: 1 });
+
+    await prisma.$disconnect();
+  });
 });

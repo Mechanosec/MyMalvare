@@ -15,6 +15,20 @@ function lineNumberAt(text: string, offset: number): number {
   return count + 1;
 }
 
+// Docs/tests litter real-looking secrets with placeholder markers (AWS's
+// own docs use AKIAIOSFODNN7EXAMPLE as the canonical example key). Only
+// "test" is scoped to non-Stripe-test-key types, since sk_test_... is a
+// real, sensitive secret type whose own prefix contains the word.
+const PLACEHOLDER_MARKERS = ['example', 'placeholder', 'sample', 'changeme', 'dummy', 'fake'];
+
+function isPlaceholder(secretType: ESecretType, value: string, context: string | null): boolean {
+  const haystack = `${value} ${context ?? ''}`.toLowerCase();
+  if (PLACEHOLDER_MARKERS.some((marker) => haystack.includes(marker))) {
+    return true;
+  }
+  return secretType !== ESecretType.STRIPE_TEST_SECRET_KEY && haystack.includes('test');
+}
+
 // For generic_high_entropy matches we have no prefix telling us the
 // service, so the best available hint is the variable/key name the token
 // was assigned to on the same line (e.g. "SUPABASE_KEY = '<token>'" ->
@@ -38,13 +52,16 @@ export function scanText(text: string): IFinding[] {
     for (const match of text.matchAll(pattern)) {
       const start = match.index ?? 0;
       const value = match[0];
+      matchedSpans.push([start, start + value.length]);
+      if (isPlaceholder(secretType, value, null)) {
+        continue;
+      }
       findings.push({
         secretType,
         secretValue: value,
         lineNumber: lineNumberAt(text, start),
         context: null,
       });
-      matchedSpans.push([start, start + value.length]);
     }
   }
 
@@ -57,11 +74,15 @@ export function scanText(text: string): IFinding[] {
     if (overlapsPatternMatch) {
       continue;
     }
+    const context = extractContext(text, start);
+    if (isPlaceholder(ESecretType.GENERIC_HIGH_ENTROPY, token, context)) {
+      continue;
+    }
     findings.push({
       secretType: ESecretType.GENERIC_HIGH_ENTROPY,
       secretValue: token,
       lineNumber: lineNumberAt(text, start),
-      context: extractContext(text, start),
+      context,
     });
   }
 

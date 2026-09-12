@@ -55,4 +55,30 @@ describe('scanText', () => {
     const match = findings.find((f) => f.secretType === ESecretType.AWS_ACCESS_KEY_ID);
     expect(match?.context).toBeNull();
   });
+
+  it('ignores AWS docs\' canonical example key', () => {
+    const findings = scanText("aws_key = 'AKIAIOSFODNN7EXAMPLE'\n");
+    expect(findings).toEqual([]);
+  });
+
+  it('ignores a pattern match containing a placeholder marker', () => {
+    const findings = scanText("token = 'ghp_" + 'sample'.padEnd(36, 'x') + "'\n");
+    expect(findings).toEqual([]);
+  });
+
+  it('ignores a high entropy token whose variable name says test', () => {
+    const token = 'Xk9pQ2mZ7vL4tR8wN1cJ6hF3sD0aY5bE9';
+    const findings = scanText(`TEST_API_KEY = '${token}'\n`);
+    expect(findings).toEqual([]);
+  });
+
+  it('does not exclude a real Stripe test-mode key just for saying "test"', () => {
+    const findings = scanText("stripe_key = 'sk_test_" + 'a'.repeat(24) + "'\n");
+    expect(findings).toContainEqual({
+      secretType: ESecretType.STRIPE_TEST_SECRET_KEY,
+      secretValue: 'sk_test_' + 'a'.repeat(24),
+      lineNumber: 1,
+      context: null,
+    });
+  });
 });

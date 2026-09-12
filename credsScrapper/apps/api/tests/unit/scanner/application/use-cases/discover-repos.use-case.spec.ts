@@ -30,4 +30,18 @@ describe('DiscoverReposUseCase', () => {
     expect(added).toBe(1);
     expect(await state.isKnown(2)).toBe(true);
   });
+
+  it('reports start and finish messages through onProgress', async () => {
+    const state = new FakeStateRepository();
+    const feed = new FakeFeed([pushEvent(1, 'octocat/hello-world')]);
+    const useCase = new DiscoverReposUseCase(feed, state, new FakeLogger());
+    const messages: string[] = [];
+
+    await useCase.execute(new Date(), (message) => messages.push(message));
+
+    expect(messages[0]).toBe('discovery: starting to read events');
+    expect(messages[messages.length - 1]).toBe(
+      'discovery: finished, 1 push events processed, 1 new candidates added',
+    );
+  });
 });

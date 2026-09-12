@@ -8,6 +8,8 @@ import { StateRepositoryPort } from './application/ports/state-repository.port';
 import { WorkdirCleanerPort } from './application/ports/workdir-cleaner.port';
 import { WorkdirJoinerPort } from './application/ports/workdir-joiner.port';
 import { DiscoverReposUseCase } from './application/use-cases/discover-repos.use-case';
+import { GetFindingsRepoOptionsUseCase } from './application/use-cases/get-findings-repo-options.use-case';
+import { GetFindingsSecretTypeCountsUseCase } from './application/use-cases/get-findings-secret-type-counts.use-case';
 import { GetFindingsUseCase } from './application/use-cases/get-findings.use-case';
 import { GetScannedReposUseCase } from './application/use-cases/get-scanned-repos.use-case';
 import { GetScanStatusUseCase } from './application/use-cases/get-scan-status.use-case';
@@ -63,6 +65,16 @@ import { ScanController } from './presentation/scan.controller';
       GetFindingsUseCase,
       [StateRepositoryPort],
       (state) => new GetFindingsUseCase(state),
+    ),
+    provideUseCase(
+      GetFindingsRepoOptionsUseCase,
+      [StateRepositoryPort],
+      (state) => new GetFindingsRepoOptionsUseCase(state),
+    ),
+    provideUseCase(
+      GetFindingsSecretTypeCountsUseCase,
+      [StateRepositoryPort],
+      (state) => new GetFindingsSecretTypeCountsUseCase(state),
     ),
     provideUseCase(
       GetScanStatusUseCase,

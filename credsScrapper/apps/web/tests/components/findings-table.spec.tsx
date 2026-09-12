@@ -1,9 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FindingsTable } from '../../src/components/findings-table';
 import * as apiClient from '../../src/lib/api-client';
 import { ESecretType } from '../../src/lib/constant/secret-type.constant';
-import { IFinding } from '../../src/lib/types/finding.type';
+import { IFinding, IFindingsPage } from '../../src/lib/types/finding.type';
 
 const finding: IFinding = {
   id: 1,
@@ -19,35 +19,150 @@ const finding: IFinding = {
   foundAt: '2026-09-12T00:00:00.000Z',
 };
 
+function page(items: IFinding[], total = items.length): IFindingsPage {
+  return { items, total };
+}
+
+const NO_FILTER_QUERY = {
+  secretTypes: undefined,
+  repoIds: undefined,
+  search: undefined,
+  offset: 0,
+};
+
 describe('FindingsTable', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(apiClient, 'fetchFindingsRepoOptions').mockResolvedValue([
+      { repoId: 42, owner: 'octocat', name: 'hello-world', count: 1 },
+    ]);
+    vi.spyOn(apiClient, 'fetchFindingsSecretTypeCounts').mockResolvedValue(
+      Object.values(ESecretType).map((secretType) => ({ secretType, count: 1 })),
+    );
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   });
 
-  it('renders the initial findings, then confirms them via a fetch with no filter', async () => {
-    const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue([finding]);
-    render(<FindingsTable initialFindings={[finding]} refreshKey={0} />);
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('renders the initial page, then confirms it via a fetch with no filter', async () => {
+    const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([finding]));
+    render(<FindingsTable initialPage={page([finding])} refreshKey={0} />);
 
     expect(screen.getByText('octocat/hello-world')).toBeInTheDocument();
-    await vi.waitFor(() => expect(fetchFindings).toHaveBeenCalledWith({ secretType: undefined }));
+    await vi.waitFor(() => expect(fetchFindings).toHaveBeenCalledWith(NO_FILTER_QUERY));
   });
 
-  it('re-fetches with the selected secretType when the filter changes', async () => {
-    const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue([finding]);
-    render(<FindingsTable initialFindings={[]} refreshKey={0} />);
+  it('re-fetches with the selected secret type when the filter changes', async () => {
+    const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([finding]));
+    render(<FindingsTable initialPage={page([])} refreshKey={0} />);
 
-    fireEvent.change(screen.getByLabelText('Secret type'), {
-      target: { value: ESecretType.GITHUB_PAT },
-    });
+    fireEvent.click(screen.getByLabelText('Secret type'));
+    fireEvent.click(screen.getByText(ESecretType.GITHUB_PAT.replace(/_/g, ' ')));
 
     await vi.waitFor(() =>
-      expect(fetchFindings).toHaveBeenLastCalledWith({ secretType: ESecretType.GITHUB_PAT }),
+      expect(fetchFindings).toHaveBeenLastCalledWith({
+        ...NO_FILTER_QUERY,
+        secretTypes: [ESecretType.GITHUB_PAT],
+      }),
+    );
+  });
+
+  it('coalesces rapid checkbox clicks into a single debounced fetch instead of one per click', async () => {
+    const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([finding]));
+    render(<FindingsTable initialPage={page([])} refreshKey={0} />);
+    const callsBeforeClicks = fetchFindings.mock.calls.length;
+
+    fireEvent.click(screen.getByLabelText('Secret type'));
+    fireEvent.click(screen.getByText(ESecretType.GITHUB_PAT.replace(/_/g, ' ')));
+    vi.advanceTimersByTime(100);
+    fireEvent.click(screen.getByText(ESecretType.GITLAB_PAT.replace(/_/g, ' ')));
+    vi.advanceTimersByTime(100);
+    fireEvent.click(screen.getByText(ESecretType.SLACK_TOKEN.replace(/_/g, ' ')));
+
+    // Still within the debounce window of the last click - no new fetch yet.
+    vi.advanceTimersByTime(299);
+    expect(fetchFindings.mock.calls.length).toBe(callsBeforeClicks);
+
+    vi.advanceTimersByTime(1);
+    await vi.waitFor(() =>
+      expect(fetchFindings).toHaveBeenLastCalledWith({
+        ...NO_FILTER_QUERY,
+        secretTypes: [ESecretType.GITHUB_PAT, ESecretType.GITLAB_PAT, ESecretType.SLACK_TOKEN],
+      }),
+    );
+    // Exactly one fetch for the whole burst of clicks, not three.
+    expect(fetchFindings.mock.calls.length).toBe(callsBeforeClicks + 1);
+  });
+
+  it('re-fetches with the selected repository when the filter changes', async () => {
+    const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([finding]));
+    render(<FindingsTable initialPage={page([])} refreshKey={0} />);
+
+    fireEvent.click(screen.getByLabelText('Repository'));
+    const listbox = screen.getByRole('listbox');
+    await vi.waitFor(() => within(listbox).getByText('octocat/hello-world'));
+    fireEvent.click(within(listbox).getByText('octocat/hello-world'));
+
+    await vi.waitFor(() =>
+      expect(fetchFindings).toHaveBeenLastCalledWith({ ...NO_FILTER_QUERY, repoIds: [42] }),
+    );
+  });
+
+  it('debounces the search box and searches server-side across the whole dataset', async () => {
+    const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([finding]));
+    render(<FindingsTable initialPage={page([])} refreshKey={0} />);
+
+    fireEvent.change(screen.getByLabelText('Search findings'), {
+      target: { value: 'octocat/hello' },
+    });
+
+    vi.advanceTimersByTime(299);
+    expect(fetchFindings).not.toHaveBeenLastCalledWith(
+      expect.objectContaining({ search: 'octocat/hello' }),
+    );
+
+    vi.advanceTimersByTime(1);
+    await vi.waitFor(() =>
+      expect(fetchFindings).toHaveBeenLastCalledWith({
+        ...NO_FILTER_QUERY,
+        search: 'octocat/hello',
+      }),
     );
   });
 
   it('shows an empty state when there are no findings', () => {
-    vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue([]);
-    render(<FindingsTable initialFindings={[]} refreshKey={0} />);
+    vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([]));
+    render(<FindingsTable initialPage={page([])} refreshKey={0} />);
     expect(screen.getByText('No findings match this filter.')).toBeInTheDocument();
+  });
+
+  it('requests the next offset when Next is clicked, duplicated top and bottom', async () => {
+    const fetchFindings = vi
+      .spyOn(apiClient, 'fetchFindings')
+      .mockResolvedValue(page([finding], 120));
+    render(<FindingsTable initialPage={page([finding], 120)} refreshKey={0} />);
+
+    // Pagination appears above and below the table, so every query here
+    // expects two matches.
+    const previousButtons = screen.getAllByRole('button', { name: 'Previous' });
+    expect(previousButtons).toHaveLength(2);
+    previousButtons.forEach((button) => expect(button).toBeDisabled());
+    screen.getAllByRole('button', { name: '1' }).forEach((button) =>
+      expect(button).toHaveAttribute('aria-current', 'page'),
+    );
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Next' })[0]);
+
+    await vi.waitFor(() =>
+      expect(fetchFindings).toHaveBeenLastCalledWith({ ...NO_FILTER_QUERY, offset: 50 }),
+    );
+    screen.getAllByRole('button', { name: '2' }).forEach((button) =>
+      expect(button).toHaveAttribute('aria-current', 'page'),
+    );
+    screen
+      .getAllByRole('button', { name: 'Previous' })
+      .forEach((button) => expect(button).not.toBeDisabled());
   });
 });

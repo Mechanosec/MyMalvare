@@ -14,3 +14,20 @@ export interface IFinding {
   readonly context: string | null;
   readonly foundAt: string;
 }
+
+export interface IFindingsPage {
+  readonly items: readonly IFinding[];
+  readonly total: number;
+}
+
+export interface IFindingsRepoOption {
+  readonly repoId: number;
+  readonly owner: string;
+  readonly name: string;
+  readonly count: number;
+}
+
+export interface ISecretTypeCount {
+  readonly secretType: ESecretType;
+  readonly count: number;
+}

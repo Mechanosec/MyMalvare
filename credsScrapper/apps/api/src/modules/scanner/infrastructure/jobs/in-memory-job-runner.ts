@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { ProgressPort } from '../../application/ports/progress.port';
 import { EJobStatus, EJobType } from '../../domain/constant/job-status.constant';
+import { IJobProgressEvent } from '../../domain/types/job-progress-event.type';
 
 export interface IJobState {
   readonly id: string;
@@ -12,9 +13,14 @@ export interface IJobState {
   readonly startedAt: Date;
   finishedAt?: Date;
   error?: string;
+  // Every event emitted for this job, in order - lets a client that
+  // (re)connects after the job already started (e.g. a page reload)
+  // replay the full log instead of only ever seeing events from the
+  // moment it happened to be listening.
+  readonly log: IJobProgressEvent[];
 }
 
-export type TJobTask = (onProgress: (processed: number) => void) => Promise<number>;
+export type TJobTask = (onProgress: (message: string, processed?: number) => void) => Promise<number>;
 
 // No Redis/BullMQ at this scale (per the design spec) - jobs live in a
 // Map for the lifetime of the process. A future multi-tenant SaaS would
@@ -34,37 +40,31 @@ export class InMemoryJobRunner {
       processed: 0,
       message: `${type} started`,
       startedAt: new Date(),
+      log: [],
     };
     this.jobs.set(jobId, job);
-    this.progress.emit({ jobId, status: EJobStatus.RUNNING, message: job.message });
+    this.emit(job, { jobId, status: EJobStatus.RUNNING, message: job.message });
 
-    task((processed) => {
-      job.processed = processed;
-      this.progress.emit({
-        jobId,
-        status: EJobStatus.RUNNING,
-        message: `processed ${processed}`,
-        processed,
-      });
+    task((message, processed) => {
+      job.message = message;
+      if (processed !== undefined) {
+        job.processed = processed;
+      }
+      this.emit(job, { jobId, status: EJobStatus.RUNNING, message, processed });
     })
       .then((result) => {
         job.status = EJobStatus.DONE;
         job.processed = result;
         job.finishedAt = new Date();
         job.message = `${type} finished: ${result} processed`;
-        this.progress.emit({
-          jobId,
-          status: EJobStatus.DONE,
-          message: job.message,
-          processed: result,
-        });
+        this.emit(job, { jobId, status: EJobStatus.DONE, message: job.message, processed: result });
       })
       .catch((err: unknown) => {
         job.status = EJobStatus.FAILED;
         job.error = err instanceof Error ? err.message : String(err);
         job.finishedAt = new Date();
         job.message = `${type} failed: ${job.error}`;
-        this.progress.emit({ jobId, status: EJobStatus.FAILED, message: job.message });
+        this.emit(job, { jobId, status: EJobStatus.FAILED, message: job.message });
       });
 
     return jobId;
@@ -72,5 +72,10 @@ export class InMemoryJobRunner {
 
   get(jobId: string): IJobState | undefined {
     return this.jobs.get(jobId);
+  }
+
+  private emit(job: IJobState, event: IJobProgressEvent): void {
+    job.log.push(event);
+    this.progress.emit(event);
   }
 }

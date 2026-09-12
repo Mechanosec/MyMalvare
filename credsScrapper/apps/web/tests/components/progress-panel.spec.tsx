@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProgressPanel } from '../../src/components/progress-panel';
+import * as apiClient from '../../src/lib/api-client';
 import { EJobStatus } from '../../src/lib/constant/job-status.constant';
 
 const handlers = new Map<string, (payload: unknown) => void>();
@@ -19,10 +20,21 @@ describe('ProgressPanel', () => {
   beforeEach(() => {
     handlers.clear();
     vi.useFakeTimers();
+    // Default: no history to hydrate, so existing tests (which drive state
+    // purely via the fake socket) see the same "Starting…" -> live-event
+    // behavior as before hydration was added.
+    vi.spyOn(apiClient, 'fetchJob').mockResolvedValue({
+      id: 'job-1',
+      status: EJobStatus.RUNNING,
+      processed: 0,
+      message: 'scan started',
+      log: [],
+    });
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('renders nothing running when no job is given', () => {
@@ -61,5 +73,25 @@ describe('ProgressPanel', () => {
     expect(screen.getByText(/processed 5 \(5 processed\)/)).toBeInTheDocument();
     expect(screen.getByText(/processed 10 \(10 processed\)/)).toBeInTheDocument();
     expect(screen.getByText('2 lines')).toBeInTheDocument();
+  });
+
+  it('hydrates the log from GET /jobs/:id on mount, so a page reload does not lose history', async () => {
+    vi.spyOn(apiClient, 'fetchJob').mockResolvedValue({
+      id: 'job-1',
+      status: EJobStatus.RUNNING,
+      processed: 3,
+      message: 'scan: octocat/repo3 - cloning',
+      log: [
+        { jobId: 'job-1', status: EJobStatus.RUNNING, message: 'scan started' },
+        { jobId: 'job-1', status: EJobStatus.RUNNING, message: 'scan: octocat/repo1 - cloning' },
+        { jobId: 'job-1', status: EJobStatus.RUNNING, message: 'scan: octocat/repo1 - done, 0 findings total', processed: 1 },
+      ],
+    });
+
+    render(<ProgressPanel jobId="job-1" />);
+
+    await vi.waitFor(() => expect(screen.getByText('3 lines')).toBeInTheDocument());
+    expect(screen.getByText(/scan: octocat\/repo1 - cloning/)).toBeInTheDocument();
+    expect(screen.getByText(/scan: octocat\/repo1 - done, 0 findings total/)).toBeInTheDocument();
   });
 });
