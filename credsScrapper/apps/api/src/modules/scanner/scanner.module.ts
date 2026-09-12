@@ -15,6 +15,7 @@ import { GetScannedReposUseCase } from './application/use-cases/get-scanned-repo
 import { GetScanStatusUseCase } from './application/use-cases/get-scan-status.use-case';
 import { RunScanLoopUseCase } from './application/use-cases/run-scan-loop.use-case';
 import { ScanRepositoryUseCase } from './application/use-cases/scan-repository.use-case';
+import { SetFindingStatusUseCase } from './application/use-cases/set-finding-status.use-case';
 import { GhArchiveHttpAdapter } from './infrastructure/discovery/gharchive-http-adapter';
 import { FsWorkdirCleanerAdapter } from './infrastructure/fs/fs-workdir-cleaner.adapter';
 import { FsWorkdirJoinerAdapter } from './infrastructure/fs/fs-workdir-joiner.adapter';
@@ -85,6 +86,11 @@ import { ScanController } from './presentation/scan.controller';
       GetScannedReposUseCase,
       [StateRepositoryPort],
       (state) => new GetScannedReposUseCase(state),
+    ),
+    provideUseCase(
+      SetFindingStatusUseCase,
+      [StateRepositoryPort],
+      (state) => new SetFindingStatusUseCase(state),
     ),
   ],
 })
