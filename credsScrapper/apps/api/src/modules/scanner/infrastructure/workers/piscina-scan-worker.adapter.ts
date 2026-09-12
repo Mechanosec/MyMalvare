@@ -15,20 +15,21 @@ export class PiscinaScanWorkerAdapter
   extends ScanWorkerPort
   implements OnModuleDestroy
 {
-  // `scan.worker.js` (compiled sibling of scan.worker.ts) - resolved
-  // relative to this file's own compiled location in dist/, so it works
-  // the same in dev (`nest start`, which builds to dist/ via tsc, not
-  // ts-node) and in prod (`node dist/main`). Under ts-jest (integration
-  // tests import this .ts file directly), __dirname is the src/ path
-  // instead, where only the .ts source exists - Piscina needs a real
-  // file to load into the worker thread, so redirect to the mirrored
-  // dist/ path in that one case (a no-op everywhere else).
+  // ts-jest's integration test imports this .ts file directly, so
+  // __dirname resolves to the real on-disk src/ path (no compiled .js
+  // there) rather than dist/ (real dev/prod always builds via tsc first,
+  // so __dirname there is already dist/). Gated on JEST_WORKER_ID rather
+  // than pattern-matching the path string itself, so this substitution
+  // can never misfire in a real deployment whose checkout path happens
+  // to contain "/src/" earlier than the intended segment.
   private readonly pool = new Piscina({
     filename: path.resolve(
-      __dirname.replace(
-        `${path.sep}src${path.sep}`,
-        `${path.sep}dist${path.sep}`,
-      ),
+      process.env.JEST_WORKER_ID !== undefined
+        ? __dirname.replace(
+            `${path.sep}src${path.sep}`,
+            `${path.sep}dist${path.sep}`,
+          )
+        : __dirname,
       'scan.worker.js',
     ),
     maxThreads: SCAN_WORKER_POOL_SIZE,
