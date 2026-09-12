@@ -2,7 +2,10 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      # Bound to localhost only - this compose file is for local dev, and
+      # Redis has no auth configured. A real deployment needs a managed/
+      # authenticated Redis instance, not this container exposed publicly.
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     command: redis-server --save 60 1 --appendonly yes
