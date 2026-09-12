@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchFindings, fetchFindingsRepoOptions, updateFindingStatus } from '../lib/api-client';
+import { fetchFindings, fetchMyTestableRepos, updateFindingStatus } from '../lib/api-client';
 import { EFindingStatus } from '../lib/constant/finding-status.constant';
 import { IFinding, IFindingsRepoOption } from '../lib/types/finding.type';
 import { FindingStatusBadge } from './finding-status-badge';
@@ -20,7 +20,7 @@ export function TestingPanel() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetchFindingsRepoOptions().then(setRepoOptions).catch(() => setRepoOptions([]));
+    fetchMyTestableRepos().then(setRepoOptions).catch(() => setRepoOptions([]));
   }, []);
 
   async function loadKeys() {

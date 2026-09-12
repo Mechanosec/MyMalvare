@@ -117,6 +117,10 @@ export function fetchFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]> {
   return get<ISecretTypeCount[]>('/findings/secret-type-counts');
 }
 
+export function fetchMyTestableRepos(): Promise<IFindingsRepoOption[]> {
+  return get<IFindingsRepoOption[]>('/repo-authorizations/mine/testable-repos');
+}
+
 export function updateFindingStatus(id: number, status: EFindingStatus): Promise<{ ok: true }> {
   return patch<{ ok: true }>(`/findings/${id}/status`, { status });
 }

@@ -7,7 +7,7 @@ import { TestingPanel } from './testing-panel';
 
 describe('TestingPanel', () => {
   beforeEach(() => {
-    vi.spyOn(apiClient, 'fetchFindingsRepoOptions').mockResolvedValue([
+    vi.spyOn(apiClient, 'fetchMyTestableRepos').mockResolvedValue([
       { repoId: 1, owner: 'acme', name: 'widgets', count: 1 },
     ]);
     vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue({
