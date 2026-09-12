@@ -31,7 +31,8 @@ async function makeRepository(dbFile: string): Promise<{
       id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id INTEGER NOT NULL, owner TEXT NOT NULL,
       name TEXT NOT NULL, file_path TEXT NOT NULL, commit_sha TEXT NOT NULL,
       secret_type TEXT NOT NULL, secret_value TEXT NOT NULL, line_number INTEGER,
-      found_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, context TEXT
+      found_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, context TEXT,
+      status TEXT NOT NULL DEFAULT 'unknown', leak_commits TEXT NOT NULL DEFAULT '[]'
     )
   `);
   return { repo: new PrismaStateRepository(prisma), prisma };
