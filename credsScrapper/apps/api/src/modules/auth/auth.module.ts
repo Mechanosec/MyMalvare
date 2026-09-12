@@ -4,7 +4,7 @@ import { StateRepositoryPort } from '../scanner/application/ports/state-reposito
 import { KeyValidatorPort } from '../scanner/application/ports/key-validator.port';
 import { GithubRepoLookupPort } from '../scanner/application/ports/github-repo-lookup.port';
 import { WorkdirJoinerPort } from '../scanner/application/ports/workdir-joiner.port';
-import { ScanRepositoryUseCase } from '../scanner/application/use-cases/scan-repository.use-case';
+import { JobQueuePort } from '../scanner/application/ports/job-queue.port';
 import { IdentityModule } from '../identity/identity.module';
 import { TokenPort } from '../identity/application/ports/token.port';
 import { provideUseCase } from '../../shared/di/provide-use-case';
@@ -42,7 +42,10 @@ import { RepoAuthorizationsController } from './presentation/repo-authorizations
   controllers: [AuthController, RepoAuthorizationsController],
   providers: [
     { provide: UserRepositoryPort, useClass: PrismaUserRepository },
-    { provide: RepoAuthorizationRepositoryPort, useClass: PrismaRepoAuthorizationRepository },
+    {
+      provide: RepoAuthorizationRepositoryPort,
+      useClass: PrismaRepoAuthorizationRepository,
+    },
     { provide: PasswordHasherPort, useClass: BcryptPasswordHasherAdapter },
     provideUseCase(
       RegisterUserUseCase,
@@ -77,43 +80,62 @@ import { RepoAuthorizationsController } from './presentation/repo-authorizations
     provideUseCase(
       ListMyTestableReposUseCase,
       [RepoAuthorizationRepositoryPort, StateRepositoryPort],
-      (authorizations, state) => new ListMyTestableReposUseCase(authorizations, state),
+      (authorizations, state) =>
+        new ListMyTestableReposUseCase(authorizations, state),
     ),
     provideUseCase(
       GetMySecretTypeCountsUseCase,
       [ListMyTestableReposUseCase, StateRepositoryPort],
-      (listMyTestableRepos, state) => new GetMySecretTypeCountsUseCase(listMyTestableRepos, state),
+      (listMyTestableRepos, state) =>
+        new GetMySecretTypeCountsUseCase(listMyTestableRepos, state),
     ),
     provideUseCase(
       TestRepoFindingsUseCase,
       [RepoAuthorizationRepositoryPort, StateRepositoryPort, KeyValidatorPort],
-      (authorizations, state, validator) => new TestRepoFindingsUseCase(authorizations, state, validator),
+      (authorizations, state, validator) =>
+        new TestRepoFindingsUseCase(authorizations, state, validator),
     ),
     provideUseCase(
       TestFindingUseCase,
       [RepoAuthorizationRepositoryPort, StateRepositoryPort, KeyValidatorPort],
-      (authorizations, state, validator) => new TestFindingUseCase(authorizations, state, validator),
+      (authorizations, state, validator) =>
+        new TestFindingUseCase(authorizations, state, validator),
     ),
     provideUseCase(
       ScanMyRepoUseCase,
-      [RepoAuthorizationRepositoryPort, StateRepositoryPort, GithubRepoLookupPort, ScanRepositoryUseCase, WorkdirJoinerPort],
-      (authorizations, state, githubLookup, scanRepository, workdirJoiner) =>
-        new ScanMyRepoUseCase(authorizations, state, githubLookup, scanRepository, workdirJoiner),
+      [
+        RepoAuthorizationRepositoryPort,
+        StateRepositoryPort,
+        GithubRepoLookupPort,
+        JobQueuePort,
+        WorkdirJoinerPort,
+      ],
+      (authorizations, state, githubLookup, jobQueue, workdirJoiner) =>
+        new ScanMyRepoUseCase(
+          authorizations,
+          state,
+          githubLookup,
+          jobQueue,
+          workdirJoiner,
+        ),
     ),
     provideUseCase(
       GetMyFindingsUseCase,
       [RepoAuthorizationRepositoryPort, StateRepositoryPort],
-      (authorizations, state) => new GetMyFindingsUseCase(authorizations, state),
+      (authorizations, state) =>
+        new GetMyFindingsUseCase(authorizations, state),
     ),
     provideUseCase(
       GetMyScannedReposUseCase,
       [RepoAuthorizationRepositoryPort, StateRepositoryPort],
-      (authorizations, state) => new GetMyScannedReposUseCase(authorizations, state),
+      (authorizations, state) =>
+        new GetMyScannedReposUseCase(authorizations, state),
     ),
     provideUseCase(
       SetMyFindingStatusUseCase,
       [RepoAuthorizationRepositoryPort, StateRepositoryPort],
-      (authorizations, state) => new SetMyFindingStatusUseCase(authorizations, state),
+      (authorizations, state) =>
+        new SetMyFindingStatusUseCase(authorizations, state),
     ),
   ],
 })
