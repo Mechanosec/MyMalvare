@@ -1,4 +1,5 @@
 import { fetchFindings, fetchQueueStatus, fetchScannedRepos } from '../lib/api-client';
+import { AuthProvider } from '../lib/auth-context';
 import { Dashboard } from './dashboard';
 
 export default async function Page() {
@@ -12,10 +13,12 @@ export default async function Page() {
   ]);
 
   return (
-    <Dashboard
-      initialQueueStatus={queueStatus}
-      initialFindingsPage={findingsPage}
-      initialScannedRepos={scannedRepos}
-    />
+    <AuthProvider>
+      <Dashboard
+        initialQueueStatus={queueStatus}
+        initialFindingsPage={findingsPage}
+        initialScannedRepos={scannedRepos}
+      />
+    </AuthProvider>
   );
 }

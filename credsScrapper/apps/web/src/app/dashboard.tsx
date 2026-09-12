@@ -2,12 +2,14 @@
 
 import { useState } from 'react';
 import { FindingsTable } from '../components/findings-table';
+import { LoginForm } from '../components/login-form';
 import { ProgressPanel } from '../components/progress-panel';
 import { ScannedReposTable } from '../components/scanned-repos-table';
 import { ScanControls } from '../components/scan-controls';
 import { StatTile } from '../components/stat-tile';
 import { Tabs } from '../components/tabs';
 import { TestingPanel } from '../components/testing-panel';
+import { useAuth } from '../lib/auth-context';
 import { EScanStatus } from '../lib/constant/scan-status.constant';
 import { IFindingsPage } from '../lib/types/finding.type';
 import { IQueueStatus } from '../lib/types/queue-status.type';
@@ -37,7 +39,13 @@ export function Dashboard({
   initialFindingsPage,
   initialScannedRepos,
 }: IDashboardProps) {
-  const [activeTab, setActiveTab] = useState<(typeof TABS)[number]['id']>('overview');
+  const { user, login, register, logout } = useAuth();
+  const [activeTab, setActiveTab] = useState<string>('overview');
+  const tabs = [
+    ...TABS,
+    ...(user ? [{ id: 'my-repos', label: 'My Repos' } as const] : []),
+    ...(user?.role === 'admin' ? [{ id: 'admin', label: 'Admin' } as const] : []),
+  ];
   // Lazy initializer, not an effect: reading localStorage is a pure
   // (if side-effect-adjacent) computation of the initial value, not a
   // subscription to an external system, so it belongs in useState's
@@ -76,11 +84,27 @@ export function Dashboard({
           />
           <h1 className="text-base font-semibold">credsScrapper</h1>
           <span className="text-sm text-text-dim">GitHub secret scanner</span>
+          <div className="ml-auto flex items-center gap-2 text-sm text-text-dim">
+            {user ? (
+              <>
+                <span>{user.email}</span>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="border border-line bg-surface-2 px-2 py-1 text-xs text-text hover:border-accent"
+                >
+                  Log out
+                </button>
+              </>
+            ) : (
+              <span>Not logged in</span>
+            )}
+          </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-6xl px-6 py-6">
-        <Tabs tabs={TABS} activeId={activeTab} onChange={(id) => setActiveTab(id as typeof activeTab)} />
+        <Tabs tabs={tabs} activeId={activeTab} onChange={(id) => setActiveTab(id)} />
 
         <div className="mt-6 space-y-6">
           {activeTab === 'overview' && (
@@ -124,7 +148,8 @@ export function Dashboard({
             <ScannedReposTable initialRepos={initialScannedRepos} refreshKey={refreshKey} />
           )}
 
-          {activeTab === 'testing' && <TestingPanel />}
+          {activeTab === 'testing' &&
+            (user ? <TestingPanel /> : <LoginForm onLogin={login} onRegister={register} />)}
         </div>
       </div>
     </main>

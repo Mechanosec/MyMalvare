@@ -4,6 +4,7 @@ import { IFindingsPage, IFindingsRepoOption, ISecretTypeCount } from './types/fi
 import { IJobState } from './types/job-progress-event.type';
 import { IQueueStatus } from './types/queue-status.type';
 import { IScannedRepo } from './types/scanned-repo.type';
+import { IAuthResult, IAuthUser } from './types/auth.type';
 
 // Public on purpose: this API has no auth/token yet, so there is nothing
 // sensitive to keep out of the browser bundle (see the frontend design
@@ -11,8 +12,34 @@ import { IScannedRepo } from './types/scanned-repo.type';
 // the day auth is added.
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
+const AUTH_TOKEN_KEY = 'credsscrapper:authToken';
+
+export function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return localStorage.getItem(AUTH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setAuthToken(token: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (token) localStorage.setItem(AUTH_TOKEN_KEY, token);
+    else localStorage.removeItem(AUTH_TOKEN_KEY);
+  } catch {
+    /* per-viewer convenience only - fine if it can't be saved */
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function get<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, { cache: 'no-store' });
+  const response = await fetch(`${API_URL}${path}`, { cache: 'no-store', headers: authHeaders() });
   if (!response.ok) {
     throw new Error(`GET ${path} failed: ${response.status}`);
   }
@@ -22,7 +49,7 @@ async function get<T>(path: string): Promise<T> {
 async function post<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
@@ -34,13 +61,25 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 async function patch<T>(path: string, body: unknown): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   });
   if (!response.ok) {
     throw new Error(`PATCH ${path} failed: ${response.status}`);
   }
   return response.json() as Promise<T>;
+}
+
+export function register(email: string, password: string): Promise<IAuthResult> {
+  return post<IAuthResult>('/auth/register', { email, password });
+}
+
+export function login(email: string, password: string): Promise<IAuthResult> {
+  return post<IAuthResult>('/auth/login', { email, password });
+}
+
+export function getMe(): Promise<IAuthUser> {
+  return get<IAuthUser>('/auth/me');
 }
 
 export function fetchQueueStatus(): Promise<IQueueStatus> {
