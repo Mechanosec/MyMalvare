@@ -55,6 +55,20 @@ const SAMPLES: Array<[ESecretType, string]> = [
     ESecretType.BRAINTREE_ACCESS_TOKEN,
     'access_token$production$1234567890abcdef$' + 'a'.repeat(32),
   ],
+  [ESecretType.OPENSSH_PRIVATE_KEY, '-----BEGIN OPENSSH PRIVATE KEY-----'],
+  [ESecretType.PGP_PRIVATE_KEY_BLOCK, '-----BEGIN PGP PRIVATE KEY BLOCK-----'],
+  [ESecretType.GCP_SERVICE_ACCOUNT_KEY, '"type": "service_account"'],
+  [ESecretType.AZURE_STORAGE_ACCOUNT_KEY, 'AccountKey=' + 'a'.repeat(86) + '=='],
+  [ESecretType.NEW_RELIC_API_KEY, 'NRAK-' + 'A'.repeat(27)],
+  [ESecretType.POSTMAN_API_KEY, 'PMAK-' + 'a'.repeat(24) + '-' + 'b'.repeat(34)],
+  [ESecretType.DATABRICKS_TOKEN, 'dapi' + 'a'.repeat(32)],
+  [ESecretType.NOTION_API_TOKEN, 'secret_' + 'a'.repeat(43)],
+  [ESecretType.TERRAFORM_CLOUD_TOKEN, 'a'.repeat(14) + '.atlasv1.' + 'b'.repeat(64)],
+  [ESecretType.LINEAR_API_KEY, 'lin_api_' + 'a'.repeat(40)],
+  [ESecretType.SENTRY_AUTH_TOKEN, 'sntrys_' + 'a'.repeat(60)],
+  [ESecretType.FIGMA_PERSONAL_ACCESS_TOKEN, 'figd_' + 'a'.repeat(40)],
+  [ESecretType.GRAFANA_API_KEY, 'eyJrIjoi' + 'a'.repeat(60)],
+  [ESecretType.DROPBOX_SHORT_LIVED_TOKEN, 'sl.' + 'a'.repeat(135)],
 ];
 
 function matchAny(text: string): Array<[ESecretType, string]> {
