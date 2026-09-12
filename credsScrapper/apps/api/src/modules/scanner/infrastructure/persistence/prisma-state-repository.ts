@@ -17,6 +17,7 @@ import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type'
 import { PrismaService } from './prisma.service';
 import {
   buildSearchConditions,
+  parseLeakCommits,
   toFindingRecord,
   toRepoRef,
   toScannedRepoRecord,
@@ -37,7 +38,11 @@ export class PrismaStateRepository extends StateRepositoryPort {
     super();
   }
 
-  async addCandidate(repoId: number, owner: string, name: string): Promise<boolean> {
+  async addCandidate(
+    repoId: number,
+    owner: string,
+    name: string,
+  ): Promise<boolean> {
     if (await this.isKnown(repoId)) {
       return false;
     }
@@ -110,7 +115,11 @@ export class PrismaStateRepository extends StateRepositoryPort {
   async markFailed(repoId: number, reason: string): Promise<void> {
     await this.prisma.scannedRepo.update({
       where: { repoId },
-      data: { status: EScanStatus.FAILED, failReason: reason, retryCount: { increment: 1 } },
+      data: {
+        status: EScanStatus.FAILED,
+        failReason: reason,
+        retryCount: { increment: 1 },
+      },
     });
   }
 
@@ -156,7 +165,7 @@ export class PrismaStateRepository extends StateRepositoryPort {
       return;
     }
 
-    const leakCommits = new Set<string>(JSON.parse(existing.leakCommits) as string[]);
+    const leakCommits = new Set<string>(parseLeakCommits(existing.leakCommits));
     leakCommits.add(commitSha);
 
     const isIncomingPathBased = filePath !== '<commit-diff>';
@@ -182,8 +191,13 @@ export class PrismaStateRepository extends StateRepositoryPort {
 
   async getQueueStatus(): Promise<IQueueStatus> {
     const [pendingCandidates, grouped] = await Promise.all([
-      this.prisma.candidate.count({ where: { status: ECandidateStatus.PENDING } }),
-      this.prisma.scannedRepo.groupBy({ by: ['status'], _count: { status: true } }),
+      this.prisma.candidate.count({
+        where: { status: ECandidateStatus.PENDING },
+      }),
+      this.prisma.scannedRepo.groupBy({
+        by: ['status'],
+        _count: { status: true },
+      }),
     ]);
     const scannedByStatus: Partial<Record<EScanStatus, number>> = {};
     for (const row of grouped) {
@@ -194,9 +208,13 @@ export class PrismaStateRepository extends StateRepositoryPort {
 
   async listFindings(filter: IFindingsFilter): Promise<IFindingsPage> {
     const where: Prisma.FindingWhereInput = {
-      secretType: filter.secretTypes?.length ? { in: [...filter.secretTypes] } : undefined,
+      secretType: filter.secretTypes?.length
+        ? { in: [...filter.secretTypes] }
+        : undefined,
       repoId: filter.repoIds?.length ? { in: [...filter.repoIds] } : undefined,
-      status: filter.statuses?.length ? { in: [...filter.statuses] } : undefined,
+      status: filter.statuses?.length
+        ? { in: [...filter.statuses] }
+        : undefined,
       ...(filter.search ? { OR: buildSearchConditions(filter.search) } : {}),
     };
     const [rows, total] = await Promise.all([
@@ -250,7 +268,11 @@ export class PrismaStateRepository extends StateRepositoryPort {
       where: { repoId: { in: rows.map((row) => row.repoId) } },
       _count: { repoId: true },
     });
-    const countByRepoId = new Map(counts.map((row) => [row.repoId, row._count.repoId]));
-    return rows.map((row) => toScannedRepoRecord(row, countByRepoId.get(row.repoId) ?? 0));
+    const countByRepoId = new Map(
+      counts.map((row) => [row.repoId, row._count.repoId]),
+    );
+    return rows.map((row) =>
+      toScannedRepoRecord(row, countByRepoId.get(row.repoId) ?? 0),
+    );
   }
 }
