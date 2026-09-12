@@ -13,6 +13,8 @@ import { ProgressPort } from './application/ports/progress.port';
 import { StateRepositoryPort } from './application/ports/state-repository.port';
 import { WorkdirCleanerPort } from './application/ports/workdir-cleaner.port';
 import { WorkdirJoinerPort } from './application/ports/workdir-joiner.port';
+import { ScanWorkerPort } from './application/ports/scan-worker.port';
+import { PiscinaScanWorkerAdapter } from './infrastructure/workers/piscina-scan-worker.adapter';
 import { DiscoverReposUseCase } from './application/use-cases/discover-repos.use-case';
 import { GetFindingsRepoOptionsUseCase } from './application/use-cases/get-findings-repo-options.use-case';
 import { GetFindingsSecretTypeCountsUseCase } from './application/use-cases/get-findings-secret-type-counts.use-case';
@@ -44,11 +46,17 @@ import { ScanController } from './presentation/scan.controller';
 // into Nest's DI container via provideUseCase.
 @Module({
   imports: [IdentityModule],
-  controllers: [DiscoverController, ScanController, FindingsController, JobsController],
+  controllers: [
+    DiscoverController,
+    ScanController,
+    FindingsController,
+    JobsController,
+  ],
   providers: [
     PrismaService,
     { provide: StateRepositoryPort, useClass: PrismaStateRepository },
     { provide: GitOperationsPort, useClass: GitCliAdapter },
+    { provide: ScanWorkerPort, useClass: PiscinaScanWorkerAdapter },
     { provide: DiscoveryFeedPort, useClass: GhArchiveHttpAdapter },
     { provide: LoggerPort, useClass: NestLoggerAdapter },
     { provide: ProgressPort, useClass: ProgressGateway },
@@ -62,12 +70,18 @@ import { ScanController } from './presentation/scan.controller';
     ),
     provideUseCase(
       ScanRepositoryUseCase,
-      [GitOperationsPort, StateRepositoryPort, LoggerPort, WorkdirCleanerPort],
-      (git, state, logger, cleaner) => new ScanRepositoryUseCase(git, state, logger, cleaner),
+      [ScanWorkerPort, StateRepositoryPort, LoggerPort, WorkdirCleanerPort],
+      (scanWorker, state, logger, cleaner) =>
+        new ScanRepositoryUseCase(scanWorker, state, logger, cleaner),
     ),
     provideUseCase(
       RunScanLoopUseCase,
-      [StateRepositoryPort, ScanRepositoryUseCase, LoggerPort, WorkdirJoinerPort],
+      [
+        StateRepositoryPort,
+        ScanRepositoryUseCase,
+        LoggerPort,
+        WorkdirJoinerPort,
+      ],
       (state, scanRepository, logger, joiner) =>
         new RunScanLoopUseCase(state, scanRepository, logger, joiner),
     ),
