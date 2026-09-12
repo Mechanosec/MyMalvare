@@ -60,3 +60,28 @@ model Finding {
 
   @@map("findings")
 }
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         String   @default("user") // EUserRole: user | admin
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
+
+model RepoAuthorization {
+  id              Int       @id @default(autoincrement())
+  userId          Int       @map("user_id")
+  owner           String
+  name            String
+  note            String?
+  status          String    @default("pending") // ERepoAuthorizationStatus: pending | approved | rejected
+  adminNote       String?   @map("admin_note")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  decidedAt       DateTime? @map("decided_at")
+  decidedByUserId Int?      @map("decided_by_user_id")
+
+  @@map("repo_authorizations")
+}
