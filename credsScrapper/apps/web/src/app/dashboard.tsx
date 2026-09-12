@@ -43,6 +43,25 @@ export function Dashboard({
 }: IDashboardProps) {
   const { user, login, register, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<string>('overview');
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  async function handleLogin(email: string, password: string) {
+    try {
+      setAuthError(null);
+      await login(email, password);
+    } catch {
+      setAuthError('Invalid email or password.');
+    }
+  }
+
+  async function handleRegister(email: string, password: string) {
+    try {
+      setAuthError(null);
+      await register(email, password);
+    } catch {
+      setAuthError('Registration failed — email may already be taken.');
+    }
+  }
   const tabs = [
     ...TABS,
     ...(user ? [{ id: 'my-repos', label: 'My Repos' } as const] : []),
@@ -151,7 +170,11 @@ export function Dashboard({
           )}
 
           {activeTab === 'testing' &&
-            (user ? <TestingPanel /> : <LoginForm onLogin={login} onRegister={register} />)}
+            (user ? (
+              <TestingPanel />
+            ) : (
+              <LoginForm onLogin={handleLogin} onRegister={handleRegister} error={authError} />
+            ))}
 
           {activeTab === 'my-repos' && user && <MyReposPanel />}
 

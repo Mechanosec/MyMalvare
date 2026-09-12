@@ -11,15 +11,17 @@ describe('ListMyTestableReposUseCase', () => {
       ]),
     } as unknown as RepoAuthorizationRepositoryPort;
     const state = {
-      listFindingsRepoOptions: jest.fn().mockResolvedValue([
+      findFindingsRepoOptionsByOwnerName: jest.fn().mockResolvedValue([
         { repoId: 10, owner: 'acme', name: 'widgets', count: 3 },
-        { repoId: 11, owner: 'other', name: 'unrelated', count: 5 },
       ]),
     };
     const useCase = new ListMyTestableReposUseCase(authorizations, state as never);
 
     const result = await useCase.execute(1);
 
+    expect(state.findFindingsRepoOptionsByOwnerName).toHaveBeenCalledWith([
+      { owner: 'Acme', name: 'Widgets' },
+    ]);
     expect(result).toEqual([{ repoId: 10, owner: 'acme', name: 'widgets', count: 3 }]);
   });
 });

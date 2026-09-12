@@ -60,6 +60,11 @@ export abstract class StateRepositoryPort {
   /** Distinct repos that have at least one finding, with their finding count - options for the repo filter dropdown. */
   abstract listFindingsRepoOptions(limit: number): Promise<IFindingsRepoOption[]>;
 
+  /** Repo options (with finding counts) for exactly the given owner/name pairs, case-insensitive match. Returns only pairs that have at least one finding. */
+  abstract findFindingsRepoOptionsByOwnerName(
+    pairs: ReadonlyArray<{ owner: string; name: string }>,
+  ): Promise<IFindingsRepoOption[]>;
+
   /** Finding count per secret type, only for types with at least one finding. */
   abstract listFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]>;
 

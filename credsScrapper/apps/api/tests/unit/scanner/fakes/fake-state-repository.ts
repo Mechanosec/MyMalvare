@@ -203,6 +203,23 @@ export class FakeStateRepository extends StateRepositoryPort {
     return [...counts.values()].slice(0, limit);
   }
 
+  async findFindingsRepoOptionsByOwnerName(
+    pairs: ReadonlyArray<{ owner: string; name: string }>,
+  ): Promise<IFindingsRepoOption[]> {
+    const wanted = new Set(pairs.map((p) => `${p.owner.toLowerCase()}/${p.name.toLowerCase()}`));
+    const counts = new Map<number, IFindingsRepoOption>();
+    for (const f of this.findings) {
+      if (!wanted.has(`${f.owner.toLowerCase()}/${f.name.toLowerCase()}`)) continue;
+      const existing = counts.get(f.repoId);
+      if (existing) {
+        counts.set(f.repoId, { ...existing, count: existing.count + 1 });
+      } else {
+        counts.set(f.repoId, { repoId: f.repoId, owner: f.owner, name: f.name, count: 1 });
+      }
+    }
+    return [...counts.values()];
+  }
+
   async listFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]> {
     const counts = new Map<ESecretType, number>();
     for (const f of this.findings) {

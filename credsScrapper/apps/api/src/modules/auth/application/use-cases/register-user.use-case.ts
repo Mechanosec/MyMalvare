@@ -11,6 +11,9 @@ export class RegisterUserUseCase {
   ) {}
 
   async execute(email: string, plainPassword: string): Promise<{ token: string; user: IAuthenticatedUser } | null> {
+    if (!email?.trim() || !email.includes('@') || !plainPassword || plainPassword.length < 8) {
+      throw new Error('Invalid email or password: email must contain "@" and password must be 8+ characters');
+    }
     const passwordHash = await this.hasher.hash(plainPassword);
     const user = await this.users.createUser(email, passwordHash);
     if (!user) {

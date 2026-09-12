@@ -36,4 +36,15 @@ describe('RegisterUserUseCase', () => {
 
     expect(await useCase.execute('taken@b.com', 'plain-password')).toBeNull();
   });
+
+  it('throws for an invalid email or a too-short password', async () => {
+    const users = { createUser: jest.fn(), findByEmail: jest.fn(), findById: jest.fn() } as unknown as UserRepositoryPort;
+    const hasher = { hash: jest.fn(), compare: jest.fn() } as unknown as PasswordHasherPort;
+    const token = { sign: jest.fn(), verify: jest.fn() } as unknown as TokenPort;
+    const useCase = new RegisterUserUseCase(users, hasher, token);
+
+    await expect(useCase.execute('not-an-email', 'longenough')).rejects.toThrow();
+    await expect(useCase.execute('a@b.com', 'short')).rejects.toThrow();
+    expect(users.createUser).not.toHaveBeenCalled();
+  });
 });

@@ -7,10 +7,10 @@ import { IScannedRepo } from './types/scanned-repo.type';
 import { IAuthResult, IAuthUser } from './types/auth.type';
 import { IRepoAuthorization } from './types/repo-authorization.type';
 
-// Public on purpose: this API has no auth/token yet, so there is nothing
-// sensitive to keep out of the browser bundle (see the frontend design
-// spec's "Deviation from the datatector reference" section). Revisit this
-// the day auth is added.
+// Public on purpose: this is just the base URL the browser talks to, not a
+// secret (see the frontend design spec's "Deviation from the datatector
+// reference" section). The JWT itself is stored in localStorage below and
+// sent as a bearer token, not baked into this constant.
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 const AUTH_TOKEN_KEY = 'credsscrapper:authToken';

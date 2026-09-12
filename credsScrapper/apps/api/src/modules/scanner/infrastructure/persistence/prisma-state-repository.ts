@@ -252,6 +252,27 @@ export class PrismaStateRepository extends StateRepositoryPort {
     }));
   }
 
+  async findFindingsRepoOptionsByOwnerName(
+    pairs: ReadonlyArray<{ owner: string; name: string }>,
+  ): Promise<IFindingsRepoOption[]> {
+    if (pairs.length === 0) {
+      return [];
+    }
+    const wanted = new Set(pairs.map((p) => `${p.owner.toLowerCase()}/${p.name.toLowerCase()}`));
+    const rows = await this.prisma.finding.groupBy({
+      by: ['repoId', 'owner', 'name'],
+      _count: { _all: true },
+    });
+    return rows
+      .filter((row) => wanted.has(`${row.owner.toLowerCase()}/${row.name.toLowerCase()}`))
+      .map((row) => ({
+        repoId: row.repoId,
+        owner: row.owner,
+        name: row.name,
+        count: row._count._all,
+      }));
+  }
+
   async listFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]> {
     const rows = await this.prisma.finding.groupBy({
       by: ['secretType'],

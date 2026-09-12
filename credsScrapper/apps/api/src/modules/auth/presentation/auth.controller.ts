@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { RegisterUserUseCase } from '../application/use-cases/register-user.use-case';
 import { LoginUserUseCase } from '../application/use-cases/login-user.use-case';
@@ -14,7 +14,12 @@ export class AuthController {
 
   @Post('register')
   async register(@Body('email') email: string, @Body('password') password: string) {
-    const result = await this.registerUser.execute(email, password);
+    let result;
+    try {
+      result = await this.registerUser.execute(email, password);
+    } catch (err) {
+      throw new BadRequestException(err instanceof Error ? err.message : 'Invalid email or password');
+    }
     if (!result) {
       throw new UnauthorizedException('Email already registered');
     }

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { SubmitRepoAuthorizationUseCase } from '../application/use-cases/submit-repo-authorization.use-case';
 import { ListMyRepoAuthorizationsUseCase } from '../application/use-cases/list-my-repo-authorizations.use-case';
@@ -65,11 +65,15 @@ export class RepoAuthorizationsController {
     if (!Object.values(ERepoAuthorizationStatus).includes(status as ERepoAuthorizationStatus)) {
       throw new BadRequestException(`Invalid status: ${status}`);
     }
-    return this.decideRepoAuthorization.execute(
+    const result = await this.decideRepoAuthorization.execute(
       Number(id),
       status as ERepoAuthorizationStatus,
       adminNote ?? null,
       req.user.id,
     );
+    if (!result) {
+      throw new NotFoundException(`Repo authorization ${id} not found`);
+    }
+    return result;
   }
 }

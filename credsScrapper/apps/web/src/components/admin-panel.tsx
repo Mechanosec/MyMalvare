@@ -14,7 +14,9 @@ export function AdminPanel() {
   useEffect(refresh, []);
 
   async function decide(id: number, status: 'approved' | 'rejected') {
-    await decideRepoAuthorization(id, status, undefined);
+    const adminNote =
+      status === 'rejected' ? (window.prompt('Optional note for this decision:') ?? undefined) : undefined;
+    await decideRepoAuthorization(id, status, adminNote || undefined);
     refresh();
   }
 
