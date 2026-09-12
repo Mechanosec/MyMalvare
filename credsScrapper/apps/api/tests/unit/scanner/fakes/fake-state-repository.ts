@@ -1,5 +1,6 @@
 import { StateRepositoryPort } from '../../../../src/modules/scanner/application/ports/state-repository.port';
 import { ECandidateStatus } from '../../../../src/modules/scanner/domain/constant/candidate-status.constant';
+import { EFindingStatus } from '../../../../src/modules/scanner/domain/constant/finding-status.constant';
 import { EScanStatus } from '../../../../src/modules/scanner/domain/constant/scan-status.constant';
 import { ESecretType } from '../../../../src/modules/scanner/domain/constant/secret-type.constant';
 import {
@@ -39,6 +40,8 @@ export class FakeStateRepository extends StateRepositoryPort {
     secretValue: string;
     lineNumber: number;
     context: string | null;
+    status: EFindingStatus;
+    leakCommits: string;
   }> = [];
 
   async addCandidate(repoId: number, owner: string, name: string): Promise<boolean> {
@@ -123,6 +126,8 @@ export class FakeStateRepository extends StateRepositoryPort {
       secretValue,
       lineNumber,
       context,
+      status: EFindingStatus.UNKNOWN,
+      leakCommits: '[]',
     });
   }
 
@@ -146,6 +151,7 @@ export class FakeStateRepository extends StateRepositoryPort {
     const matching = this.findings
       .filter((f) => !filter.secretTypes?.length || filter.secretTypes.includes(f.secretType))
       .filter((f) => !filter.repoIds?.length || filter.repoIds.includes(f.repoId))
+      .filter((f) => !filter.statuses?.length || filter.statuses.includes(f.status))
       .filter(
         (f) =>
           !search ||
@@ -153,10 +159,22 @@ export class FakeStateRepository extends StateRepositoryPort {
           f.filePath.toLowerCase().includes(search) ||
           (f.context ?? '').toLowerCase().includes(search),
       )
-      .map((f, i) => ({ id: i, foundAt: new Date(), ...f }));
+      .map((f, i) => {
+        const leakCommits = this.parseLeakCommits(f.leakCommits);
+        return { id: i, foundAt: new Date(), ...f, leakCommits };
+      });
     const offset = filter.offset ?? 0;
     const limit = filter.limit ?? 100;
     return { items: matching.slice(offset, offset + limit), total: matching.length };
+  }
+
+  private parseLeakCommits(raw: string): readonly string[] {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+    } catch {
+      return [];
+    }
   }
 
   async listFindingsRepoOptions(limit: number): Promise<IFindingsRepoOption[]> {
