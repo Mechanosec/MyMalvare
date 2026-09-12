@@ -51,6 +51,9 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
       connection: redisConnection,
       concurrency: SCAN_WORKER_POOL_SIZE,
     });
+    this.worker.on('error', (err) => {
+      console.error('[BullmqJobWorker] Redis connection error:', err);
+    });
   }
 
   private async process(job: Job): Promise<void> {
@@ -73,42 +76,65 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
         processed,
       };
       log.push(event);
-      void job.updateProgress({ message, processed, log });
+      void job.updateProgress({ message, processed, log }).catch(() => {});
       this.progress.emit(event);
     };
 
-    if (job.name === 'discover') {
-      const data = job.data as IDiscoverJobData;
-      const date = data.date ? new Date(data.date) : undefined;
-      processed = await this.discoverRepos.execute(date, onProgress);
-      return;
-    }
+    try {
+      if (job.name === 'discover') {
+        const data = job.data as IDiscoverJobData;
+        const date = data.date ? new Date(data.date) : undefined;
+        processed = await this.discoverRepos.execute(date, onProgress);
+      } else if (job.name === 'scan') {
+        const data = job.data as IScanLoopJobData;
+        processed = await this.runScanLoop.execute({
+          workdirRoot: data.workdirRoot,
+          sourceUrlFn: buildCloneUrl,
+          workers: data.workers,
+          maxRepos: data.maxRepos,
+          staleTimeoutSeconds: data.staleTimeoutSeconds,
+          onProgress,
+        });
+      } else if (job.name === 'scan-repo') {
+        const data = job.data as IScanRepoJobData;
+        await this.scanRepository.execute(
+          data.repoRef,
+          data.cloneSource,
+          data.workdir,
+          (message) => onProgress(message),
+        );
+      } else {
+        throw new Error(`Unknown job name: ${job.name}`);
+      }
 
-    if (job.name === 'scan') {
-      const data = job.data as IScanLoopJobData;
-      processed = await this.runScanLoop.execute({
-        workdirRoot: data.workdirRoot,
-        sourceUrlFn: buildCloneUrl,
-        workers: data.workers,
-        maxRepos: data.maxRepos,
-        staleTimeoutSeconds: data.staleTimeoutSeconds,
-        onProgress,
-      });
-      return;
+      const doneMessage = `${job.name} finished: ${processed} processed`;
+      const doneEvent: IJobProgressEvent = {
+        jobId: job.id!,
+        status: EJobStatus.DONE,
+        message: doneMessage,
+        processed,
+      };
+      log.push(doneEvent);
+      void job
+        .updateProgress({ message: doneMessage, processed, log })
+        .catch(() => {});
+      this.progress.emit(doneEvent);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const failMessage = `${job.name} failed: ${errorMessage}`;
+      const failEvent: IJobProgressEvent = {
+        jobId: job.id!,
+        status: EJobStatus.FAILED,
+        message: failMessage,
+        processed,
+      };
+      log.push(failEvent);
+      void job
+        .updateProgress({ message: failMessage, processed, log })
+        .catch(() => {});
+      this.progress.emit(failEvent);
+      throw err;
     }
-
-    if (job.name === 'scan-repo') {
-      const data = job.data as IScanRepoJobData;
-      await this.scanRepository.execute(
-        data.repoRef,
-        data.cloneSource,
-        data.workdir,
-        (message) => onProgress(message),
-      );
-      return;
-    }
-
-    throw new Error(`Unknown job name: ${job.name}`);
   }
 
   async close(): Promise<void> {

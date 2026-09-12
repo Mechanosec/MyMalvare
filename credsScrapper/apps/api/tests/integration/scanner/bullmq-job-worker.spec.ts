@@ -6,6 +6,7 @@ import { EJobStatus } from '../../../src/modules/scanner/domain/constant/job-sta
 
 class RecordingScanRepository {
   calls: unknown[] = [];
+  shouldReject = false;
   execute = async (
     repoRef: unknown,
     cloneSource: string,
@@ -13,6 +14,9 @@ class RecordingScanRepository {
     onProgress?: (message: string) => void,
   ): Promise<void> => {
     this.calls.push({ repoRef, cloneSource, workdir });
+    if (this.shouldReject) {
+      throw new Error('scan worker crashed');
+    }
     onProgress?.('scan: test/repo - cloning');
     onProgress?.('scan: test/repo - done, 0 findings total');
   };
@@ -100,6 +104,31 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
     const finalState = await queueAdapter.getJob(job.id!);
     expect(finalState?.log.map((e) => e.message)).toContain('scan: test/repo - cloning');
     expect(progress.events.some((e: any) => e.message === 'scan: test/repo - cloning')).toBe(true);
+    expect(progress.events.some((e: any) => e.status === EJobStatus.DONE)).toBe(true);
+  });
+
+  it('emits a FAILED progress event when scan-repo processing rejects', async () => {
+    scanRepository.shouldReject = true;
+    try {
+      const job = await queue.add('scan-repo', {
+        repoRef: { repoId: 2, owner: 'test', name: 'repo2' },
+        cloneSource: 'https://example.com/repo2.git',
+        workdir: 'workdir/repo-2',
+      });
+
+      await waitForStatus(job.id!, EJobStatus.FAILED);
+
+      expect(
+        progress.events.some(
+          (e: any) =>
+            e.status === EJobStatus.FAILED &&
+            typeof e.message === 'string' &&
+            e.message.includes('scan worker crashed'),
+        ),
+      ).toBe(true);
+    } finally {
+      scanRepository.shouldReject = false;
+    }
   });
 
   it('processes a discover job by calling DiscoverReposUseCase.execute', async () => {

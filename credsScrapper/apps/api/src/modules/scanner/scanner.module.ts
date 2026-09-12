@@ -5,7 +5,6 @@ import { AdminGuard } from '../identity/infrastructure/guards/admin.guard';
 import { AdminTestRepoFindingsUseCase } from './application/use-cases/admin-test-repo-findings.use-case';
 import { AdminTestFindingUseCase } from './application/use-cases/admin-test-finding.use-case';
 import { DiscoveryFeedPort } from './application/ports/discovery-feed.port';
-import { GitOperationsPort } from './application/ports/git-operations.port';
 import { GithubRepoLookupPort } from './application/ports/github-repo-lookup.port';
 import { KeyValidatorPort } from './application/ports/key-validator.port';
 import { LoggerPort } from './application/ports/logger.port';
@@ -28,7 +27,6 @@ import { GhArchiveHttpAdapter } from './infrastructure/discovery/gharchive-http-
 import { GithubApiRepoLookupAdapter } from './infrastructure/discovery/github-api-repo-lookup.adapter';
 import { FsWorkdirCleanerAdapter } from './infrastructure/fs/fs-workdir-cleaner.adapter';
 import { FsWorkdirJoinerAdapter } from './infrastructure/fs/fs-workdir-joiner.adapter';
-import { GitCliAdapter } from './infrastructure/git/git-cli-adapter';
 import { JobQueuePort } from './application/ports/job-queue.port';
 import { BullmqJobQueueAdapter } from './infrastructure/jobs/bullmq-job-queue.adapter';
 import { BullmqJobWorker } from './infrastructure/jobs/bullmq-job-worker';
@@ -57,7 +55,6 @@ import { ScanController } from './presentation/scan.controller';
   providers: [
     PrismaService,
     { provide: StateRepositoryPort, useClass: PrismaStateRepository },
-    { provide: GitOperationsPort, useClass: GitCliAdapter },
     { provide: ScanWorkerPort, useClass: PiscinaScanWorkerAdapter },
     { provide: DiscoveryFeedPort, useClass: GhArchiveHttpAdapter },
     { provide: LoggerPort, useClass: NestLoggerAdapter },
@@ -136,7 +133,6 @@ import { ScanController } from './presentation/scan.controller';
     PrismaService,
     KeyValidatorPort,
     GithubRepoLookupPort,
-    ScanRepositoryUseCase,
     WorkdirJoinerPort,
     JobQueuePort,
   ],

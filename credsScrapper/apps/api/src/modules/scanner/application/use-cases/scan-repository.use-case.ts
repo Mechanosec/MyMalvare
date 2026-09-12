@@ -58,6 +58,13 @@ export class ScanRepositoryUseCase {
       } else {
         await this.state.markFailed(repoRef.repoId, result.failReason);
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `scan: ${repoRef.owner}/${repoRef.name} - failed: ${message}`,
+      );
+      onProgress?.(`scan: ${repoRef.owner}/${repoRef.name} - failed: ${message}`);
+      await this.state.markFailed(repoRef.repoId, message);
     } finally {
       await this.workdirCleaner.remove(workdir);
     }

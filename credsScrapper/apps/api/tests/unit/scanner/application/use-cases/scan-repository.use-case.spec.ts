@@ -10,6 +10,7 @@ import { FakeStateRepository } from '../../fakes/fake-state-repository';
 class FakeScanWorker extends ScanWorkerPort {
   events: IScanJobEvent[] = [];
   result: TScanJobResult = { status: 'done', headSha: 'a'.repeat(40) };
+  rejection?: Error;
 
   async run(
     _repoRef: unknown,
@@ -17,6 +18,9 @@ class FakeScanWorker extends ScanWorkerPort {
     _workdir: string,
     onEvent: (event: IScanJobEvent) => void,
   ): Promise<TScanJobResult> {
+    if (this.rejection) {
+      throw this.rejection;
+    }
     for (const event of this.events) {
       onEvent(event);
     }
@@ -81,6 +85,24 @@ describe('ScanRepositoryUseCase', () => {
     await useCase.execute(ref, 'https://example.com/repo.git', 'workdir/repo-1');
 
     expect(state.scanned.get(1)?.status).toBe(EScanStatus.FAILED);
+  });
+
+  it('marks the repo failed and resolves without throwing when the worker rejects', async () => {
+    const worker = new FakeScanWorker();
+    worker.rejection = new Error('worker thread crashed');
+    const state = new FakeStateRepository();
+    const cleaner = new FakeWorkdirCleaner();
+    const useCase = new ScanRepositoryUseCase(worker, state, new FakeLogger(), cleaner);
+    await state.addCandidate(1, 'octocat', 'hello-world');
+    await state.claimNext();
+
+    await expect(
+      useCase.execute(ref, 'https://example.com/repo.git', 'workdir/repo-1'),
+    ).resolves.toBeUndefined();
+
+    expect(state.scanned.get(1)?.status).toBe(EScanStatus.FAILED);
+    expect(state.scanned.get(1)?.failReason).toBe('worker thread crashed');
+    expect(cleaner.removed).toEqual(['workdir/repo-1', 'workdir/repo-1']);
   });
 
   it('cleans the workdir before dispatching and again after', async () => {

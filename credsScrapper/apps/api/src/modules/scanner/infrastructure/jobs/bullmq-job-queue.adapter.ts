@@ -42,6 +42,13 @@ export class BullmqJobQueueAdapter
     connection: redisConnection,
   });
 
+  constructor() {
+    super();
+    this.queue.on('error', (err) => {
+      console.error('[BullmqJobQueueAdapter] Redis connection error:', err);
+    });
+  }
+
   async enqueue(type: string, payload: unknown): Promise<string> {
     const job = await this.queue.add(type, payload);
     if (!job.id) {
