@@ -5,6 +5,7 @@ import { IJobState } from './types/job-progress-event.type';
 import { IQueueStatus } from './types/queue-status.type';
 import { IScannedRepo } from './types/scanned-repo.type';
 import { IAuthResult, IAuthUser } from './types/auth.type';
+import { IRepoAuthorization } from './types/repo-authorization.type';
 
 // Public on purpose: this API has no auth/token yet, so there is nothing
 // sensitive to keep out of the browser bundle (see the frontend design
@@ -139,4 +140,12 @@ export function fetchJob(jobId: string): Promise<IJobState> {
 
 export function fetchScannedRepos(limit = 100): Promise<IScannedRepo[]> {
   return get<IScannedRepo[]>(`/scan/repos?limit=${limit}`);
+}
+
+export function submitRepoAuthorization(owner: string, name: string, note?: string): Promise<IRepoAuthorization> {
+  return post<IRepoAuthorization>('/repo-authorizations', { owner, name, note });
+}
+
+export function fetchMyRepoAuthorizations(): Promise<IRepoAuthorization[]> {
+  return get<IRepoAuthorization[]>('/repo-authorizations/mine');
 }

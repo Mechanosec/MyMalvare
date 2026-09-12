@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { FindingsTable } from '../components/findings-table';
 import { LoginForm } from '../components/login-form';
+import { MyReposPanel } from '../components/my-repos-panel';
 import { ProgressPanel } from '../components/progress-panel';
 import { ScannedReposTable } from '../components/scanned-repos-table';
 import { ScanControls } from '../components/scan-controls';
@@ -150,6 +151,8 @@ export function Dashboard({
 
           {activeTab === 'testing' &&
             (user ? <TestingPanel /> : <LoginForm onLogin={login} onRegister={register} />)}
+
+          {activeTab === 'my-repos' && user && <MyReposPanel />}
         </div>
       </div>
     </main>
