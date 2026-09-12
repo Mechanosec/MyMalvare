@@ -8,6 +8,7 @@ export interface RunScanLoopOptions {
   readonly workdirRoot: string;
   readonly sourceUrlFn: (ref: IRepoRef) => string;
   readonly staleTimeoutSeconds?: number;
+  readonly maxRetries?: number;
   readonly maxRepos?: number;
   readonly workers?: number;
   readonly onProgress?: (message: string, processed: number) => void;
@@ -35,6 +36,7 @@ export class RunScanLoopUseCase {
       workdirRoot,
       sourceUrlFn,
       staleTimeoutSeconds = 3600,
+      maxRetries = 3,
       maxRepos,
       workers = 1,
       onProgress,
@@ -49,6 +51,10 @@ export class RunScanLoopUseCase {
     const requeued = await this.state.requeueStale(staleTimeoutSeconds);
     if (requeued > 0) {
       report(`scan: requeued ${requeued} stale in-progress repos`);
+    }
+    const requeuedFailed = await this.state.requeueFailed(maxRetries);
+    if (requeuedFailed > 0) {
+      report(`scan: requeued ${requeuedFailed} failed repos for retry (max ${maxRetries} attempts)`);
     }
     await this.workdirJoiner.ensureDir(workdirRoot);
 

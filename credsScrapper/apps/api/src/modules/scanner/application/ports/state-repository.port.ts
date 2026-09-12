@@ -32,6 +32,9 @@ export abstract class StateRepositoryPort {
   /** Resets in_progress rows older than timeoutSeconds back to pending. Returns count changed. */
   abstract requeueStale(timeoutSeconds: number): Promise<number>;
 
+  /** Resets failed rows with retryCount < maxRetries back to pending. Returns count changed. */
+  abstract requeueFailed(maxRetries: number): Promise<number>;
+
   abstract addFinding(
     repoId: number,
     owner: string,

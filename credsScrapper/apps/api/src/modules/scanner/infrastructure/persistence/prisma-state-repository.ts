@@ -122,6 +122,14 @@ export class PrismaStateRepository extends StateRepositoryPort {
     return result.count;
   }
 
+  async requeueFailed(maxRetries: number): Promise<number> {
+    const result = await this.prisma.scannedRepo.updateMany({
+      where: { status: EScanStatus.FAILED, retryCount: { lt: maxRetries } },
+      data: { status: EScanStatus.PENDING },
+    });
+    return result.count;
+  }
+
   async addFinding(
     repoId: number,
     owner: string,

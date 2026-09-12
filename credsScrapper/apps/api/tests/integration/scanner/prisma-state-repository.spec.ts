@@ -90,6 +90,26 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
     await prisma.$disconnect();
   });
 
+  it('requeues a failed repo below maxRetries, but not one that has hit it', async () => {
+    const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+    await repo.addCandidate(1, 'octocat', 'repo1');
+    await repo.claimNext();
+    await repo.markFailed(1, 'stdout maxBuffer length exceeded');
+
+    await repo.addCandidate(2, 'octocat', 'repo2');
+    await repo.claimNext();
+    await repo.markFailed(2, 'stdout maxBuffer length exceeded');
+    await prisma.scannedRepo.update({ where: { repoId: 2 }, data: { retryCount: 3 } });
+
+    const requeued = await repo.requeueFailed(3);
+    expect(requeued).toBe(1);
+    expect(await repo.claimNext()).toEqual({ repoId: 1, owner: 'octocat', name: 'repo1' });
+    expect(await repo.claimNext()).toBeNull();
+
+    await prisma.$disconnect();
+  });
+
   it('groups repo options and secret-type counts correctly against a real DB', async () => {
     const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
 

@@ -68,10 +68,15 @@ export class GitCliAdapter extends GitOperationsPort {
   async iterCommitDiffs(
     repoPath: string,
   ): Promise<Array<{ commitSha: string; diffText: string }>> {
+    // ponytail: buffers the whole history diff in memory - the real
+    // ceiling-fix for a repo whose full history still exceeds this is
+    // streaming `git log -p` output (spawn + readline) instead of
+    // buffering it whole, but that's a bigger change than warranted
+    // while 512MB covers everything seen in practice so far.
     const { stdout } = await execFileAsync(
       'git',
       ['-C', repoPath, 'log', '-p', '--full-history'],
-      { maxBuffer: 1024 * 1024 * 100 },
+      { maxBuffer: 1024 * 1024 * 512 },
     );
     const matches = [...stdout.matchAll(COMMIT_HEADER_RE)];
     const diffs: Array<{ commitSha: string; diffText: string }> = [];

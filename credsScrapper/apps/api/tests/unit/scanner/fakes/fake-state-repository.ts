@@ -84,10 +84,12 @@ export class FakeStateRepository extends StateRepositoryPort {
     }
   }
 
-  async markFailed(repoId: number): Promise<void> {
+  async markFailed(repoId: number, reason: string): Promise<void> {
     const row = this.scanned.get(repoId);
     if (row) {
       row.status = EScanStatus.FAILED;
+      row.failReason = reason;
+      row.retryCount = (row.retryCount ?? 0) + 1;
     }
   }
 
@@ -95,6 +97,17 @@ export class FakeStateRepository extends StateRepositoryPort {
     let count = 0;
     for (const row of this.scanned.values()) {
       if (row.status === EScanStatus.IN_PROGRESS) {
+        row.status = EScanStatus.PENDING;
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  async requeueFailed(maxRetries: number): Promise<number> {
+    let count = 0;
+    for (const row of this.scanned.values()) {
+      if (row.status === EScanStatus.FAILED && (row.retryCount ?? 0) < maxRetries) {
         row.status = EScanStatus.PENDING;
         count += 1;
       }

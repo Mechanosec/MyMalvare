@@ -95,6 +95,52 @@ describe('RunScanLoopUseCase', () => {
     expect(secondRun).toBe(0);
   });
 
+  it('retries a failed repo on the next run, up to maxRetries', async () => {
+    const state = new FakeStateRepository();
+    await state.addCandidate(1, 'octocat', 'repo1');
+    await state.claimNext();
+    await state.markFailed(1, 'stdout maxBuffer length exceeded');
+    const scanner = new RecordingScanner(state);
+    const useCase = new RunScanLoopUseCase(
+      state,
+      scanner as never,
+      new FakeLogger(),
+      new FakeWorkdirJoiner(),
+    );
+
+    const processed = await useCase.execute({
+      workdirRoot: 'w',
+      sourceUrlFn: () => 'x',
+      maxRetries: 3,
+    });
+
+    expect(processed).toBe(1);
+    expect(scanner.scanned.map((r) => r.repoId)).toEqual([1]);
+  });
+
+  it('does not retry a failed repo once it has hit maxRetries', async () => {
+    const state = new FakeStateRepository();
+    await state.addCandidate(1, 'octocat', 'repo1');
+    await state.claimNext();
+    await state.markFailed(1, 'stdout maxBuffer length exceeded');
+    await state.markFailed(1, 'stdout maxBuffer length exceeded');
+    const scanner = new RecordingScanner(state);
+    const useCase = new RunScanLoopUseCase(
+      state,
+      scanner as never,
+      new FakeLogger(),
+      new FakeWorkdirJoiner(),
+    );
+
+    const processed = await useCase.execute({
+      workdirRoot: 'w',
+      sourceUrlFn: () => 'x',
+      maxRetries: 2,
+    });
+
+    expect(processed).toBe(0);
+  });
+
   it('forwards per-repo progress messages from the scanner, not just a final count', async () => {
     const state = new FakeStateRepository();
     await state.addCandidate(1, 'octocat', 'repo1');
