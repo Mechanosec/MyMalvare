@@ -210,6 +210,6 @@ export function decideRepoAuthorization(
   return patch<IRepoAuthorization>(`/repo-authorizations/${id}`, { status, adminNote });
 }
 
-export function scanMyRepo(owner: string, name: string): Promise<{ repoId: number }> {
-  return post<{ repoId: number }>('/repo-authorizations/mine/scan-repo', { owner, name });
+export function scanMyRepo(owner: string, name: string): Promise<{ repoId: number; jobId: string }> {
+  return post<{ repoId: number; jobId: string }>('/repo-authorizations/mine/scan-repo', { owner, name });
 }

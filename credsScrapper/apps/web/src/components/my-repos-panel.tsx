@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { fetchMyRepoAuthorizations, scanMyRepo, submitRepoAuthorization } from '../lib/api-client';
 import { IRepoAuthorization } from '../lib/types/repo-authorization.type';
+import { ProgressPanel } from './progress-panel';
 
 const TONE_BY_STATUS: Record<IRepoAuthorization['status'], string> = {
   pending: 'text-warning border-warning/50 bg-warning/10',
@@ -15,23 +16,24 @@ export function MyReposPanel() {
   const [owner, setOwner] = useState('');
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
-  const [scanning, setScanning] = useState<number | null>(null);
-  const [scanMessage, setScanMessage] = useState<{ id: number; text: string } | null>(null);
+  const [scanningRequestId, setScanningRequestId] = useState<number | null>(null);
+  const [scanJobId, setScanJobId] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<{ id: number; text: string } | null>(null);
 
   function refresh() {
     fetchMyRepoAuthorizations().then(setRequests).catch(() => setRequests([]));
   }
 
   async function scan(request: IRepoAuthorization) {
-    setScanning(request.id);
-    setScanMessage(null);
+    setScanningRequestId(request.id);
+    setScanJobId(null);
+    setScanError(null);
     try {
-      const { repoId } = await scanMyRepo(request.owner, request.name);
-      setScanMessage({ id: request.id, text: `Scan complete (repo #${repoId}) — check the Findings tab.` });
+      const { jobId } = await scanMyRepo(request.owner, request.name);
+      setScanJobId(jobId);
     } catch {
-      setScanMessage({ id: request.id, text: 'Scan failed — see server logs for details.' });
-    } finally {
-      setScanning(null);
+      setScanError({ id: request.id, text: 'Failed to start scan — see server logs for details.' });
+      setScanningRequestId(null);
     }
   }
 
@@ -130,28 +132,28 @@ export function MyReposPanel() {
                 <td className="px-3 py-2 text-text-dim">{r.adminNote ?? '—'}</td>
                 <td className="px-3 py-2">
                   {r.status === 'approved' ? (
-                    <div className="flex flex-col items-start gap-1">
-                      <button
-                        type="button"
-                        onClick={() => scan(r)}
-                        disabled={scanning === r.id}
-                        className="shrink-0 whitespace-nowrap border border-accent-dim bg-accent/10 px-3 py-1 text-xs font-medium text-accent hover:bg-accent/20 disabled:opacity-40"
-                      >
-                        {scanning === r.id ? 'Scanning…' : 'Scan'}
-                      </button>
-                      {scanMessage?.id === r.id && (
-                        <span className="max-w-64 text-xs text-text-dim">{scanMessage.text}</span>
-                      )}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => scan(r)}
+                      disabled={scanningRequestId === r.id && scanJobId === null}
+                      className="shrink-0 whitespace-nowrap border border-accent-dim bg-accent/10 px-3 py-1 text-xs font-medium text-accent hover:bg-accent/20 disabled:opacity-40"
+                    >
+                      {scanningRequestId === r.id && scanJobId === null ? 'Starting…' : 'Scan'}
+                    </button>
                   ) : (
                     <span className="text-xs text-text-dim">—</span>
                   )}
+                  {scanError?.id === r.id && <p className="mt-1 text-xs text-critical">{scanError.text}</p>}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {scanningRequestId !== null && (
+        <ProgressPanel key={scanJobId} jobId={scanJobId} />
+      )}
     </div>
   );
 }
