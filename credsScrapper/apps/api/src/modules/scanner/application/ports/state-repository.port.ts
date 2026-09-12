@@ -1,3 +1,4 @@
+import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 import {
   IFindingsFilter,
@@ -43,6 +44,8 @@ export abstract class StateRepositoryPort {
     lineNumber: number,
     context: string | null,
   ): Promise<void>;
+
+  abstract updateFindingStatus(id: number, status: EFindingStatus): Promise<void>;
 
   abstract countFindings(repoId: number): Promise<number>;
 

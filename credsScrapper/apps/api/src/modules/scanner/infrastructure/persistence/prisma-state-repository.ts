@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { StateRepositoryPort } from '../../application/ports/state-repository.port';
 import { ECandidateStatus } from '../../domain/constant/candidate-status.constant';
+import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { EScanStatus } from '../../domain/constant/scan-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 import {
@@ -133,19 +134,46 @@ export class PrismaStateRepository extends StateRepositoryPort {
     lineNumber: number,
     context: string | null,
   ): Promise<void> {
-    await this.prisma.finding.create({
+    const existing = await this.prisma.finding.findFirst({
+      where: { repoId, secretType, secretValue },
+    });
+
+    if (!existing) {
+      await this.prisma.finding.create({
+        data: {
+          repoId,
+          owner,
+          name,
+          filePath,
+          commitSha,
+          secretType,
+          secretValue,
+          lineNumber,
+          context,
+          leakCommits: JSON.stringify([commitSha]),
+        },
+      });
+      return;
+    }
+
+    const leakCommits = new Set<string>(JSON.parse(existing.leakCommits) as string[]);
+    leakCommits.add(commitSha);
+
+    const isIncomingPathBased = filePath !== '<commit-diff>';
+    const isExistingDiffBased = existing.filePath === '<commit-diff>';
+    const shouldPromote = isIncomingPathBased && isExistingDiffBased;
+
+    await this.prisma.finding.update({
+      where: { id: existing.id },
       data: {
-        repoId,
-        owner,
-        name,
-        filePath,
-        commitSha,
-        secretType,
-        secretValue,
-        lineNumber,
-        context,
+        leakCommits: JSON.stringify([...leakCommits]),
+        ...(shouldPromote ? { filePath, commitSha, lineNumber, context } : {}),
       },
     });
+  }
+
+  async updateFindingStatus(id: number, status: EFindingStatus): Promise<void> {
+    await this.prisma.finding.update({ where: { id }, data: { status } });
   }
 
   async countFindings(repoId: number): Promise<number> {
@@ -168,6 +196,7 @@ export class PrismaStateRepository extends StateRepositoryPort {
     const where: Prisma.FindingWhereInput = {
       secretType: filter.secretTypes?.length ? { in: [...filter.secretTypes] } : undefined,
       repoId: filter.repoIds?.length ? { in: [...filter.repoIds] } : undefined,
+      status: filter.statuses?.length ? { in: [...filter.statuses] } : undefined,
       ...(filter.search ? { OR: buildSearchConditions(filter.search) } : {}),
     };
     const [rows, total] = await Promise.all([

@@ -131,6 +131,13 @@ export class FakeStateRepository extends StateRepositoryPort {
     });
   }
 
+  async updateFindingStatus(id: number, status: EFindingStatus): Promise<void> {
+    const row = this.findings[id];
+    if (row) {
+      row.status = status;
+    }
+  }
+
   async countFindings(repoId: number): Promise<number> {
     return this.findings.filter((f) => f.repoId === repoId).length;
   }
@@ -149,19 +156,20 @@ export class FakeStateRepository extends StateRepositoryPort {
   async listFindings(filter: IFindingsFilter): Promise<IFindingsPage> {
     const search = filter.search?.toLowerCase();
     const matching = this.findings
-      .filter((f) => !filter.secretTypes?.length || filter.secretTypes.includes(f.secretType))
-      .filter((f) => !filter.repoIds?.length || filter.repoIds.includes(f.repoId))
-      .filter((f) => !filter.statuses?.length || filter.statuses.includes(f.status))
+      .map((f, id) => ({ f, id }))
+      .filter(({ f }) => !filter.secretTypes?.length || filter.secretTypes.includes(f.secretType))
+      .filter(({ f }) => !filter.repoIds?.length || filter.repoIds.includes(f.repoId))
+      .filter(({ f }) => !filter.statuses?.length || filter.statuses.includes(f.status))
       .filter(
-        (f) =>
+        ({ f }) =>
           !search ||
           `${f.owner}/${f.name}`.toLowerCase().includes(search) ||
           f.filePath.toLowerCase().includes(search) ||
           (f.context ?? '').toLowerCase().includes(search),
       )
-      .map((f, i) => {
+      .map(({ f, id }) => {
         const leakCommits = this.parseLeakCommits(f.leakCommits);
-        return { id: i, foundAt: new Date(), ...f, leakCommits };
+        return { id, foundAt: new Date(), ...f, leakCommits };
       });
     const offset = filter.offset ?? 0;
     const limit = filter.limit ?? 100;
