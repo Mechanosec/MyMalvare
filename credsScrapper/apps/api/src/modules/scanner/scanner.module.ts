@@ -29,7 +29,9 @@ import { GithubApiRepoLookupAdapter } from './infrastructure/discovery/github-ap
 import { FsWorkdirCleanerAdapter } from './infrastructure/fs/fs-workdir-cleaner.adapter';
 import { FsWorkdirJoinerAdapter } from './infrastructure/fs/fs-workdir-joiner.adapter';
 import { GitCliAdapter } from './infrastructure/git/git-cli-adapter';
-import { InMemoryJobRunner } from './infrastructure/jobs/in-memory-job-runner';
+import { JobQueuePort } from './application/ports/job-queue.port';
+import { BullmqJobQueueAdapter } from './infrastructure/jobs/bullmq-job-queue.adapter';
+import { BullmqJobWorker } from './infrastructure/jobs/bullmq-job-worker';
 import { NestLoggerAdapter } from './infrastructure/logging/nest-logger.adapter';
 import { LiveKeyValidatorAdapter } from './infrastructure/validation/live-key-validator.adapter';
 import { PrismaService } from './infrastructure/persistence/prisma.service';
@@ -62,7 +64,8 @@ import { ScanController } from './presentation/scan.controller';
     { provide: ProgressPort, useClass: ProgressGateway },
     { provide: WorkdirCleanerPort, useClass: FsWorkdirCleanerAdapter },
     { provide: WorkdirJoinerPort, useClass: FsWorkdirJoinerAdapter },
-    InMemoryJobRunner,
+    { provide: JobQueuePort, useClass: BullmqJobQueueAdapter },
+    BullmqJobWorker,
     provideUseCase(
       DiscoverReposUseCase,
       [DiscoveryFeedPort, StateRepositoryPort, LoggerPort],
@@ -135,6 +138,7 @@ import { ScanController } from './presentation/scan.controller';
     GithubRepoLookupPort,
     ScanRepositoryUseCase,
     WorkdirJoinerPort,
+    JobQueuePort,
   ],
 })
 export class ScannerModule {}

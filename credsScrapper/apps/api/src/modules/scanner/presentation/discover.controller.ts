@@ -1,8 +1,7 @@
 import { Controller, Post, UseGuards } from '@nestjs/common';
 import { AdminGuard } from '../../identity/infrastructure/guards/admin.guard';
-import { DiscoverReposUseCase } from '../application/use-cases/discover-repos.use-case';
+import { JobQueuePort } from '../application/ports/job-queue.port';
 import { EJobType } from '../domain/constant/job-status.constant';
-import { InMemoryJobRunner } from '../infrastructure/jobs/in-memory-job-runner';
 
 // Admin-only: this crawls the public GH Archive feed at large and queues
 // arbitrary third-party repos - a regular user's scope is limited to
@@ -11,16 +10,11 @@ import { InMemoryJobRunner } from '../infrastructure/jobs/in-memory-job-runner';
 @Controller('discover')
 @UseGuards(AdminGuard)
 export class DiscoverController {
-  constructor(
-    private readonly discoverRepos: DiscoverReposUseCase,
-    private readonly jobRunner: InMemoryJobRunner,
-  ) {}
+  constructor(private readonly jobQueue: JobQueuePort) {}
 
   @Post()
-  start(): { jobId: string } {
-    const jobId = this.jobRunner.start(EJobType.DISCOVER, (onProgress) =>
-      this.discoverRepos.execute(undefined, onProgress),
-    );
+  async start(): Promise<{ jobId: string }> {
+    const jobId = await this.jobQueue.enqueue(EJobType.DISCOVER, {});
     return { jobId };
   }
 }
