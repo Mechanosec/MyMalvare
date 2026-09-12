@@ -1,3 +1,4 @@
+import { EFindingStatus } from '../constant/finding-status.constant';
 import { ESecretType } from '../constant/secret-type.constant';
 
 // Mirrors apps/api's IFindingRecord.
@@ -13,6 +14,8 @@ export interface IFinding {
   readonly lineNumber: number | null;
   readonly context: string | null;
   readonly foundAt: string;
+  readonly status: EFindingStatus;
+  readonly leakCommits: readonly string[];
 }
 
 export interface IFindingsPage {

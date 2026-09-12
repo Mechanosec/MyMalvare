@@ -7,8 +7,10 @@ import {
   fetchFindingsSecretTypeCounts,
   FINDINGS_PAGE_SIZE,
 } from '../lib/api-client';
+import { EFindingStatus } from '../lib/constant/finding-status.constant';
 import { ESecretType } from '../lib/constant/secret-type.constant';
 import { IFinding, IFindingsPage, IFindingsRepoOption, ISecretTypeCount } from '../lib/types/finding.type';
+import { FindingStatusBadge } from './finding-status-badge';
 import { MultiSelect } from './multi-select';
 import { Pagination } from './pagination';
 import { SecretTypeBadge } from './secret-type-badge';
@@ -40,14 +42,16 @@ const FILTER_DEBOUNCE_MS = 300;
 interface ICommittedFilters {
   readonly secretTypes: ESecretType[];
   readonly repoIds: number[];
+  readonly statuses: EFindingStatus[];
   readonly search: string;
 }
 
-const NO_FILTERS: ICommittedFilters = { secretTypes: [], repoIds: [], search: '' };
+const NO_FILTERS: ICommittedFilters = { secretTypes: [], repoIds: [], statuses: [], search: '' };
 
 export function FindingsTable({ initialPage, refreshKey }: IFindingsTableProps) {
   const [secretTypes, setSecretTypes] = useState<ESecretType[]>([]);
   const [repoIds, setRepoIds] = useState<number[]>([]);
+  const [statuses, setStatuses] = useState<EFindingStatus[]>([]);
   const [repoOptions, setRepoOptions] = useState<IFindingsRepoOption[]>([]);
   const [secretTypeCounts, setSecretTypeCounts] = useState<ISecretTypeCount[]>([]);
   const [search, setSearch] = useState('');
@@ -67,16 +71,17 @@ export function FindingsTable({ initialPage, refreshKey }: IFindingsTableProps) 
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setCommitted({ secretTypes, repoIds, search });
+      setCommitted({ secretTypes, repoIds, statuses, search });
       setPage(0);
     }, FILTER_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [secretTypes, repoIds, search]);
+  }, [secretTypes, repoIds, statuses, search]);
 
   useEffect(() => {
     fetchFindings({
       secretTypes: committed.secretTypes.length ? committed.secretTypes : undefined,
       repoIds: committed.repoIds.length ? committed.repoIds : undefined,
+      statuses: committed.statuses.length ? committed.statuses : undefined,
       search: committed.search || undefined,
       offset: page * FINDINGS_PAGE_SIZE,
     })
@@ -134,6 +139,13 @@ export function FindingsTable({ initialPage, refreshKey }: IFindingsTableProps) 
           onChange={setRepoIds}
         />
 
+        <MultiSelect
+          label="Status"
+          options={Object.values(EFindingStatus).map((value) => ({ value, label: value }))}
+          selected={statuses}
+          onChange={setStatuses}
+        />
+
         <input
           type="text"
           value={search}
@@ -165,6 +177,7 @@ export function FindingsTable({ initialPage, refreshKey }: IFindingsTableProps) 
                 <th className="px-3 py-2 font-medium">Secret</th>
                 <th className="px-3 py-2 font-medium">Context</th>
                 <SortableHeader label="Line" sortKey="line" activeKey={sortKey} direction={sortDir} onSort={toggleSort} />
+                <th className="px-3 py-2 font-medium">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -184,6 +197,9 @@ export function FindingsTable({ initialPage, refreshKey }: IFindingsTableProps) 
                   </td>
                   <td className="px-3 py-2 font-mono text-text-dim">{finding.context ?? '—'}</td>
                   <td className="px-3 py-2 font-mono text-text-dim">{finding.lineNumber ?? '—'}</td>
+                  <td className="px-3 py-2">
+                    <FindingStatusBadge status={finding.status} />
+                  </td>
                 </tr>
               ))}
             </tbody>
