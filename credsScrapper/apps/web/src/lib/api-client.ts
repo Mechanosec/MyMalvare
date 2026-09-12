@@ -149,3 +149,15 @@ export function submitRepoAuthorization(owner: string, name: string, note?: stri
 export function fetchMyRepoAuthorizations(): Promise<IRepoAuthorization[]> {
   return get<IRepoAuthorization[]>('/repo-authorizations/mine');
 }
+
+export function fetchAllRepoAuthorizations(status?: string): Promise<IRepoAuthorization[]> {
+  return get<IRepoAuthorization[]>(`/repo-authorizations${status ? `?status=${status}` : ''}`);
+}
+
+export function decideRepoAuthorization(
+  id: number,
+  status: 'approved' | 'rejected',
+  adminNote?: string,
+): Promise<IRepoAuthorization> {
+  return patch<IRepoAuthorization>(`/repo-authorizations/${id}`, { status, adminNote });
+}

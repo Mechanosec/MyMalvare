@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { AdminPanel } from '../components/admin-panel';
 import { FindingsTable } from '../components/findings-table';
 import { LoginForm } from '../components/login-form';
 import { MyReposPanel } from '../components/my-repos-panel';
@@ -153,6 +154,8 @@ export function Dashboard({
             (user ? <TestingPanel /> : <LoginForm onLogin={login} onRegister={register} />)}
 
           {activeTab === 'my-repos' && user && <MyReposPanel />}
+
+          {activeTab === 'admin' && user?.role === 'admin' && <AdminPanel />}
         </div>
       </div>
     </main>
