@@ -15,6 +15,7 @@ export interface IFinding {
   readonly context: string | null;
   readonly foundAt: string;
   readonly status: EFindingStatus;
+  readonly checkedAt: string | null;
   readonly leakCommits: readonly string[];
 }
 

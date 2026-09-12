@@ -1,6 +1,6 @@
 import { EFindingStatus } from './constant/finding-status.constant';
 import { ESecretType } from './constant/secret-type.constant';
-import { IFindingsPage, IFindingsRepoOption, ISecretTypeCount } from './types/finding.type';
+import { IFinding, IFindingsPage, IFindingsRepoOption, ISecretTypeCount } from './types/finding.type';
 import { IJobState } from './types/job-progress-event.type';
 import { IQueueStatus } from './types/queue-status.type';
 import { IScannedRepo } from './types/scanned-repo.type';
@@ -109,24 +109,50 @@ export function fetchFindings(query: IFindingsQuery = {}): Promise<IFindingsPage
   return get<IFindingsPage>(`/findings?${params.toString()}`);
 }
 
-export function fetchFindingsRepoOptions(limit?: number): Promise<IFindingsRepoOption[]> {
-  return get<IFindingsRepoOption[]>(`/findings/repos${limit ? `?limit=${limit}` : ''}`);
+export function fetchFindingsRepoOptions(
+  limit?: number,
+  secretTypes?: ESecretType[],
+): Promise<IFindingsRepoOption[]> {
+  const params = new URLSearchParams();
+  if (limit) params.set('limit', String(limit));
+  if (secretTypes?.length) params.set('secretTypes', secretTypes.join(','));
+  const query = params.toString();
+  return get<IFindingsRepoOption[]>(`/findings/repos${query ? `?${query}` : ''}`);
 }
 
-export function fetchFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]> {
-  return get<ISecretTypeCount[]>('/findings/secret-type-counts');
+export function fetchFindingsSecretTypeCounts(repoId?: number): Promise<ISecretTypeCount[]> {
+  return get<ISecretTypeCount[]>(`/findings/secret-type-counts${repoId !== undefined ? `?repoId=${repoId}` : ''}`);
 }
 
-export function fetchMyTestableRepos(): Promise<IFindingsRepoOption[]> {
-  return get<IFindingsRepoOption[]>('/repo-authorizations/mine/testable-repos');
+export function fetchMyTestableRepos(secretTypes?: ESecretType[]): Promise<IFindingsRepoOption[]> {
+  const query = secretTypes?.length ? `?secretTypes=${secretTypes.join(',')}` : '';
+  return get<IFindingsRepoOption[]>(`/repo-authorizations/mine/testable-repos${query}`);
+}
+
+export function fetchMySecretTypeCounts(repoId: number): Promise<ISecretTypeCount[]> {
+  return get<ISecretTypeCount[]>(`/repo-authorizations/mine/secret-type-counts?repoId=${repoId}`);
 }
 
 export function updateFindingStatus(id: number, status: EFindingStatus): Promise<{ ok: true }> {
   return patch<{ ok: true }>(`/findings/${id}/status`, { status });
 }
 
-export function updateMyFindingStatus(id: number, status: EFindingStatus): Promise<{ ok: true }> {
-  return patch<{ ok: true }>(`/repo-authorizations/mine/findings/${id}/status`, { status });
+export function testMyFinding(id: number): Promise<IFinding> {
+  return post<IFinding>(`/repo-authorizations/mine/test-finding/${id}`);
+}
+
+export function testMyRepoFindings(repoId: number): Promise<IFinding[]> {
+  return post<IFinding[]>(`/repo-authorizations/mine/test-repo/${repoId}`);
+}
+
+// Admin-only, unscoped equivalents - any repo/finding, no RepoAuthorization
+// required. MVP stand-in until scanning+testing runs automatically.
+export function adminTestFinding(id: number): Promise<IFinding> {
+  return post<IFinding>(`/findings/${id}/test`);
+}
+
+export function adminTestRepoFindings(repoId: number): Promise<IFinding[]> {
+  return post<IFinding[]>(`/findings/test-repo/${repoId}`);
 }
 
 export function fetchMyFindings(query: IFindingsQuery = {}): Promise<IFindingsPage> {

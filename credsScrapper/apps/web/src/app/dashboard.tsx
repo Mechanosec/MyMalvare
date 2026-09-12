@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AdminPanel } from '../components/admin-panel';
 import { FindingsTable } from '../components/findings-table';
-import { LoginForm } from '../components/login-form';
+import { LandingPage } from '../components/landing-page';
 import { MyReposPanel } from '../components/my-repos-panel';
 import { ProgressPanel } from '../components/progress-panel';
 import { ScannedReposTable } from '../components/scanned-repos-table';
@@ -11,15 +11,11 @@ import { ScanControls } from '../components/scan-controls';
 import { StatTile } from '../components/stat-tile';
 import { Tabs } from '../components/tabs';
 import { TestingPanel } from '../components/testing-panel';
-import { fetchMyScannedRepos, fetchScannedRepos } from '../lib/api-client';
+import { fetchMyScannedRepos, fetchQueueStatus, fetchScannedRepos } from '../lib/api-client';
 import { useAuth } from '../lib/auth-context';
 import { EScanStatus } from '../lib/constant/scan-status.constant';
 import { IQueueStatus } from '../lib/types/queue-status.type';
 import { IScannedRepo } from '../lib/types/scanned-repo.type';
-
-interface IDashboardProps {
-  readonly initialQueueStatus: IQueueStatus | null;
-}
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
@@ -34,8 +30,8 @@ const TABS = [
 // of showing "No job running" while the scan keeps going server-side.
 const LAST_JOB_ID_KEY = 'credsscrapper:lastJobId';
 
-export function Dashboard({ initialQueueStatus }: IDashboardProps) {
-  const { user, login, register, logout } = useAuth();
+export function Dashboard() {
+  const { user, loading: authLoading, login, register, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -56,6 +52,7 @@ export function Dashboard({ initialQueueStatus }: IDashboardProps) {
       setAuthError('Registration failed — email may already be taken.');
     }
   }
+
   const tabs = [
     ...TABS,
     ...(user ? [{ id: 'my-repos', label: 'My Repos' } as const] : []),
@@ -91,42 +88,50 @@ export function Dashboard({ initialQueueStatus }: IDashboardProps) {
   }
 
   const [scannedRepos, setScannedRepos] = useState<IScannedRepo[]>([]);
+  const [queueStatus, setQueueStatus] = useState<IQueueStatus | null>(null);
 
   useEffect(() => {
     if (!user) {
       setScannedRepos([]);
+      setQueueStatus(null);
       return;
     }
     const fetchRepos = user.role === 'admin' ? fetchScannedRepos : fetchMyScannedRepos;
     fetchRepos().then(setScannedRepos).catch(() => setScannedRepos([]));
+    if (user.role === 'admin') {
+      fetchQueueStatus().then(setQueueStatus).catch(() => setQueueStatus(null));
+    }
   }, [user, refreshKey]);
 
   const totalFindings = scannedRepos.reduce((sum, r) => sum + r.findingsCount, 0);
+
+  // While the stored token is still being verified (getMe() in-flight),
+  // render nothing rather than flashing the landing page for an
+  // already-logged-in user whose session just hasn't resolved yet.
+  if (authLoading) {
+    return null;
+  }
+
+  if (!user) {
+    return <LandingPage onLogin={handleLogin} onRegister={handleRegister} error={authError} />;
+  }
 
   return (
     <main className="min-h-full">
       <header className="border-b border-line px-6 py-4">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
-          <span
-            className={`h-2 w-2 rounded-full ${initialQueueStatus ? 'bg-accent' : 'bg-critical'}`}
-          />
+          <span className="h-2 w-2 rounded-full bg-accent" />
           <h1 className="text-base font-semibold">credsScrapper</h1>
           <span className="text-sm text-text-dim">GitHub secret scanner</span>
           <div className="ml-auto flex items-center gap-2 text-sm text-text-dim">
-            {user ? (
-              <>
-                <span>{user.email}</span>
-                <button
-                  type="button"
-                  onClick={logout}
-                  className="border border-line bg-surface-2 px-2 py-1 text-xs text-text hover:border-accent"
-                >
-                  Log out
-                </button>
-              </>
-            ) : (
-              <span>Not logged in</span>
-            )}
+            <span>{user.email}</span>
+            <button
+              type="button"
+              onClick={logout}
+              className="border border-line bg-surface-2 px-2 py-1 text-xs text-text hover:border-accent"
+            >
+              Log out
+            </button>
           </div>
         </div>
       </header>
@@ -137,33 +142,44 @@ export function Dashboard({ initialQueueStatus }: IDashboardProps) {
         <div className="mt-6 space-y-6">
           {activeTab === 'overview' && (
             <>
-              {initialQueueStatus ? (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-                  <StatTile label="Pending" value={initialQueueStatus.pendingCandidates} />
-                  <StatTile
-                    label="Scanning"
-                    value={initialQueueStatus.scannedByStatus[EScanStatus.IN_PROGRESS] ?? 0}
-                    tone="warning"
-                  />
-                  <StatTile
-                    label="Done"
-                    value={initialQueueStatus.scannedByStatus[EScanStatus.DONE] ?? 0}
-                    tone="accent"
-                  />
-                  <StatTile
-                    label="Failed"
-                    value={initialQueueStatus.scannedByStatus[EScanStatus.FAILED] ?? 0}
-                    tone="critical"
-                  />
-                  <StatTile label="Findings" value={totalFindings} tone={totalFindings > 0 ? 'critical' : 'default'} />
-                </div>
+              {user.role === 'admin' ? (
+                queueStatus ? (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                    <StatTile label="Pending" value={queueStatus.pendingCandidates} />
+                    <StatTile
+                      label="Scanning"
+                      value={queueStatus.scannedByStatus[EScanStatus.IN_PROGRESS] ?? 0}
+                      tone="warning"
+                    />
+                    <StatTile
+                      label="Done"
+                      value={queueStatus.scannedByStatus[EScanStatus.DONE] ?? 0}
+                      tone="accent"
+                    />
+                    <StatTile
+                      label="Failed"
+                      value={queueStatus.scannedByStatus[EScanStatus.FAILED] ?? 0}
+                      tone="critical"
+                    />
+                    <StatTile label="Findings" value={totalFindings} tone={totalFindings > 0 ? 'critical' : 'default'} />
+                  </div>
+                ) : (
+                  <p className="border border-critical/50 bg-critical/10 px-4 py-3 text-sm text-critical">
+                    Could not reach the API at {process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}.
+                  </p>
+                )
               ) : (
-                <p className="border border-critical/50 bg-critical/10 px-4 py-3 text-sm text-critical">
-                  Could not reach the API at {process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}.
-                </p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <StatTile label="Your repos" value={scannedRepos.length} />
+                  <StatTile
+                    label="Your findings"
+                    value={totalFindings}
+                    tone={totalFindings > 0 ? 'critical' : 'default'}
+                  />
+                </div>
               )}
 
-              {user?.role === 'admin' ? (
+              {user.role === 'admin' ? (
                 <>
                   <ScanControls onJobStarted={handleJobStarted} />
                   <ProgressPanel key={jobId} jobId={jobId} />
@@ -177,30 +193,17 @@ export function Dashboard({ initialQueueStatus }: IDashboardProps) {
             </>
           )}
 
-          {activeTab === 'findings' &&
-            (user ? (
-              <FindingsTable isAdmin={user.role === 'admin'} refreshKey={refreshKey} />
-            ) : (
-              <LoginForm onLogin={handleLogin} onRegister={handleRegister} error={authError} />
-            ))}
+          {activeTab === 'findings' && (
+            <FindingsTable isAdmin={user.role === 'admin'} refreshKey={refreshKey} />
+          )}
 
-          {activeTab === 'repositories' &&
-            (user ? (
-              <ScannedReposTable repos={scannedRepos} />
-            ) : (
-              <LoginForm onLogin={handleLogin} onRegister={handleRegister} error={authError} />
-            ))}
+          {activeTab === 'repositories' && <ScannedReposTable repos={scannedRepos} />}
 
-          {activeTab === 'testing' &&
-            (user ? (
-              <TestingPanel />
-            ) : (
-              <LoginForm onLogin={handleLogin} onRegister={handleRegister} error={authError} />
-            ))}
+          {activeTab === 'testing' && <TestingPanel isAdmin={user.role === 'admin'} />}
 
-          {activeTab === 'my-repos' && user && <MyReposPanel />}
+          {activeTab === 'my-repos' && <MyReposPanel />}
 
-          {activeTab === 'admin' && user?.role === 'admin' && <AdminPanel />}
+          {activeTab === 'admin' && user.role === 'admin' && <AdminPanel />}
         </div>
       </div>
     </main>

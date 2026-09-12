@@ -130,17 +130,17 @@ export function MyReposPanel() {
                 <td className="px-3 py-2 text-text-dim">{r.adminNote ?? '—'}</td>
                 <td className="px-3 py-2">
                   {r.status === 'approved' ? (
-                    <div className="flex flex-col gap-1">
+                    <div className="flex flex-col items-start gap-1">
                       <button
                         type="button"
                         onClick={() => scan(r)}
                         disabled={scanning === r.id}
-                        className="border border-line px-2 py-1 text-xs text-text hover:border-accent disabled:opacity-40"
+                        className="shrink-0 whitespace-nowrap border border-accent-dim bg-accent/10 px-3 py-1 text-xs font-medium text-accent hover:bg-accent/20 disabled:opacity-40"
                       >
                         {scanning === r.id ? 'Scanning…' : 'Scan'}
                       </button>
                       {scanMessage?.id === r.id && (
-                        <span className="text-xs text-text-dim">{scanMessage.text}</span>
+                        <span className="max-w-64 text-xs text-text-dim">{scanMessage.text}</span>
                       )}
                     </div>
                   ) : (

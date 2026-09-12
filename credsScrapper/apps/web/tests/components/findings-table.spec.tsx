@@ -19,6 +19,7 @@ const finding: IFinding = {
   context: null,
   foundAt: '2026-09-12T00:00:00.000Z',
   status: EFindingStatus.UNKNOWN,
+  checkedAt: null,
   leakCommits: [],
 };
 

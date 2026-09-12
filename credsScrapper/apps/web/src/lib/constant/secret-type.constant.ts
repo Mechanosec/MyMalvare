@@ -62,3 +62,40 @@ export enum ESecretType {
   DROPBOX_SHORT_LIVED_TOKEN = 'dropbox_short_lived_token',
   GENERIC_HIGH_ENTROPY = 'generic_high_entropy',
 }
+
+// Mirrors the CHECKERS map keys in apps/api's live-key-validator.adapter.ts
+// - the only secret types with a live "is this key still active" check.
+// Testing any other type always resolves to unknown, so the Testing tab
+// only ever offers these.
+export const TESTABLE_SECRET_TYPES: readonly ESecretType[] = [
+  ESecretType.TELEGRAM_BOT_TOKEN,
+  ESecretType.GITHUB_PAT,
+  ESecretType.GITHUB_OAUTH_TOKEN,
+  ESecretType.GITLAB_PAT,
+  ESecretType.NPM_ACCESS_TOKEN,
+  ESecretType.OPENAI_API_KEY,
+  ESecretType.ANTHROPIC_API_KEY,
+  ESecretType.STRIPE_LIVE_SECRET_KEY,
+  ESecretType.STRIPE_TEST_SECRET_KEY,
+  ESecretType.STRIPE_RESTRICTED_KEY,
+  ESecretType.SLACK_TOKEN,
+  ESecretType.DISCORD_BOT_TOKEN,
+  ESecretType.DISCORD_WEBHOOK_URL,
+  ESecretType.SENDGRID_API_KEY,
+  ESecretType.MAILGUN_API_KEY,
+  ESecretType.MAILCHIMP_API_KEY,
+  ESecretType.SQUARE_ACCESS_TOKEN,
+  ESecretType.DIGITALOCEAN_PAT,
+  ESecretType.DIGITALOCEAN_OAUTH_TOKEN,
+  ESecretType.AIRTABLE_API_KEY,
+  ESecretType.NOTION_API_TOKEN,
+  ESecretType.TERRAFORM_CLOUD_TOKEN,
+  ESecretType.LINEAR_API_KEY,
+  ESecretType.SENTRY_AUTH_TOKEN,
+  ESecretType.FIGMA_PERSONAL_ACCESS_TOKEN,
+  ESecretType.NEW_RELIC_API_KEY,
+  ESecretType.POSTMAN_API_KEY,
+  ESecretType.DROPBOX_SHORT_LIVED_TOKEN,
+  ESecretType.FACEBOOK_ACCESS_TOKEN,
+  ESecretType.TWITTER_BEARER_TOKEN,
+];
