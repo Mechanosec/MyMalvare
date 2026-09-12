@@ -1,36 +1,26 @@
-import { GitOperationsPort } from '../../../../../src/modules/scanner/application/ports/git-operations.port';
+import { ScanWorkerPort } from '../../../../../src/modules/scanner/application/ports/scan-worker.port';
 import { WorkdirCleanerPort } from '../../../../../src/modules/scanner/application/ports/workdir-cleaner.port';
 import { ScanRepositoryUseCase } from '../../../../../src/modules/scanner/application/use-cases/scan-repository.use-case';
+import { IScanJobEvent, TScanJobResult } from '../../../../../src/modules/scanner/application/use-cases/run-scan-job.use-case';
+import { ESecretType } from '../../../../../src/modules/scanner/domain/constant/secret-type.constant';
 import { EScanStatus } from '../../../../../src/modules/scanner/domain/constant/scan-status.constant';
 import { FakeLogger } from '../../fakes/fake-logger';
 import { FakeStateRepository } from '../../fakes/fake-state-repository';
 
-class FakeGit extends GitOperationsPort {
-  headSha = 'a'.repeat(40);
-  files: Record<string, string | null> = {};
-  diffs: Array<{ commitSha: string; diffText: string }> = [];
-  cloneShouldFail = false;
+class FakeScanWorker extends ScanWorkerPort {
+  events: IScanJobEvent[] = [];
+  result: TScanJobResult = { status: 'done', headSha: 'a'.repeat(40) };
 
-  async cloneBare(): Promise<void> {
-    if (this.cloneShouldFail) {
-      throw new Error('clone failed');
+  async run(
+    _repoRef: unknown,
+    _cloneSource: string,
+    _workdir: string,
+    onEvent: (event: IScanJobEvent) => void,
+  ): Promise<TScanJobResult> {
+    for (const event of this.events) {
+      onEvent(event);
     }
-  }
-
-  async getHeadCommit(): Promise<string> {
-    return this.headSha;
-  }
-
-  async listFilesAtHead(): Promise<string[]> {
-    return Object.keys(this.files);
-  }
-
-  async readFileAtHead(_repoPath: string, filePath: string): Promise<string | null> {
-    return this.files[filePath];
-  }
-
-  async iterCommitDiffs(): Promise<Array<{ commitSha: string; diffText: string }>> {
-    return this.diffs;
+    return this.result;
   }
 }
 
@@ -42,12 +32,20 @@ class FakeWorkdirCleaner extends WorkdirCleanerPort {
 }
 
 describe('ScanRepositoryUseCase', () => {
-  it('records findings from the working tree and marks the repo done', async () => {
-    const git = new FakeGit();
-    git.files = { 'config.py': "AWS_KEY = 'AKIAABCDEFGH12345678'\n" };
+  const ref = { repoId: 1, owner: 'octocat', name: 'hello-world' };
+
+  it('persists each finding event from the worker and marks the repo done', async () => {
+    const worker = new FakeScanWorker();
+    worker.events = [
+      {
+        type: 'finding',
+        filePath: 'config.py',
+        commitSha: 'a'.repeat(40),
+        finding: { secretType: ESecretType.AWS_ACCESS_KEY_ID, secretValue: 'AKIAABCDEFGH12345678', lineNumber: 1, context: null },
+      },
+    ];
     const state = new FakeStateRepository();
-    const useCase = new ScanRepositoryUseCase(git, state, new FakeLogger(), new FakeWorkdirCleaner());
-    const ref = { repoId: 1, owner: 'octocat', name: 'hello-world' };
+    const useCase = new ScanRepositoryUseCase(worker, state, new FakeLogger(), new FakeWorkdirCleaner());
     await state.addCandidate(1, 'octocat', 'hello-world');
     await state.claimNext();
 
@@ -58,45 +56,25 @@ describe('ScanRepositoryUseCase', () => {
     expect(state.findings[0].secretValue).toBe('AKIAABCDEFGH12345678');
   });
 
-  it('skips a binary file (readFileAtHead returns null) without failing', async () => {
-    const git = new FakeGit();
-    git.files = { 'image.png': null };
+  it('forwards progress events through onProgress', async () => {
+    const worker = new FakeScanWorker();
+    worker.events = [{ type: 'progress', message: 'scan: octocat/hello-world - cloning' }];
     const state = new FakeStateRepository();
-    const useCase = new ScanRepositoryUseCase(git, state, new FakeLogger(), new FakeWorkdirCleaner());
-    const ref = { repoId: 1, owner: 'octocat', name: 'hello-world' };
+    const useCase = new ScanRepositoryUseCase(worker, state, new FakeLogger(), new FakeWorkdirCleaner());
     await state.addCandidate(1, 'octocat', 'hello-world');
     await state.claimNext();
+    const messages: string[] = [];
 
-    await useCase.execute(ref, 'https://example.com/repo.git', 'workdir/repo-1');
+    await useCase.execute(ref, 'https://example.com/repo.git', 'workdir/repo-1', (m) => messages.push(m));
 
-    expect(state.scanned.get(1)?.status).toBe(EScanStatus.DONE);
-    expect(state.findings).toHaveLength(0);
+    expect(messages).toContain('scan: octocat/hello-world - cloning');
   });
 
-  it('skips a test file even when it contains a real-looking secret pattern', async () => {
-    const git = new FakeGit();
-    git.files = {
-      'tests/test_secrets.py': "AWS_KEY = 'AKIAABCDEFGH12345678'\n",
-      'src/config.py': "AWS_KEY = 'AKIAABCDEFGH12345699'\n",
-    };
+  it('marks the repo failed when the worker resolves a failed result', async () => {
+    const worker = new FakeScanWorker();
+    worker.result = { status: 'failed', failReason: 'clone failed' };
     const state = new FakeStateRepository();
-    const useCase = new ScanRepositoryUseCase(git, state, new FakeLogger(), new FakeWorkdirCleaner());
-    const ref = { repoId: 1, owner: 'octocat', name: 'hello-world' };
-    await state.addCandidate(1, 'octocat', 'hello-world');
-    await state.claimNext();
-
-    await useCase.execute(ref, 'https://example.com/repo.git', 'workdir/repo-1');
-
-    expect(state.findings).toHaveLength(1);
-    expect(state.findings[0].filePath).toBe('src/config.py');
-  });
-
-  it('marks the repo failed when cloning throws', async () => {
-    const git = new FakeGit();
-    git.cloneShouldFail = true;
-    const state = new FakeStateRepository();
-    const useCase = new ScanRepositoryUseCase(git, state, new FakeLogger(), new FakeWorkdirCleaner());
-    const ref = { repoId: 1, owner: 'octocat', name: 'hello-world' };
+    const useCase = new ScanRepositoryUseCase(worker, state, new FakeLogger(), new FakeWorkdirCleaner());
     await state.addCandidate(1, 'octocat', 'hello-world');
     await state.claimNext();
 
@@ -105,45 +83,16 @@ describe('ScanRepositoryUseCase', () => {
     expect(state.scanned.get(1)?.status).toBe(EScanStatus.FAILED);
   });
 
-  it('reports each stage of the scan through onProgress, not just the final result', async () => {
-    const git = new FakeGit();
-    git.files = { 'config.py': "AWS_KEY = 'AKIAABCDEFGH12345678'\n" };
+  it('cleans the workdir before dispatching and again after', async () => {
+    const worker = new FakeScanWorker();
     const state = new FakeStateRepository();
-    const useCase = new ScanRepositoryUseCase(git, state, new FakeLogger(), new FakeWorkdirCleaner());
-    const ref = { repoId: 1, owner: 'octocat', name: 'hello-world' };
+    const cleaner = new FakeWorkdirCleaner();
+    const useCase = new ScanRepositoryUseCase(worker, state, new FakeLogger(), cleaner);
     await state.addCandidate(1, 'octocat', 'hello-world');
     await state.claimNext();
-    const messages: string[] = [];
 
-    await useCase.execute(ref, 'https://example.com/repo.git', 'workdir/repo-1', (message) =>
-      messages.push(message),
-    );
+    await useCase.execute(ref, 'https://example.com/repo.git', 'workdir/repo-1');
 
-    expect(messages).toEqual([
-      'scan: octocat/hello-world - cloning',
-      `scan: octocat/hello-world - cloned, head=${git.headSha}, scanning commit history`,
-      'scan: octocat/hello-world - commit history done (0 findings), scanning working tree',
-      'scan: octocat/hello-world - done, 1 findings total',
-    ]);
-  });
-
-  it('reports a failure message through onProgress when cloning throws', async () => {
-    const git = new FakeGit();
-    git.cloneShouldFail = true;
-    const state = new FakeStateRepository();
-    const useCase = new ScanRepositoryUseCase(git, state, new FakeLogger(), new FakeWorkdirCleaner());
-    const ref = { repoId: 1, owner: 'octocat', name: 'hello-world' };
-    await state.addCandidate(1, 'octocat', 'hello-world');
-    await state.claimNext();
-    const messages: string[] = [];
-
-    await useCase.execute(ref, 'https://example.com/repo.git', 'workdir/repo-1', (message) =>
-      messages.push(message),
-    );
-
-    expect(messages).toEqual([
-      'scan: octocat/hello-world - cloning',
-      'scan: octocat/hello-world - failed: clone failed',
-    ]);
+    expect(cleaner.removed).toEqual(['workdir/repo-1', 'workdir/repo-1']);
   });
 });

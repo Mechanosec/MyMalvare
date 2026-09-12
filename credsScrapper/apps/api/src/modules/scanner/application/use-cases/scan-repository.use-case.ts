@@ -1,21 +1,16 @@
-import { scanText } from '../../domain/detection/engine';
-import { isExcludedPath } from '../../domain/detection/path-exclusion';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
-import { GitOperationsPort } from '../ports/git-operations.port';
+import { ScanWorkerPort } from '../ports/scan-worker.port';
 import { LoggerPort } from '../ports/logger.port';
 import { StateRepositoryPort } from '../ports/state-repository.port';
 import { WorkdirCleanerPort } from '../ports/workdir-cleaner.port';
 
-// Ported from credsScrapper/app/scan/orchestrator.py's scan_repository:
-// clone, scan HEAD tree, scan full commit history, record findings, mark
-// done/failed. Binary files are skipped (readFileAtHead returns null)
-// rather than aborting the whole repo scan. Test/spec/e2e/fixture paths
-// are skipped in the HEAD tree scan (see isExcludedPath) - the commit
-// history scan can't apply the same filter since iterCommitDiffs returns
-// a whole commit's diff as one blob with no per-file path.
+// The CPU-heavy work (clone, diff parsing, secret detection) now runs in
+// a worker thread behind ScanWorkerPort (see RunScanJobUseCase /
+// infrastructure/workers) - this class is the main-thread orchestrator:
+// clean the workdir, dispatch, persist whatever comes back, clean again.
 export class ScanRepositoryUseCase {
   constructor(
-    private readonly git: GitOperationsPort,
+    private readonly scanWorker: ScanWorkerPort,
     private readonly state: StateRepositoryPort,
     private readonly logger: LoggerPort,
     private readonly workdirCleaner: WorkdirCleanerPort,
@@ -28,78 +23,41 @@ export class ScanRepositoryUseCase {
     onProgress?: (message: string) => void,
   ): Promise<void> {
     await this.workdirCleaner.remove(workdir);
+    let pendingWrites: Promise<void> = Promise.resolve();
 
-    const report = (message: string) => {
-      this.logger.log(message);
-      onProgress?.(message);
-    };
-
-    report(`scan: ${repoRef.owner}/${repoRef.name} - cloning`);
     try {
-      await this.git.cloneBare(cloneSource, workdir);
-      const headSha = await this.git.getHeadCommit(workdir);
-      report(
-        `scan: ${repoRef.owner}/${repoRef.name} - cloned, head=${headSha}, scanning commit history`,
-      );
-
-      let findingsCount = 0;
-      for (const { commitSha, diffText } of await this.git.iterCommitDiffs(
+      const result = await this.scanWorker.run(
+        repoRef,
+        cloneSource,
         workdir,
-      )) {
-        for (const finding of scanText(diffText)) {
-          await this.state.addFinding(
-            repoRef.repoId,
-            repoRef.owner,
-            repoRef.name,
-            '<commit-diff>',
-            commitSha,
-            finding.secretType,
-            finding.secretValue,
-            finding.lineNumber,
-            finding.context,
+        (event) => {
+          if (event.type === 'progress') {
+            this.logger.log(event.message);
+            onProgress?.(event.message);
+            return;
+          }
+          pendingWrites = pendingWrites.then(() =>
+            this.state.addFinding(
+              repoRef.repoId,
+              repoRef.owner,
+              repoRef.name,
+              event.filePath,
+              event.commitSha,
+              event.finding.secretType,
+              event.finding.secretValue,
+              event.finding.lineNumber,
+              event.finding.context,
+            ),
           );
-          findingsCount += 1;
-        }
-      }
-
-      report(
-        `scan: ${repoRef.owner}/${repoRef.name} - commit history done (${findingsCount} findings), scanning working tree`,
+        },
       );
+      await pendingWrites;
 
-      for (const filePath of await this.git.listFilesAtHead(workdir)) {
-        if (isExcludedPath(filePath)) {
-          continue; // test/spec/e2e/fixture files - noise, not live credentials
-        }
-        const text = await this.git.readFileAtHead(workdir, filePath);
-        if (text === null) {
-          continue; // binary file, not scannable as text
-        }
-        for (const finding of scanText(text)) {
-          await this.state.addFinding(
-            repoRef.repoId,
-            repoRef.owner,
-            repoRef.name,
-            filePath,
-            headSha,
-            finding.secretType,
-            finding.secretValue,
-            finding.lineNumber,
-            finding.context,
-          );
-          findingsCount += 1;
-        }
+      if (result.status === 'done') {
+        await this.state.markDone(repoRef.repoId, result.headSha);
+      } else {
+        await this.state.markFailed(repoRef.repoId, result.failReason);
       }
-
-      await this.state.markDone(repoRef.repoId, headSha);
-      report(
-        `scan: ${repoRef.owner}/${repoRef.name} - done, ${findingsCount} findings total`,
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const failMessage = `scan: ${repoRef.owner}/${repoRef.name} - failed: ${message}`;
-      this.logger.error(failMessage);
-      onProgress?.(failMessage);
-      await this.state.markFailed(repoRef.repoId, message);
     } finally {
       await this.workdirCleaner.remove(workdir);
     }
