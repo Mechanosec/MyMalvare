@@ -93,5 +93,6 @@ import { ScanController } from './presentation/scan.controller';
       (state) => new SetFindingStatusUseCase(state),
     ),
   ],
+  exports: [StateRepositoryPort, PrismaService],
 })
 export class ScannerModule {}
