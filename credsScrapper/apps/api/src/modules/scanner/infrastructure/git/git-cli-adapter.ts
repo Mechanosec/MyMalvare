@@ -25,7 +25,12 @@ export class GitCliAdapter extends GitOperationsPort {
   }
 
   async getHeadCommit(repoPath: string): Promise<string> {
-    const { stdout } = await execFileAsync('git', ['-C', repoPath, 'rev-parse', 'HEAD']);
+    const { stdout } = await execFileAsync('git', [
+      '-C',
+      repoPath,
+      'rev-parse',
+      'HEAD',
+    ]);
     return stdout.trim();
   }
 
@@ -46,7 +51,10 @@ export class GitCliAdapter extends GitOperationsPort {
     return stdout.split('\0').filter((name) => name.length > 0);
   }
 
-  async readFileAtHead(repoPath: string, filePath: string): Promise<string | null> {
+  async readFileAtHead(
+    repoPath: string,
+    filePath: string,
+  ): Promise<string | null> {
     // Read as raw bytes first: file content is arbitrary (unlike git's
     // own text output from other commands), so a binary file - a PNG
     // starting with \x89, a compiled binary, a font - is not valid
@@ -75,7 +83,7 @@ export class GitCliAdapter extends GitOperationsPort {
     // while 512MB covers everything seen in practice so far.
     const { stdout } = await execFileAsync(
       'git',
-      ['-C', repoPath, 'log', '-p', '--full-history'],
+      ['-C', repoPath, 'log', '-p', '--full-history', '--reverse'],
       { maxBuffer: 1024 * 1024 * 512 },
     );
     const matches = [...stdout.matchAll(COMMIT_HEADER_RE)];
@@ -84,7 +92,8 @@ export class GitCliAdapter extends GitOperationsPort {
       const match = matches[i];
       const sha = match[1];
       const start = match.index! + match[0].length;
-      const end = i + 1 < matches.length ? matches[i + 1].index! : stdout.length;
+      const end =
+        i + 1 < matches.length ? matches[i + 1].index! : stdout.length;
       diffs.push({ commitSha: sha, diffText: stdout.slice(start, end) });
     }
     return diffs;

@@ -105,4 +105,31 @@ export const PATTERNS: readonly ISecretPattern[] = [
     secretType: ESecretType.BRAINTREE_ACCESS_TOKEN,
     pattern: /access_token\$production\$[0-9a-z]{16}\$[0-9a-f]{32}/g,
   },
+  // Private keys (specific formats, in addition to the existing generic PRIVATE_KEY_PEM)
+  { secretType: ESecretType.OPENSSH_PRIVATE_KEY, pattern: /-----BEGIN OPENSSH PRIVATE KEY-----/g },
+  { secretType: ESecretType.PGP_PRIVATE_KEY_BLOCK, pattern: /-----BEGIN PGP PRIVATE KEY BLOCK-----/g },
+  // GCP service account key (JSON credentials file)
+  { secretType: ESecretType.GCP_SERVICE_ACCOUNT_KEY, pattern: /"type":\s*"service_account"/g },
+  // Azure Storage connection string
+  { secretType: ESecretType.AZURE_STORAGE_ACCOUNT_KEY, pattern: /AccountKey=[A-Za-z0-9+/]{86}==/g },
+  // New Relic
+  { secretType: ESecretType.NEW_RELIC_API_KEY, pattern: /NRAK-[A-Z0-9]{27}/g },
+  // Postman
+  { secretType: ESecretType.POSTMAN_API_KEY, pattern: /PMAK-[a-f0-9]{24}-[a-f0-9]{34}/g },
+  // Databricks
+  { secretType: ESecretType.DATABRICKS_TOKEN, pattern: /dapi[a-f0-9]{32}/g },
+  // Notion
+  { secretType: ESecretType.NOTION_API_TOKEN, pattern: /secret_[A-Za-z0-9]{43}/g },
+  // Terraform Cloud
+  { secretType: ESecretType.TERRAFORM_CLOUD_TOKEN, pattern: /[A-Za-z0-9]{14}\.atlasv1\.[A-Za-z0-9-_=]{64,}/g },
+  // Linear
+  { secretType: ESecretType.LINEAR_API_KEY, pattern: /lin_api_[A-Za-z0-9]{40}/g },
+  // Sentry
+  { secretType: ESecretType.SENTRY_AUTH_TOKEN, pattern: /sntrys_[A-Za-z0-9+/=_-]{40,200}/g },
+  // Figma
+  { secretType: ESecretType.FIGMA_PERSONAL_ACCESS_TOKEN, pattern: /figd_[A-Za-z0-9_-]{40}/g },
+  // Grafana (base64-encoded {"k":...} blob, no dots - distinct shape from the dot-delimited JWT_TOKEN pattern)
+  { secretType: ESecretType.GRAFANA_API_KEY, pattern: /eyJrIjoi[A-Za-z0-9+/=]{50,300}/g },
+  // Dropbox short-lived token
+  { secretType: ESecretType.DROPBOX_SHORT_LIVED_TOKEN, pattern: /sl\.[A-Za-z0-9_-]{130,152}/g },
 ];

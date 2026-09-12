@@ -38,9 +38,34 @@ export class ScanRepositoryUseCase {
     try {
       await this.git.cloneBare(cloneSource, workdir);
       const headSha = await this.git.getHeadCommit(workdir);
-      report(`scan: ${repoRef.owner}/${repoRef.name} - cloned, head=${headSha}, scanning working tree`);
+      report(
+        `scan: ${repoRef.owner}/${repoRef.name} - cloned, head=${headSha}, scanning commit history`,
+      );
 
       let findingsCount = 0;
+      for (const { commitSha, diffText } of await this.git.iterCommitDiffs(
+        workdir,
+      )) {
+        for (const finding of scanText(diffText)) {
+          await this.state.addFinding(
+            repoRef.repoId,
+            repoRef.owner,
+            repoRef.name,
+            '<commit-diff>',
+            commitSha,
+            finding.secretType,
+            finding.secretValue,
+            finding.lineNumber,
+            finding.context,
+          );
+          findingsCount += 1;
+        }
+      }
+
+      report(
+        `scan: ${repoRef.owner}/${repoRef.name} - commit history done (${findingsCount} findings), scanning working tree`,
+      );
+
       for (const filePath of await this.git.listFilesAtHead(workdir)) {
         if (isExcludedPath(filePath)) {
           continue; // test/spec/e2e/fixture files - noise, not live credentials
@@ -65,29 +90,10 @@ export class ScanRepositoryUseCase {
         }
       }
 
-      report(
-        `scan: ${repoRef.owner}/${repoRef.name} - working tree done (${findingsCount} findings), scanning commit history`,
-      );
-
-      for (const { commitSha, diffText } of await this.git.iterCommitDiffs(workdir)) {
-        for (const finding of scanText(diffText)) {
-          await this.state.addFinding(
-            repoRef.repoId,
-            repoRef.owner,
-            repoRef.name,
-            '<commit-diff>',
-            commitSha,
-            finding.secretType,
-            finding.secretValue,
-            finding.lineNumber,
-            finding.context,
-          );
-          findingsCount += 1;
-        }
-      }
-
       await this.state.markDone(repoRef.repoId, headSha);
-      report(`scan: ${repoRef.owner}/${repoRef.name} - done, ${findingsCount} findings total`);
+      report(
+        `scan: ${repoRef.owner}/${repoRef.name} - done, ${findingsCount} findings total`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const failMessage = `scan: ${repoRef.owner}/${repoRef.name} - failed: ${message}`;

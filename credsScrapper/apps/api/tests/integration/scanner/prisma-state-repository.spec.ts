@@ -31,7 +31,8 @@ async function makeRepository(dbFile: string): Promise<{
       id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id INTEGER NOT NULL, owner TEXT NOT NULL,
       name TEXT NOT NULL, file_path TEXT NOT NULL, commit_sha TEXT NOT NULL,
       secret_type TEXT NOT NULL, secret_value TEXT NOT NULL, line_number INTEGER,
-      found_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, context TEXT
+      found_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, context TEXT,
+      status TEXT NOT NULL DEFAULT 'unknown', leak_commits TEXT NOT NULL DEFAULT '[]'
     )
   `);
   return { repo: new PrismaStateRepository(prisma), prisma };
@@ -113,8 +114,8 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
   it('groups repo options and secret-type counts correctly against a real DB', async () => {
     const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
 
-    await repo.addFinding(1, 'octocat', 'repo1', 'a.py', 'sha', 'AWS_ACCESS_KEY_ID' as never, 'v', 1, null);
-    await repo.addFinding(1, 'octocat', 'repo1', 'b.py', 'sha', 'AWS_ACCESS_KEY_ID' as never, 'v', 1, null);
+    await repo.addFinding(1, 'octocat', 'repo1', 'a.py', 'sha', 'AWS_ACCESS_KEY_ID' as never, 'v1', 1, null);
+    await repo.addFinding(1, 'octocat', 'repo1', 'b.py', 'sha', 'AWS_ACCESS_KEY_ID' as never, 'v2', 1, null);
     await repo.addFinding(2, 'someone', 'repo2', 'c.py', 'sha', 'GITHUB_PAT' as never, 'v', 1, null);
 
     const repoOptions = await repo.listFindingsRepoOptions(10);
@@ -126,5 +127,77 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
     expect(secretTypeCounts).toContainEqual({ secretType: 'GITHUB_PAT', count: 1 });
 
     await prisma.$disconnect();
+  });
+
+  describe('addFinding dedup', () => {
+    it('inserts a fresh row with leakCommits seeded from the first commit', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+      await repo.addFinding(1, 'acme', 'widgets', 'src/config.ts', 'head-sha', 'AWS_ACCESS_KEY_ID' as never, 'AKIAABCDEFGH12345678', 3, null);
+
+      const page = await repo.listFindings({ repoIds: [1] });
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0].leakCommits).toEqual(['head-sha']);
+      expect(page.items[0].filePath).toBe('src/config.ts');
+
+      await prisma.$disconnect();
+    });
+
+    it('promotes a diff-based finding to path-based when the same secret is later found at HEAD', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+      await repo.addFinding(1, 'acme', 'widgets', '<commit-diff>', 'old-sha', 'AWS_ACCESS_KEY_ID' as never, 'AKIAABCDEFGH12345678', 1, null);
+      await repo.addFinding(1, 'acme', 'widgets', 'src/config.ts', 'head-sha', 'AWS_ACCESS_KEY_ID' as never, 'AKIAABCDEFGH12345678', 3, null);
+
+      const page = await repo.listFindings({ repoIds: [1] });
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0].filePath).toBe('src/config.ts');
+      expect(page.items[0].commitSha).toBe('head-sha');
+      expect([...page.items[0].leakCommits].sort()).toEqual(['head-sha', 'old-sha']);
+
+      await prisma.$disconnect();
+    });
+
+    it('does not regress an already path-based finding when a diff-based match for the same secret arrives later', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+      await repo.addFinding(1, 'acme', 'widgets', 'src/config.ts', 'head-sha', 'AWS_ACCESS_KEY_ID' as never, 'AKIAABCDEFGH12345678', 3, null);
+      await repo.addFinding(1, 'acme', 'widgets', '<commit-diff>', 'old-sha', 'AWS_ACCESS_KEY_ID' as never, 'AKIAABCDEFGH12345678', 1, null);
+
+      const page = await repo.listFindings({ repoIds: [1] });
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0].filePath).toBe('src/config.ts');
+      expect([...page.items[0].leakCommits].sort()).toEqual(['head-sha', 'old-sha']);
+
+      await prisma.$disconnect();
+    });
+
+    it('does not merge findings with different secret values', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+      await repo.addFinding(1, 'acme', 'widgets', 'src/config.ts', 'head-sha', 'AWS_ACCESS_KEY_ID' as never, 'AKIAABCDEFGH12345678', 3, null);
+      await repo.addFinding(1, 'acme', 'widgets', 'src/other.ts', 'head-sha', 'AWS_ACCESS_KEY_ID' as never, 'AKIAZZZZZZZZ99999999', 1, null);
+
+      const page = await repo.listFindings({ repoIds: [1] });
+      expect(page.items).toHaveLength(2);
+
+      await prisma.$disconnect();
+    });
+  });
+
+  describe('updateFindingStatus', () => {
+    it('persists the given status', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+      await repo.addFinding(1, 'acme', 'widgets', 'src/config.ts', 'head-sha', 'AWS_ACCESS_KEY_ID' as never, 'AKIAABCDEFGH12345678', 3, null);
+      const [before] = (await repo.listFindings({ repoIds: [1] })).items;
+
+      await repo.updateFindingStatus(before.id, 'valid' as never);
+
+      const [after] = (await repo.listFindings({ repoIds: [1] })).items;
+      expect(after.status).toBe('valid');
+
+      await prisma.$disconnect();
+    });
   });
 });

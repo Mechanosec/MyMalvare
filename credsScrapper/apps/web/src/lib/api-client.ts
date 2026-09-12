@@ -1,3 +1,4 @@
+import { EFindingStatus } from './constant/finding-status.constant';
 import { ESecretType } from './constant/secret-type.constant';
 import { IFindingsPage, IFindingsRepoOption, ISecretTypeCount } from './types/finding.type';
 import { IJobState } from './types/job-progress-event.type';
@@ -30,6 +31,18 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function patch<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new Error(`PATCH ${path} failed: ${response.status}`);
+  }
+  return response.json() as Promise<T>;
+}
+
 export function fetchQueueStatus(): Promise<IQueueStatus> {
   return get<IQueueStatus>('/scan/status');
 }
@@ -37,6 +50,7 @@ export function fetchQueueStatus(): Promise<IQueueStatus> {
 export interface IFindingsQuery {
   secretTypes?: ESecretType[];
   repoIds?: number[];
+  statuses?: EFindingStatus[];
   search?: string;
   limit?: number;
   offset?: number;
@@ -48,6 +62,7 @@ export function fetchFindings(query: IFindingsQuery = {}): Promise<IFindingsPage
   const params = new URLSearchParams();
   if (query.secretTypes?.length) params.set('secretTypes', query.secretTypes.join(','));
   if (query.repoIds?.length) params.set('repoIds', query.repoIds.join(','));
+  if (query.statuses?.length) params.set('statuses', query.statuses.join(','));
   if (query.search) params.set('search', query.search);
   params.set('limit', String(query.limit ?? FINDINGS_PAGE_SIZE));
   params.set('offset', String(query.offset ?? 0));
@@ -60,6 +75,10 @@ export function fetchFindingsRepoOptions(limit?: number): Promise<IFindingsRepoO
 
 export function fetchFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]> {
   return get<ISecretTypeCount[]>('/findings/secret-type-counts');
+}
+
+export function updateFindingStatus(id: number, status: EFindingStatus): Promise<{ ok: true }> {
+  return patch<{ ok: true }>(`/findings/${id}/status`, { status });
 }
 
 export function startDiscover(): Promise<{ jobId: string }> {

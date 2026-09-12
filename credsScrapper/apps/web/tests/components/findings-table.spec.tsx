@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FindingsTable } from '../../src/components/findings-table';
 import * as apiClient from '../../src/lib/api-client';
+import { EFindingStatus } from '../../src/lib/constant/finding-status.constant';
 import { ESecretType } from '../../src/lib/constant/secret-type.constant';
 import { IFinding, IFindingsPage } from '../../src/lib/types/finding.type';
 
@@ -17,6 +18,8 @@ const finding: IFinding = {
   lineNumber: 7,
   context: null,
   foundAt: '2026-09-12T00:00:00.000Z',
+  status: EFindingStatus.UNKNOWN,
+  leakCommits: [],
 };
 
 function page(items: IFinding[], total = items.length): IFindingsPage {
@@ -26,6 +29,7 @@ function page(items: IFinding[], total = items.length): IFindingsPage {
 const NO_FILTER_QUERY = {
   secretTypes: undefined,
   repoIds: undefined,
+  statuses: undefined,
   search: undefined,
   offset: 0,
 };

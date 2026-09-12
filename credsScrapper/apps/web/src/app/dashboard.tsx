@@ -7,6 +7,7 @@ import { ScannedReposTable } from '../components/scanned-repos-table';
 import { ScanControls } from '../components/scan-controls';
 import { StatTile } from '../components/stat-tile';
 import { Tabs } from '../components/tabs';
+import { TestingPanel } from '../components/testing-panel';
 import { EScanStatus } from '../lib/constant/scan-status.constant';
 import { IFindingsPage } from '../lib/types/finding.type';
 import { IQueueStatus } from '../lib/types/queue-status.type';
@@ -22,6 +23,7 @@ const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'findings', label: 'Findings' },
   { id: 'repositories', label: 'Repositories' },
+  { id: 'testing', label: 'Testing' },
 ] as const;
 
 // A viewer's own convenience, not shared state (see the Artifact/browser-
@@ -121,6 +123,8 @@ export function Dashboard({
           {activeTab === 'repositories' && (
             <ScannedReposTable initialRepos={initialScannedRepos} refreshKey={refreshKey} />
           )}
+
+          {activeTab === 'testing' && <TestingPanel />}
         </div>
       </div>
     </main>

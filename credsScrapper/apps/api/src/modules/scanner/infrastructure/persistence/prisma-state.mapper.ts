@@ -4,6 +4,7 @@ import type {
   ScannedRepo as TPrismaScannedRepo,
 } from '@prisma/client';
 import { ECandidateStatus } from '../../domain/constant/candidate-status.constant';
+import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { EScanStatus } from '../../domain/constant/scan-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 import { IFindingRecord } from '../../domain/types/finding-record.type';
@@ -27,6 +28,19 @@ export function toSecretType(raw: string): ESecretType {
   return raw as ESecretType;
 }
 
+export function toFindingStatus(raw: string): EFindingStatus {
+  return raw as EFindingStatus;
+}
+
+export function parseLeakCommits(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 export function toRepoRef(row: { repoId: number; owner: string; name: string }): IRepoRef {
   return { repoId: row.repoId, owner: row.owner, name: row.name };
 }
@@ -44,6 +58,8 @@ export function toFindingRecord(row: TPrismaFinding): IFindingRecord {
     lineNumber: row.lineNumber,
     context: row.context,
     foundAt: row.foundAt,
+    status: toFindingStatus(row.status),
+    leakCommits: parseLeakCommits(row.leakCommits),
   };
 }
 

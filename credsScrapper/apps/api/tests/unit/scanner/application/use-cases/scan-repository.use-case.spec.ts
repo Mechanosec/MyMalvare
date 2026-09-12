@@ -121,8 +121,8 @@ describe('ScanRepositoryUseCase', () => {
 
     expect(messages).toEqual([
       'scan: octocat/hello-world - cloning',
-      `scan: octocat/hello-world - cloned, head=${git.headSha}, scanning working tree`,
-      'scan: octocat/hello-world - working tree done (1 findings), scanning commit history',
+      `scan: octocat/hello-world - cloned, head=${git.headSha}, scanning commit history`,
+      'scan: octocat/hello-world - commit history done (0 findings), scanning working tree',
       'scan: octocat/hello-world - done, 1 findings total',
     ]);
   });

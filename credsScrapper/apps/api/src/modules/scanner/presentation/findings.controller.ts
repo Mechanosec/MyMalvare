@@ -1,7 +1,9 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { SetFindingStatusUseCase } from '../application/use-cases/set-finding-status.use-case';
 import { GetFindingsRepoOptionsUseCase } from '../application/use-cases/get-findings-repo-options.use-case';
 import { GetFindingsSecretTypeCountsUseCase } from '../application/use-cases/get-findings-secret-type-counts.use-case';
 import { GetFindingsUseCase } from '../application/use-cases/get-findings.use-case';
+import { EFindingStatus } from '../domain/constant/finding-status.constant';
 import { ESecretType } from '../domain/constant/secret-type.constant';
 import {
   IFindingsPage,
@@ -19,12 +21,14 @@ export class FindingsController {
     private readonly getFindings: GetFindingsUseCase,
     private readonly getFindingsRepoOptions: GetFindingsRepoOptionsUseCase,
     private readonly getFindingsSecretTypeCounts: GetFindingsSecretTypeCountsUseCase,
+    private readonly setFindingStatus: SetFindingStatusUseCase,
   ) {}
 
   @Get()
   async list(
     @Query('secretTypes') secretTypes?: string,
     @Query('repoIds') repoIds?: string,
+    @Query('statuses') statuses?: string,
     @Query('search') search?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
@@ -32,6 +36,7 @@ export class FindingsController {
     return this.getFindings.execute({
       secretTypes: parseCsv<ESecretType>(secretTypes),
       repoIds: parseCsv(repoIds, Number),
+      statuses: parseCsv<EFindingStatus>(statuses),
       search: search || undefined,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
@@ -46,5 +51,17 @@ export class FindingsController {
   @Get('secret-type-counts')
   async secretTypeCounts(): Promise<ISecretTypeCount[]> {
     return this.getFindingsSecretTypeCounts.execute();
+  }
+
+  @Patch(':id/status')
+  async updateStatus(
+    @Param('id') id: string,
+    @Body('status') status: string,
+  ): Promise<{ ok: true }> {
+    if (!Object.values(EFindingStatus).includes(status as EFindingStatus)) {
+      throw new BadRequestException(`Invalid status: ${status}`);
+    }
+    await this.setFindingStatus.execute(Number(id), status as EFindingStatus);
+    return { ok: true };
   }
 }

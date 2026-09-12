@@ -1,5 +1,6 @@
 import { StateRepositoryPort } from '../../../../src/modules/scanner/application/ports/state-repository.port';
 import { ECandidateStatus } from '../../../../src/modules/scanner/domain/constant/candidate-status.constant';
+import { EFindingStatus } from '../../../../src/modules/scanner/domain/constant/finding-status.constant';
 import { EScanStatus } from '../../../../src/modules/scanner/domain/constant/scan-status.constant';
 import { ESecretType } from '../../../../src/modules/scanner/domain/constant/secret-type.constant';
 import {
@@ -11,6 +12,7 @@ import {
 import { IQueueStatus } from '../../../../src/modules/scanner/domain/types/queue-status.type';
 import { IRepoRef } from '../../../../src/modules/scanner/domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../../../src/modules/scanner/domain/types/scanned-repo-record.type';
+import { parseLeakCommits } from '../../../../src/modules/scanner/infrastructure/persistence/prisma-state.mapper';
 
 interface CandidateRow extends IRepoRef {
   status: ECandidateStatus;
@@ -39,6 +41,8 @@ export class FakeStateRepository extends StateRepositoryPort {
     secretValue: string;
     lineNumber: number;
     context: string | null;
+    status: EFindingStatus;
+    leakCommits: string;
   }> = [];
 
   async addCandidate(repoId: number, owner: string, name: string): Promise<boolean> {
@@ -136,7 +140,16 @@ export class FakeStateRepository extends StateRepositoryPort {
       secretValue,
       lineNumber,
       context,
+      status: EFindingStatus.UNKNOWN,
+      leakCommits: '[]',
     });
+  }
+
+  async updateFindingStatus(id: number, status: EFindingStatus): Promise<void> {
+    const row = this.findings[id];
+    if (row) {
+      row.status = status;
+    }
   }
 
   async countFindings(repoId: number): Promise<number> {
@@ -157,16 +170,21 @@ export class FakeStateRepository extends StateRepositoryPort {
   async listFindings(filter: IFindingsFilter): Promise<IFindingsPage> {
     const search = filter.search?.toLowerCase();
     const matching = this.findings
-      .filter((f) => !filter.secretTypes?.length || filter.secretTypes.includes(f.secretType))
-      .filter((f) => !filter.repoIds?.length || filter.repoIds.includes(f.repoId))
+      .map((f, id) => ({ f, id }))
+      .filter(({ f }) => !filter.secretTypes?.length || filter.secretTypes.includes(f.secretType))
+      .filter(({ f }) => !filter.repoIds?.length || filter.repoIds.includes(f.repoId))
+      .filter(({ f }) => !filter.statuses?.length || filter.statuses.includes(f.status))
       .filter(
-        (f) =>
+        ({ f }) =>
           !search ||
           `${f.owner}/${f.name}`.toLowerCase().includes(search) ||
           f.filePath.toLowerCase().includes(search) ||
           (f.context ?? '').toLowerCase().includes(search),
       )
-      .map((f, i) => ({ id: i, foundAt: new Date(), ...f }));
+      .map(({ f, id }) => {
+        const leakCommits = parseLeakCommits(f.leakCommits);
+        return { id, foundAt: new Date(), ...f, leakCommits };
+      });
     const offset = filter.offset ?? 0;
     const limit = filter.limit ?? 100;
     return { items: matching.slice(offset, offset + limit), total: matching.length };
