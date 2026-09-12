@@ -1,0 +1,60 @@
+import { AdminTestRepoFindingsUseCase } from '../../../../../src/modules/scanner/application/use-cases/admin-test-repo-findings.use-case';
+import { StateRepositoryPort } from '../../../../../src/modules/scanner/application/ports/state-repository.port';
+import { KeyValidatorPort } from '../../../../../src/modules/scanner/application/ports/key-validator.port';
+import { EFindingStatus } from '../../../../../src/modules/scanner/domain/constant/finding-status.constant';
+import { ESecretType } from '../../../../../src/modules/scanner/domain/constant/secret-type.constant';
+
+function makeFinding(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 1,
+    repoId: 10,
+    owner: 'acme',
+    name: 'widgets',
+    filePath: 'a.py',
+    commitSha: 'sha',
+    secretType: ESecretType.TELEGRAM_BOT_TOKEN,
+    secretValue: 'fake-token',
+    lineNumber: 1,
+    context: null,
+    foundAt: new Date(),
+    status: EFindingStatus.UNKNOWN,
+    checkedAt: null,
+    leakCommits: [],
+    ...overrides,
+  };
+}
+
+describe('AdminTestRepoFindingsUseCase', () => {
+  it('validates every finding for the repo and returns the refreshed list, with no authorization check', async () => {
+    const finding = makeFinding();
+    const state = {
+      listFindings: jest
+        .fn()
+        .mockResolvedValueOnce({ items: [finding], total: 1 })
+        .mockResolvedValueOnce({ items: [{ ...finding, status: EFindingStatus.VALID }], total: 1 }),
+      recordTestResult: jest.fn(),
+    } as unknown as StateRepositoryPort;
+    const validator = { validate: jest.fn().mockResolvedValue(EFindingStatus.VALID) } as unknown as KeyValidatorPort;
+    const useCase = new AdminTestRepoFindingsUseCase(state, validator);
+
+    const result = await useCase.execute(10);
+
+    expect(validator.validate).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token');
+    expect(state.recordTestResult).toHaveBeenCalledWith(1, EFindingStatus.VALID);
+    expect(result).toEqual([{ ...finding, status: EFindingStatus.VALID }]);
+  });
+
+  it('is a no-op when the repo has no findings', async () => {
+    const state = {
+      listFindings: jest.fn().mockResolvedValue({ items: [], total: 0 }),
+      recordTestResult: jest.fn(),
+    } as unknown as StateRepositoryPort;
+    const validator = { validate: jest.fn() } as unknown as KeyValidatorPort;
+    const useCase = new AdminTestRepoFindingsUseCase(state, validator);
+
+    const result = await useCase.execute(10);
+
+    expect(result).toEqual([]);
+    expect(validator.validate).not.toHaveBeenCalled();
+  });
+});

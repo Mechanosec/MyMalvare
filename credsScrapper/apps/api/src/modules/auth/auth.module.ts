@@ -22,10 +22,12 @@ import { ListAllRepoAuthorizationsUseCase } from './application/use-cases/list-a
 import { DecideRepoAuthorizationUseCase } from './application/use-cases/decide-repo-authorization.use-case';
 import { ListMyTestableReposUseCase } from './application/use-cases/list-my-testable-repos.use-case';
 import { TestRepoFindingsUseCase } from './application/use-cases/test-repo-findings.use-case';
+import { TestFindingUseCase } from './application/use-cases/test-finding.use-case';
 import { ScanMyRepoUseCase } from './application/use-cases/scan-my-repo.use-case';
 import { GetMyFindingsUseCase } from './application/use-cases/get-my-findings.use-case';
 import { GetMyScannedReposUseCase } from './application/use-cases/get-my-scanned-repos.use-case';
 import { SetMyFindingStatusUseCase } from './application/use-cases/set-my-finding-status.use-case';
+import { GetMySecretTypeCountsUseCase } from './application/use-cases/get-my-secret-type-counts.use-case';
 import { AuthController } from './presentation/auth.controller';
 import { RepoAuthorizationsController } from './presentation/repo-authorizations.controller';
 
@@ -78,9 +80,19 @@ import { RepoAuthorizationsController } from './presentation/repo-authorizations
       (authorizations, state) => new ListMyTestableReposUseCase(authorizations, state),
     ),
     provideUseCase(
+      GetMySecretTypeCountsUseCase,
+      [ListMyTestableReposUseCase, StateRepositoryPort],
+      (listMyTestableRepos, state) => new GetMySecretTypeCountsUseCase(listMyTestableRepos, state),
+    ),
+    provideUseCase(
       TestRepoFindingsUseCase,
       [RepoAuthorizationRepositoryPort, StateRepositoryPort, KeyValidatorPort],
       (authorizations, state, validator) => new TestRepoFindingsUseCase(authorizations, state, validator),
+    ),
+    provideUseCase(
+      TestFindingUseCase,
+      [RepoAuthorizationRepositoryPort, StateRepositoryPort, KeyValidatorPort],
+      (authorizations, state, validator) => new TestFindingUseCase(authorizations, state, validator),
     ),
     provideUseCase(
       ScanMyRepoUseCase,

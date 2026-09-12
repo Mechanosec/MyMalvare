@@ -49,9 +49,18 @@ use-case has to be rewritten.
   a `types/` directory, `I`/`T`-prefixed; a `*.port.ts` is the one
   exception (an abstract class, no prefix, doubles as its own NestJS DI
   token).
-- **Detection is passive, always.** Never add a network call that
-  authenticates as a credential this tool found — format/regex/entropy
-  detection only. See the README's "Guardrails" section.
+- **Detection itself is passive, always.** The scanner
+  (`modules/scanner/domain/detection`) never authenticates with a
+  credential it finds — format/regex/entropy only.
+  **Live key testing is a separate, opt-in feature** the *repo owner*
+  triggers themselves from the Testing tab, exactly once per key/repo
+  action, only for a repo with an admin-approved `RepoAuthorization`.
+  It exists so a user whose keys leaked can find out which are still
+  active and rotate them — see `KeyValidatorPort`/`LiveKeyValidatorAdapter`.
+  Any checker there must stay a single read-only "who am I"-style
+  request (never an action the key's real owner would notice), and
+  must go through that port — never a direct `fetch` from a use-case
+  or controller. See the README's "Guardrails" section.
 - **Findings are stored as plaintext on purpose (MVP tradeoff).** Don't
   "fix" this unilaterally by hashing/masking at the database layer — the
   frontend's reveal-on-click UI is the intended control point. Encryption

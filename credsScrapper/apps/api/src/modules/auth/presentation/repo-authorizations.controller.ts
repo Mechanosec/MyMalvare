@@ -6,10 +6,12 @@ import { ListAllRepoAuthorizationsUseCase } from '../application/use-cases/list-
 import { DecideRepoAuthorizationUseCase } from '../application/use-cases/decide-repo-authorization.use-case';
 import { ListMyTestableReposUseCase } from '../application/use-cases/list-my-testable-repos.use-case';
 import { TestRepoFindingsUseCase } from '../application/use-cases/test-repo-findings.use-case';
+import { TestFindingUseCase } from '../application/use-cases/test-finding.use-case';
 import { ScanMyRepoUseCase } from '../application/use-cases/scan-my-repo.use-case';
 import { GetMyFindingsUseCase } from '../application/use-cases/get-my-findings.use-case';
 import { GetMyScannedReposUseCase } from '../application/use-cases/get-my-scanned-repos.use-case';
 import { SetMyFindingStatusUseCase } from '../application/use-cases/set-my-finding-status.use-case';
+import { GetMySecretTypeCountsUseCase } from '../application/use-cases/get-my-secret-type-counts.use-case';
 import { AuthGuard } from '../../identity/infrastructure/guards/auth.guard';
 import { AdminGuard } from '../../identity/infrastructure/guards/admin.guard';
 import { ERepoAuthorizationStatus } from '../domain/constant/repo-authorization-status.constant';
@@ -32,10 +34,12 @@ export class RepoAuthorizationsController {
     private readonly decideRepoAuthorization: DecideRepoAuthorizationUseCase,
     private readonly listMyTestableRepos: ListMyTestableReposUseCase,
     private readonly testRepoFindings: TestRepoFindingsUseCase,
+    private readonly testFinding: TestFindingUseCase,
     private readonly scanMyRepo: ScanMyRepoUseCase,
     private readonly getMyFindings: GetMyFindingsUseCase,
     private readonly getMyScannedRepos: GetMyScannedReposUseCase,
     private readonly setMyFindingStatus: SetMyFindingStatusUseCase,
+    private readonly getMySecretTypeCounts: GetMySecretTypeCountsUseCase,
   ) {}
 
   @Post()
@@ -82,8 +86,18 @@ export class RepoAuthorizationsController {
 
   @Get('mine/testable-repos')
   @UseGuards(AuthGuard)
-  async testableRepos(@Req() req: TAuthedRequest) {
-    return this.listMyTestableRepos.execute(req.user.id);
+  async testableRepos(@Req() req: TAuthedRequest, @Query('secretTypes') secretTypes?: string) {
+    return this.listMyTestableRepos.execute(req.user.id, parseCsv<ESecretType>(secretTypes));
+  }
+
+  @Get('mine/secret-type-counts')
+  @UseGuards(AuthGuard)
+  async mySecretTypeCounts(@Req() req: TAuthedRequest, @Query('repoId') repoId: string) {
+    const result = await this.getMySecretTypeCounts.execute(req.user.id, Number(repoId));
+    if (result === null) {
+      throw new ForbiddenException('You do not have an approved authorization for this repository');
+    }
+    return result;
   }
 
   @Post('mine/scan-repo')
@@ -122,6 +136,16 @@ export class RepoAuthorizationsController {
     const result = await this.testRepoFindings.execute(req.user.id, Number(repoId));
     if (result === null) {
       throw new ForbiddenException('You do not have an approved authorization for this repository');
+    }
+    return result;
+  }
+
+  @Post('mine/test-finding/:id')
+  @UseGuards(AuthGuard)
+  async testOneFinding(@Req() req: TAuthedRequest, @Param('id') id: string) {
+    const result = await this.testFinding.execute(req.user.id, Number(id));
+    if (result === null) {
+      throw new ForbiddenException('This finding is not in one of your approved repositories');
     }
     return result;
   }

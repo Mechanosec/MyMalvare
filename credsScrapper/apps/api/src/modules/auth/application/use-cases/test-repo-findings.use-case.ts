@@ -35,7 +35,7 @@ export class TestRepoFindingsUseCase {
 
     for (const finding of items) {
       const status = await this.validator.validate(finding.secretType, finding.secretValue);
-      await this.state.updateFindingStatus(finding.id, status);
+      await this.state.recordTestResult(finding.id, status);
     }
 
     return (await this.state.listFindings({ repoIds: [repoId], limit: 1000 })).items;

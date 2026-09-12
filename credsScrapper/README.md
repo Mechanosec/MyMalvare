@@ -19,9 +19,14 @@ explain *why* each piece is shaped the way it is.
 
 ## Guardrails (read before touching detection or scan code)
 
-- **Detection only, never validation-by-use.** The scanner never makes a
-  network call authenticating as a credential it found — no "does this AWS
-  key work" check. Only format/regex/entropy detection.
+- **Detection is passive; live testing is a separate, opt-in step.** The
+  scanner itself never authenticates with a credential it found — only
+  format/regex/entropy detection. Once a repo owner's authorization is
+  admin-approved, the Testing tab lets *that owner* voluntarily run a
+  read-only "is this key still active" check against each of their own
+  findings, so they know what to rotate. That check is gated behind the
+  approved authorization and goes through `KeyValidatorPort` — it is
+  never triggered automatically or for a repo the caller doesn't own.
 - **Findings are stored as plaintext for now** (an explicit MVP tradeoff, not
   an oversight) — `findings.secretValue` in the database is the raw secret.
   Encryption at rest is a known gap before any real/shared use.

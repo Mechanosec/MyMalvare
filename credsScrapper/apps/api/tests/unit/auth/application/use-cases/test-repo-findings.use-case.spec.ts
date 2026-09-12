@@ -20,6 +20,7 @@ function makeFinding(overrides: Partial<Record<string, unknown>> = {}) {
     context: null,
     foundAt: new Date(),
     status: EFindingStatus.UNKNOWN,
+    checkedAt: null,
     leakCommits: ['sha'],
     ...overrides,
   };
@@ -53,7 +54,7 @@ describe('TestRepoFindingsUseCase', () => {
         .fn()
         .mockResolvedValueOnce({ items: [finding], total: 1 })
         .mockResolvedValueOnce({ items: [{ ...finding, status: EFindingStatus.VALID }], total: 1 }),
-      updateFindingStatus: jest.fn(),
+      recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
     const authorizations = {
       listByUser: jest.fn().mockResolvedValue([
@@ -66,7 +67,7 @@ describe('TestRepoFindingsUseCase', () => {
     const result = await useCase.execute(1, 10);
 
     expect(validator.validate).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token');
-    expect(state.updateFindingStatus).toHaveBeenCalledWith(1, EFindingStatus.VALID);
+    expect(state.recordTestResult).toHaveBeenCalledWith(1, EFindingStatus.VALID);
     expect(result).toEqual([{ ...finding, status: EFindingStatus.VALID }]);
   });
 

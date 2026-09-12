@@ -48,7 +48,11 @@ export class ScanController {
     return { jobId };
   }
 
+  // Admin-only: aggregate counts still reveal the scale of the shared
+  // discovery queue (third-party repos), which the closed-system design
+  // keeps out of unauthenticated/non-admin view entirely.
   @Get('status')
+  @UseGuards(AdminGuard)
   async status(): Promise<IQueueStatus> {
     return this.getScanStatus.execute();
   }

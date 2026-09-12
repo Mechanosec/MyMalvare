@@ -1,12 +1,26 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { AdminGuard } from '../../identity/infrastructure/guards/admin.guard';
 import { SetFindingStatusUseCase } from '../application/use-cases/set-finding-status.use-case';
+import { AdminTestRepoFindingsUseCase } from '../application/use-cases/admin-test-repo-findings.use-case';
+import { AdminTestFindingUseCase } from '../application/use-cases/admin-test-finding.use-case';
 import { GetFindingsRepoOptionsUseCase } from '../application/use-cases/get-findings-repo-options.use-case';
 import { GetFindingsSecretTypeCountsUseCase } from '../application/use-cases/get-findings-secret-type-counts.use-case';
 import { GetFindingsUseCase } from '../application/use-cases/get-findings.use-case';
 import { EFindingStatus } from '../domain/constant/finding-status.constant';
 import { ESecretType } from '../domain/constant/secret-type.constant';
 import {
+  IFindingRecord,
   IFindingsPage,
   IFindingsRepoOption,
   ISecretTypeCount,
@@ -28,6 +42,8 @@ export class FindingsController {
     private readonly getFindingsRepoOptions: GetFindingsRepoOptionsUseCase,
     private readonly getFindingsSecretTypeCounts: GetFindingsSecretTypeCountsUseCase,
     private readonly setFindingStatus: SetFindingStatusUseCase,
+    private readonly adminTestRepoFindings: AdminTestRepoFindingsUseCase,
+    private readonly adminTestFinding: AdminTestFindingUseCase,
   ) {}
 
   @Get()
@@ -50,13 +66,16 @@ export class FindingsController {
   }
 
   @Get('repos')
-  async repoOptions(@Query('limit') limit?: string): Promise<IFindingsRepoOption[]> {
-    return this.getFindingsRepoOptions.execute(limit ? Number(limit) : undefined);
+  async repoOptions(
+    @Query('limit') limit?: string,
+    @Query('secretTypes') secretTypes?: string,
+  ): Promise<IFindingsRepoOption[]> {
+    return this.getFindingsRepoOptions.execute(limit ? Number(limit) : undefined, parseCsv<ESecretType>(secretTypes));
   }
 
   @Get('secret-type-counts')
-  async secretTypeCounts(): Promise<ISecretTypeCount[]> {
-    return this.getFindingsSecretTypeCounts.execute();
+  async secretTypeCounts(@Query('repoId') repoId?: string): Promise<ISecretTypeCount[]> {
+    return this.getFindingsSecretTypeCounts.execute(repoId ? Number(repoId) : undefined);
   }
 
   @Patch(':id/status')
@@ -69,5 +88,19 @@ export class FindingsController {
     }
     await this.setFindingStatus.execute(Number(id), status as EFindingStatus);
     return { ok: true };
+  }
+
+  @Post('test-repo/:repoId')
+  async testRepo(@Param('repoId') repoId: string): Promise<readonly IFindingRecord[]> {
+    return this.adminTestRepoFindings.execute(Number(repoId));
+  }
+
+  @Post(':id/test')
+  async testOne(@Param('id') id: string): Promise<IFindingRecord> {
+    const result = await this.adminTestFinding.execute(Number(id));
+    if (!result) {
+      throw new NotFoundException(`Finding ${id} not found`);
+    }
+    return result;
   }
 }

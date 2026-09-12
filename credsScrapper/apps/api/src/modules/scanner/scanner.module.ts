@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { provideUseCase } from '../../shared/di/provide-use-case';
 import { IdentityModule } from '../identity/identity.module';
 import { AdminGuard } from '../identity/infrastructure/guards/admin.guard';
+import { AdminTestRepoFindingsUseCase } from './application/use-cases/admin-test-repo-findings.use-case';
+import { AdminTestFindingUseCase } from './application/use-cases/admin-test-finding.use-case';
 import { DiscoveryFeedPort } from './application/ports/discovery-feed.port';
 import { GitOperationsPort } from './application/ports/git-operations.port';
 import { GithubRepoLookupPort } from './application/ports/github-repo-lookup.port';
@@ -98,6 +100,16 @@ import { ScanController } from './presentation/scan.controller';
       SetFindingStatusUseCase,
       [StateRepositoryPort],
       (state) => new SetFindingStatusUseCase(state),
+    ),
+    provideUseCase(
+      AdminTestRepoFindingsUseCase,
+      [StateRepositoryPort, KeyValidatorPort],
+      (state, validator) => new AdminTestRepoFindingsUseCase(state, validator),
+    ),
+    provideUseCase(
+      AdminTestFindingUseCase,
+      [StateRepositoryPort, KeyValidatorPort],
+      (state, validator) => new AdminTestFindingUseCase(state, validator),
     ),
     { provide: KeyValidatorPort, useClass: LiveKeyValidatorAdapter },
     { provide: GithubRepoLookupPort, useClass: GithubApiRepoLookupAdapter },

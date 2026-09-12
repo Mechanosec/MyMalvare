@@ -1,6 +1,7 @@
 import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 import {
+  IFindingRecord,
   IFindingsFilter,
   IFindingsPage,
   IFindingsRepoOption,
@@ -58,6 +59,9 @@ export abstract class StateRepositoryPort {
 
   abstract updateFindingStatus(id: number, status: EFindingStatus): Promise<void>;
 
+  /** Same as updateFindingStatus, but also stamps checkedAt - use for a live key-validation result, never a manual mark. */
+  abstract recordTestResult(id: number, status: EFindingStatus): Promise<void>;
+
   abstract countFindings(repoId: number): Promise<number>;
 
   abstract getQueueStatus(): Promise<IQueueStatus>;
@@ -65,16 +69,29 @@ export abstract class StateRepositoryPort {
   /** total counts every row matching the filter, ignoring limit/offset - what pagination needs. */
   abstract listFindings(filter: IFindingsFilter): Promise<IFindingsPage>;
 
-  /** Distinct repos that have at least one finding, with their finding count - options for the repo filter dropdown. */
-  abstract listFindingsRepoOptions(limit: number): Promise<IFindingsRepoOption[]>;
+  /** A single finding by its id, or null if it doesn't exist - an O(1) lookup, unlike paging through listFindings to find one row by id. */
+  abstract getFindingById(id: number): Promise<IFindingRecord | null>;
 
-  /** Repo options (with finding counts) for exactly the given owner/name pairs, case-insensitive match. Returns only pairs that have at least one finding. */
+  /**
+   * Distinct repos that have at least one finding, with their finding
+   * count - options for the repo filter dropdown. When secretTypes is
+   * given, both the count and which repos even appear are scoped to
+   * findings of those types only (e.g. the Testing tab only cares about
+   * repos with at least one live-testable finding).
+   */
+  abstract listFindingsRepoOptions(
+    limit: number,
+    secretTypes?: readonly ESecretType[],
+  ): Promise<IFindingsRepoOption[]>;
+
+  /** Repo options (with finding counts) for exactly the given owner/name pairs, case-insensitive match. Returns only pairs that have at least one finding (matching secretTypes, if given). */
   abstract findFindingsRepoOptionsByOwnerName(
     pairs: ReadonlyArray<{ owner: string; name: string }>,
+    secretTypes?: readonly ESecretType[],
   ): Promise<IFindingsRepoOption[]>;
 
   /** Finding count per secret type, only for types with at least one finding. */
-  abstract listFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]>;
+  abstract listFindingsSecretTypeCounts(repoId?: number): Promise<ISecretTypeCount[]>;
 
   /** Most recently scanned repos first, newest attempt (started/scanned) on top. */
   abstract listScannedRepos(limit: number): Promise<IScannedRepoRecord[]>;

@@ -25,4 +25,17 @@ describe('GetFindingsSecretTypeCountsUseCase', () => {
     expect(counts).toHaveLength(Object.values(ESecretType).length);
     expect(counts).toContainEqual({ secretType: ESecretType.STRIPE_LIVE_SECRET_KEY, count: 0 });
   });
+
+  it('scopes counts to a single repo when repoId is given', async () => {
+    const state = new FakeStateRepository();
+    await state.addFinding(1, 'octocat', 'repo', 'a.py', 'sha', ESecretType.AWS_ACCESS_KEY_ID, 'v', 1, null);
+    await state.addFinding(2, 'octocat', 'other', 'b.py', 'sha', ESecretType.AWS_ACCESS_KEY_ID, 'v', 1, null);
+    await state.addFinding(1, 'octocat', 'repo', 'c.py', 'sha', ESecretType.GITHUB_PAT, 'v', 1, null);
+    const useCase = new GetFindingsSecretTypeCountsUseCase(state);
+
+    const counts = await useCase.execute(1);
+
+    expect(counts).toContainEqual({ secretType: ESecretType.AWS_ACCESS_KEY_ID, count: 1 });
+    expect(counts).toContainEqual({ secretType: ESecretType.GITHUB_PAT, count: 1 });
+  });
 });

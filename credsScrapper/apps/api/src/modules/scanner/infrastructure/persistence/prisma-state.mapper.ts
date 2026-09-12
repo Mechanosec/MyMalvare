@@ -59,6 +59,7 @@ export function toFindingRecord(row: TPrismaFinding): IFindingRecord {
     context: row.context,
     foundAt: row.foundAt,
     status: toFindingStatus(row.status),
+    checkedAt: row.checkedAt,
     leakCommits: parseLeakCommits(row.leakCommits),
   };
 }

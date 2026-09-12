@@ -4,6 +4,7 @@ import { EFindingStatus } from '../../../../src/modules/scanner/domain/constant/
 import { EScanStatus } from '../../../../src/modules/scanner/domain/constant/scan-status.constant';
 import { ESecretType } from '../../../../src/modules/scanner/domain/constant/secret-type.constant';
 import {
+  IFindingRecord,
   IFindingsFilter,
   IFindingsPage,
   IFindingsRepoOption,
@@ -42,6 +43,7 @@ export class FakeStateRepository extends StateRepositoryPort {
     lineNumber: number;
     context: string | null;
     status: EFindingStatus;
+    checkedAt: Date | null;
     leakCommits: string;
   }> = [];
 
@@ -153,6 +155,7 @@ export class FakeStateRepository extends StateRepositoryPort {
       lineNumber,
       context,
       status: EFindingStatus.UNKNOWN,
+      checkedAt: null,
       leakCommits: '[]',
     });
   }
@@ -161,6 +164,14 @@ export class FakeStateRepository extends StateRepositoryPort {
     const row = this.findings[id];
     if (row) {
       row.status = status;
+    }
+  }
+
+  async recordTestResult(id: number, status: EFindingStatus): Promise<void> {
+    const row = this.findings[id];
+    if (row) {
+      row.status = status;
+      row.checkedAt = new Date();
     }
   }
 
@@ -202,9 +213,19 @@ export class FakeStateRepository extends StateRepositoryPort {
     return { items: matching.slice(offset, offset + limit), total: matching.length };
   }
 
-  async listFindingsRepoOptions(limit: number): Promise<IFindingsRepoOption[]> {
+  async getFindingById(id: number): Promise<IFindingRecord | null> {
+    const row = this.findings[id];
+    if (!row) return null;
+    return { id, foundAt: new Date(), ...row, leakCommits: parseLeakCommits(row.leakCommits) };
+  }
+
+  async listFindingsRepoOptions(
+    limit: number,
+    secretTypes?: readonly ESecretType[],
+  ): Promise<IFindingsRepoOption[]> {
     const counts = new Map<number, IFindingsRepoOption>();
     for (const f of this.findings) {
+      if (secretTypes?.length && !secretTypes.includes(f.secretType)) continue;
       const existing = counts.get(f.repoId);
       if (existing) {
         counts.set(f.repoId, { ...existing, count: existing.count + 1 });
@@ -217,11 +238,13 @@ export class FakeStateRepository extends StateRepositoryPort {
 
   async findFindingsRepoOptionsByOwnerName(
     pairs: ReadonlyArray<{ owner: string; name: string }>,
+    secretTypes?: readonly ESecretType[],
   ): Promise<IFindingsRepoOption[]> {
     const wanted = new Set(pairs.map((p) => `${p.owner.toLowerCase()}/${p.name.toLowerCase()}`));
     const counts = new Map<number, IFindingsRepoOption>();
     for (const f of this.findings) {
       if (!wanted.has(`${f.owner.toLowerCase()}/${f.name.toLowerCase()}`)) continue;
+      if (secretTypes?.length && !secretTypes.includes(f.secretType)) continue;
       const existing = counts.get(f.repoId);
       if (existing) {
         counts.set(f.repoId, { ...existing, count: existing.count + 1 });
@@ -232,9 +255,10 @@ export class FakeStateRepository extends StateRepositoryPort {
     return [...counts.values()];
   }
 
-  async listFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]> {
+  async listFindingsSecretTypeCounts(repoId?: number): Promise<ISecretTypeCount[]> {
     const counts = new Map<ESecretType, number>();
     for (const f of this.findings) {
+      if (repoId !== undefined && f.repoId !== repoId) continue;
       counts.set(f.secretType, (counts.get(f.secretType) ?? 0) + 1);
     }
     return [...counts.entries()].map(([secretType, count]) => ({ secretType, count }));

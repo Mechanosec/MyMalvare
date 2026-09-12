@@ -6,6 +6,7 @@ import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { EScanStatus } from '../../domain/constant/scan-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 import {
+  IFindingRecord,
   IFindingsFilter,
   IFindingsPage,
   IFindingsRepoOption,
@@ -201,6 +202,10 @@ export class PrismaStateRepository extends StateRepositoryPort {
     await this.prisma.finding.update({ where: { id }, data: { status } });
   }
 
+  async recordTestResult(id: number, status: EFindingStatus): Promise<void> {
+    await this.prisma.finding.update({ where: { id }, data: { status, checkedAt: new Date() } });
+  }
+
   async countFindings(repoId: number): Promise<number> {
     return this.prisma.finding.count({ where: { repoId } });
   }
@@ -245,9 +250,18 @@ export class PrismaStateRepository extends StateRepositoryPort {
     return { items: rows.map(toFindingRecord), total };
   }
 
-  async listFindingsRepoOptions(limit: number): Promise<IFindingsRepoOption[]> {
+  async getFindingById(id: number): Promise<IFindingRecord | null> {
+    const row = await this.prisma.finding.findUnique({ where: { id } });
+    return row ? toFindingRecord(row) : null;
+  }
+
+  async listFindingsRepoOptions(
+    limit: number,
+    secretTypes?: readonly ESecretType[],
+  ): Promise<IFindingsRepoOption[]> {
     const rows = await this.prisma.finding.groupBy({
       by: ['repoId', 'owner', 'name'],
+      where: secretTypes?.length ? { secretType: { in: [...secretTypes] } } : undefined,
       _count: { _all: true },
       orderBy: { _count: { repoId: 'desc' } },
       take: limit,
@@ -262,6 +276,7 @@ export class PrismaStateRepository extends StateRepositoryPort {
 
   async findFindingsRepoOptionsByOwnerName(
     pairs: ReadonlyArray<{ owner: string; name: string }>,
+    secretTypes?: readonly ESecretType[],
   ): Promise<IFindingsRepoOption[]> {
     if (pairs.length === 0) {
       return [];
@@ -269,6 +284,7 @@ export class PrismaStateRepository extends StateRepositoryPort {
     const wanted = new Set(pairs.map((p) => `${p.owner.toLowerCase()}/${p.name.toLowerCase()}`));
     const rows = await this.prisma.finding.groupBy({
       by: ['repoId', 'owner', 'name'],
+      where: secretTypes?.length ? { secretType: { in: [...secretTypes] } } : undefined,
       _count: { _all: true },
     });
     return rows
@@ -281,9 +297,10 @@ export class PrismaStateRepository extends StateRepositoryPort {
       }));
   }
 
-  async listFindingsSecretTypeCounts(): Promise<ISecretTypeCount[]> {
+  async listFindingsSecretTypeCounts(repoId?: number): Promise<ISecretTypeCount[]> {
     const rows = await this.prisma.finding.groupBy({
       by: ['secretType'],
+      where: repoId !== undefined ? { repoId } : undefined,
       _count: { _all: true },
     });
     return rows.map((row) => ({
