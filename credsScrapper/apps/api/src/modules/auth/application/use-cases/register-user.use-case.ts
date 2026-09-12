@@ -1,7 +1,7 @@
 import { UserRepositoryPort } from '../ports/user-repository.port';
 import { PasswordHasherPort } from '../ports/password-hasher.port';
-import { TokenPort } from '../ports/token.port';
-import { IAuthenticatedUser } from '../../domain/types/user.type';
+import { TokenPort } from '../../../identity/application/ports/token.port';
+import { IAuthenticatedUser } from '../../../identity/domain/types/authenticated-user.type';
 
 export class RegisterUserUseCase {
   constructor(

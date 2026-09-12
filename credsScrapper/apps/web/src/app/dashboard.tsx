@@ -11,16 +11,14 @@ import { ScanControls } from '../components/scan-controls';
 import { StatTile } from '../components/stat-tile';
 import { Tabs } from '../components/tabs';
 import { TestingPanel } from '../components/testing-panel';
+import { fetchMyScannedRepos, fetchScannedRepos } from '../lib/api-client';
 import { useAuth } from '../lib/auth-context';
 import { EScanStatus } from '../lib/constant/scan-status.constant';
-import { IFindingsPage } from '../lib/types/finding.type';
 import { IQueueStatus } from '../lib/types/queue-status.type';
 import { IScannedRepo } from '../lib/types/scanned-repo.type';
 
 interface IDashboardProps {
   readonly initialQueueStatus: IQueueStatus | null;
-  readonly initialFindingsPage: IFindingsPage;
-  readonly initialScannedRepos: IScannedRepo[];
 }
 
 const TABS = [
@@ -36,11 +34,7 @@ const TABS = [
 // of showing "No job running" while the scan keeps going server-side.
 const LAST_JOB_ID_KEY = 'credsscrapper:lastJobId';
 
-export function Dashboard({
-  initialQueueStatus,
-  initialFindingsPage,
-  initialScannedRepos,
-}: IDashboardProps) {
+export function Dashboard({ initialQueueStatus }: IDashboardProps) {
   const { user, login, register, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [authError, setAuthError] = useState<string | null>(null);
@@ -96,7 +90,18 @@ export function Dashboard({
     }
   }
 
-  const totalFindings = initialScannedRepos.reduce((sum, r) => sum + r.findingsCount, 0);
+  const [scannedRepos, setScannedRepos] = useState<IScannedRepo[]>([]);
+
+  useEffect(() => {
+    if (!user) {
+      setScannedRepos([]);
+      return;
+    }
+    const fetchRepos = user.role === 'admin' ? fetchScannedRepos : fetchMyScannedRepos;
+    fetchRepos().then(setScannedRepos).catch(() => setScannedRepos([]));
+  }, [user, refreshKey]);
+
+  const totalFindings = scannedRepos.reduce((sum, r) => sum + r.findingsCount, 0);
 
   return (
     <main className="min-h-full">
@@ -158,18 +163,33 @@ export function Dashboard({
                 </p>
               )}
 
-              <ScanControls onJobStarted={handleJobStarted} />
-              <ProgressPanel key={jobId} jobId={jobId} />
+              {user?.role === 'admin' ? (
+                <>
+                  <ScanControls onJobStarted={handleJobStarted} />
+                  <ProgressPanel key={jobId} jobId={jobId} />
+                </>
+              ) : (
+                <p className="border border-line bg-surface px-4 py-3 text-sm text-text-dim">
+                  Discovery and scanning across all repositories is admin-only. To scan a specific
+                  repository you control, submit it on the &quot;My Repos&quot; tab.
+                </p>
+              )}
             </>
           )}
 
-          {activeTab === 'findings' && (
-            <FindingsTable initialPage={initialFindingsPage} refreshKey={refreshKey} />
-          )}
+          {activeTab === 'findings' &&
+            (user ? (
+              <FindingsTable isAdmin={user.role === 'admin'} refreshKey={refreshKey} />
+            ) : (
+              <LoginForm onLogin={handleLogin} onRegister={handleRegister} error={authError} />
+            ))}
 
-          {activeTab === 'repositories' && (
-            <ScannedReposTable initialRepos={initialScannedRepos} refreshKey={refreshKey} />
-          )}
+          {activeTab === 'repositories' &&
+            (user ? (
+              <ScannedReposTable repos={scannedRepos} />
+            ) : (
+              <LoginForm onLogin={handleLogin} onRegister={handleRegister} error={authError} />
+            ))}
 
           {activeTab === 'testing' &&
             (user ? (

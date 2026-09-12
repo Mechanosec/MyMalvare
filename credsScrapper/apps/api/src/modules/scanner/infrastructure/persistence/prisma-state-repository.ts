@@ -123,6 +123,14 @@ export class PrismaStateRepository extends StateRepositoryPort {
     });
   }
 
+  async startRepoScan(repoId: number, owner: string, name: string): Promise<void> {
+    await this.prisma.scannedRepo.upsert({
+      where: { repoId },
+      create: { repoId, owner, name, status: EScanStatus.IN_PROGRESS, startedAt: new Date(), retryCount: 0 },
+      update: { status: EScanStatus.IN_PROGRESS, startedAt: new Date() },
+    });
+  }
+
   async requeueStale(timeoutSeconds: number): Promise<number> {
     const cutoff = new Date(Date.now() - timeoutSeconds * 1000);
     const result = await this.prisma.scannedRepo.updateMany({

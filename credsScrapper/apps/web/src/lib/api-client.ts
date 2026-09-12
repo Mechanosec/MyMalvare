@@ -125,6 +125,24 @@ export function updateFindingStatus(id: number, status: EFindingStatus): Promise
   return patch<{ ok: true }>(`/findings/${id}/status`, { status });
 }
 
+export function updateMyFindingStatus(id: number, status: EFindingStatus): Promise<{ ok: true }> {
+  return patch<{ ok: true }>(`/repo-authorizations/mine/findings/${id}/status`, { status });
+}
+
+export function fetchMyFindings(query: IFindingsQuery = {}): Promise<IFindingsPage> {
+  const params = new URLSearchParams();
+  if (query.secretTypes?.length) params.set('secretTypes', query.secretTypes.join(','));
+  if (query.statuses?.length) params.set('statuses', query.statuses.join(','));
+  if (query.search) params.set('search', query.search);
+  params.set('limit', String(query.limit ?? FINDINGS_PAGE_SIZE));
+  params.set('offset', String(query.offset ?? 0));
+  return get<IFindingsPage>(`/repo-authorizations/mine/findings?${params.toString()}`);
+}
+
+export function fetchMyScannedRepos(): Promise<IScannedRepo[]> {
+  return get<IScannedRepo[]>('/repo-authorizations/mine/scanned-repos');
+}
+
 export function startDiscover(): Promise<{ jobId: string }> {
   return post<{ jobId: string }>('/discover');
 }
@@ -164,4 +182,8 @@ export function decideRepoAuthorization(
   adminNote?: string,
 ): Promise<IRepoAuthorization> {
   return patch<IRepoAuthorization>(`/repo-authorizations/${id}`, { status, adminNote });
+}
+
+export function scanMyRepo(owner: string, name: string): Promise<{ repoId: number }> {
+  return post<{ repoId: number }>('/repo-authorizations/mine/scan-repo', { owner, name });
 }

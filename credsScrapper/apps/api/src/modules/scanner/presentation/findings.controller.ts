@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Get, Param, Patch, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { AdminGuard } from '../../identity/infrastructure/guards/admin.guard';
 import { SetFindingStatusUseCase } from '../application/use-cases/set-finding-status.use-case';
 import { GetFindingsRepoOptionsUseCase } from '../application/use-cases/get-findings-repo-options.use-case';
 import { GetFindingsSecretTypeCountsUseCase } from '../application/use-cases/get-findings-secret-type-counts.use-case';
@@ -15,7 +16,12 @@ function parseCsv<T>(value: string | undefined, map: (raw: string) => T = (raw) 
   return value ? value.split(',').filter(Boolean).map(map) : undefined;
 }
 
+// Admin-only: this is unscoped, whole-database access - a regular user's
+// scope is their own approved repos, via
+// repo-authorizations.controller.ts's mine/findings, mine/scanned-repos,
+// and mine/findings/:id/status routes instead.
 @Controller('findings')
+@UseGuards(AdminGuard)
 export class FindingsController {
   constructor(
     private readonly getFindings: GetFindingsUseCase,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchFindings, fetchMyTestableRepos, updateFindingStatus } from '../lib/api-client';
+import { fetchMyFindings, fetchMyTestableRepos, updateMyFindingStatus } from '../lib/api-client';
 import { EFindingStatus } from '../lib/constant/finding-status.constant';
 import { IFinding, IFindingsRepoOption } from '../lib/types/finding.type';
 import { FindingStatusBadge } from './finding-status-badge';
@@ -27,9 +27,13 @@ export function TestingPanel() {
     if (repoId === null) return;
     setLoading(true);
     try {
-      const page = await fetchFindings({ repoIds: [repoId], limit: 1000 });
-      setFindings(page.items);
-      setLog((prev) => [...prev, `Loaded ${page.items.length} finding(s) for repo ${repoId}`]);
+      // mine/findings has no repoIds filter (it's already scoped to the
+      // caller's own approved repos, which is at most a handful) - filter
+      // down to the selected one client-side instead.
+      const page = await fetchMyFindings({ limit: 1000 });
+      const items = page.items.filter((f) => f.repoId === repoId);
+      setFindings(items);
+      setLog((prev) => [...prev, `Loaded ${items.length} finding(s) for repo ${repoId}`]);
     } catch {
       setFindings([]);
       setLog((prev) => [...prev, `Failed to load findings for repo ${repoId}`]);
@@ -40,7 +44,7 @@ export function TestingPanel() {
 
   async function mark(finding: IFinding, status: EFindingStatus) {
     try {
-      await updateFindingStatus(finding.id, status);
+      await updateMyFindingStatus(finding.id, status);
       setFindings((prev) => prev.map((f) => (f.id === finding.id ? { ...f, status } : f)));
       setLog((prev) => [
         ...prev,

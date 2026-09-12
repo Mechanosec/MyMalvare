@@ -1,17 +1,19 @@
 import { Module } from '@nestjs/common';
 import { ScannerModule } from '../scanner/scanner.module';
 import { StateRepositoryPort } from '../scanner/application/ports/state-repository.port';
+import { KeyValidatorPort } from '../scanner/application/ports/key-validator.port';
+import { GithubRepoLookupPort } from '../scanner/application/ports/github-repo-lookup.port';
+import { WorkdirJoinerPort } from '../scanner/application/ports/workdir-joiner.port';
+import { ScanRepositoryUseCase } from '../scanner/application/use-cases/scan-repository.use-case';
+import { IdentityModule } from '../identity/identity.module';
+import { TokenPort } from '../identity/application/ports/token.port';
 import { provideUseCase } from '../../shared/di/provide-use-case';
 import { UserRepositoryPort } from './application/ports/user-repository.port';
 import { RepoAuthorizationRepositoryPort } from './application/ports/repo-authorization-repository.port';
 import { PasswordHasherPort } from './application/ports/password-hasher.port';
-import { TokenPort } from './application/ports/token.port';
 import { PrismaUserRepository } from './infrastructure/persistence/prisma-user-repository';
 import { PrismaRepoAuthorizationRepository } from './infrastructure/persistence/prisma-repo-authorization-repository';
 import { BcryptPasswordHasherAdapter } from './infrastructure/security/bcrypt-password-hasher.adapter';
-import { JwtTokenAdapter } from './infrastructure/security/jwt-token.adapter';
-import { AuthGuard } from './infrastructure/guards/auth.guard';
-import { AdminGuard } from './infrastructure/guards/admin.guard';
 import { RegisterUserUseCase } from './application/use-cases/register-user.use-case';
 import { LoginUserUseCase } from './application/use-cases/login-user.use-case';
 import { SubmitRepoAuthorizationUseCase } from './application/use-cases/submit-repo-authorization.use-case';
@@ -19,22 +21,27 @@ import { ListMyRepoAuthorizationsUseCase } from './application/use-cases/list-my
 import { ListAllRepoAuthorizationsUseCase } from './application/use-cases/list-all-repo-authorizations.use-case';
 import { DecideRepoAuthorizationUseCase } from './application/use-cases/decide-repo-authorization.use-case';
 import { ListMyTestableReposUseCase } from './application/use-cases/list-my-testable-repos.use-case';
+import { TestRepoFindingsUseCase } from './application/use-cases/test-repo-findings.use-case';
+import { ScanMyRepoUseCase } from './application/use-cases/scan-my-repo.use-case';
+import { GetMyFindingsUseCase } from './application/use-cases/get-my-findings.use-case';
+import { GetMyScannedReposUseCase } from './application/use-cases/get-my-scanned-repos.use-case';
+import { SetMyFindingStatusUseCase } from './application/use-cases/set-my-finding-status.use-case';
 import { AuthController } from './presentation/auth.controller';
 import { RepoAuthorizationsController } from './presentation/repo-authorizations.controller';
 
 // PrismaService itself is NOT re-declared here: importing ScannerModule
 // (which exports StateRepositoryPort) is enough to reuse its bound
 // PrismaStateRepository instance without a second, redundant binding.
+// Same reasoning for TokenPort/AuthGuard/AdminGuard via IdentityModule -
+// this module has no `auth` <-> `scanner` circular import because
+// IdentityModule depends on neither.
 @Module({
-  imports: [ScannerModule],
+  imports: [ScannerModule, IdentityModule],
   controllers: [AuthController, RepoAuthorizationsController],
   providers: [
     { provide: UserRepositoryPort, useClass: PrismaUserRepository },
     { provide: RepoAuthorizationRepositoryPort, useClass: PrismaRepoAuthorizationRepository },
     { provide: PasswordHasherPort, useClass: BcryptPasswordHasherAdapter },
-    { provide: TokenPort, useClass: JwtTokenAdapter },
-    { provide: AuthGuard, useFactory: (token: TokenPort) => new AuthGuard(token), inject: [TokenPort] },
-    { provide: AdminGuard, useFactory: (token: TokenPort) => new AdminGuard(token), inject: [TokenPort] },
     provideUseCase(
       RegisterUserUseCase,
       [UserRepositoryPort, PasswordHasherPort, TokenPort],
@@ -69,6 +76,32 @@ import { RepoAuthorizationsController } from './presentation/repo-authorizations
       ListMyTestableReposUseCase,
       [RepoAuthorizationRepositoryPort, StateRepositoryPort],
       (authorizations, state) => new ListMyTestableReposUseCase(authorizations, state),
+    ),
+    provideUseCase(
+      TestRepoFindingsUseCase,
+      [RepoAuthorizationRepositoryPort, StateRepositoryPort, KeyValidatorPort],
+      (authorizations, state, validator) => new TestRepoFindingsUseCase(authorizations, state, validator),
+    ),
+    provideUseCase(
+      ScanMyRepoUseCase,
+      [RepoAuthorizationRepositoryPort, StateRepositoryPort, GithubRepoLookupPort, ScanRepositoryUseCase, WorkdirJoinerPort],
+      (authorizations, state, githubLookup, scanRepository, workdirJoiner) =>
+        new ScanMyRepoUseCase(authorizations, state, githubLookup, scanRepository, workdirJoiner),
+    ),
+    provideUseCase(
+      GetMyFindingsUseCase,
+      [RepoAuthorizationRepositoryPort, StateRepositoryPort],
+      (authorizations, state) => new GetMyFindingsUseCase(authorizations, state),
+    ),
+    provideUseCase(
+      GetMyScannedReposUseCase,
+      [RepoAuthorizationRepositoryPort, StateRepositoryPort],
+      (authorizations, state) => new GetMyScannedReposUseCase(authorizations, state),
+    ),
+    provideUseCase(
+      SetMyFindingStatusUseCase,
+      [RepoAuthorizationRepositoryPort, StateRepositoryPort],
+      (authorizations, state) => new SetMyFindingStatusUseCase(authorizations, state),
     ),
   ],
 })

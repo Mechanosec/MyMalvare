@@ -1,4 +1,4 @@
-import { IAuthenticatedUser } from '../../domain/types/user.type';
+import { IAuthenticatedUser } from '../../domain/types/authenticated-user.type';
 
 export abstract class TokenPort {
   abstract sign(payload: IAuthenticatedUser): string;

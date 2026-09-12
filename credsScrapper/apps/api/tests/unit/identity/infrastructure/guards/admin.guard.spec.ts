@@ -1,7 +1,7 @@
 import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
-import { AdminGuard } from '../../../../../src/modules/auth/infrastructure/guards/admin.guard';
-import { TokenPort } from '../../../../../src/modules/auth/application/ports/token.port';
-import { EUserRole } from '../../../../../src/modules/auth/domain/constant/user-role.constant';
+import { AdminGuard } from '../../../../../src/modules/identity/infrastructure/guards/admin.guard';
+import { TokenPort } from '../../../../../src/modules/identity/application/ports/token.port';
+import { EUserRole } from '../../../../../src/modules/identity/domain/constant/user-role.constant';
 
 function makeContext(authHeader?: string): ExecutionContext {
   const request: { headers: Record<string, string>; user?: unknown } = { headers: {} };

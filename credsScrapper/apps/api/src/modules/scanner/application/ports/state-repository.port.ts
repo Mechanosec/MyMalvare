@@ -30,6 +30,14 @@ export abstract class StateRepositoryPort {
 
   abstract markFailed(repoId: number, reason: string): Promise<void>;
 
+  /**
+   * Directly (re)starts a scan for a specific repo, bypassing the shared
+   * candidate queue - creates or resets its ScannedRepo row to
+   * in_progress. Used for a user-triggered scan of their own approved
+   * repo, which must never grab an unrelated queued repo via claimNext().
+   */
+  abstract startRepoScan(repoId: number, owner: string, name: string): Promise<void>;
+
   /** Resets in_progress rows older than timeoutSeconds back to pending. Returns count changed. */
   abstract requeueStale(timeoutSeconds: number): Promise<number>;
 

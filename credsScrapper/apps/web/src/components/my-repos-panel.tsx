@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fetchMyRepoAuthorizations, submitRepoAuthorization } from '../lib/api-client';
+import { fetchMyRepoAuthorizations, scanMyRepo, submitRepoAuthorization } from '../lib/api-client';
 import { IRepoAuthorization } from '../lib/types/repo-authorization.type';
 
 const TONE_BY_STATUS: Record<IRepoAuthorization['status'], string> = {
@@ -15,9 +15,24 @@ export function MyReposPanel() {
   const [owner, setOwner] = useState('');
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
+  const [scanning, setScanning] = useState<number | null>(null);
+  const [scanMessage, setScanMessage] = useState<{ id: number; text: string } | null>(null);
 
   function refresh() {
     fetchMyRepoAuthorizations().then(setRequests).catch(() => setRequests([]));
+  }
+
+  async function scan(request: IRepoAuthorization) {
+    setScanning(request.id);
+    setScanMessage(null);
+    try {
+      const { repoId } = await scanMyRepo(request.owner, request.name);
+      setScanMessage({ id: request.id, text: `Scan complete (repo #${repoId}) — check the Findings tab.` });
+    } catch {
+      setScanMessage({ id: request.id, text: 'Scan failed — see server logs for details.' });
+    } finally {
+      setScanning(null);
+    }
   }
 
   useEffect(refresh, []);
@@ -98,6 +113,7 @@ export function MyReposPanel() {
               <th className="px-3 py-2 font-medium">Note</th>
               <th className="px-3 py-2 font-medium">Status</th>
               <th className="px-3 py-2 font-medium">Admin note</th>
+              <th className="px-3 py-2 font-medium">Scan</th>
             </tr>
           </thead>
           <tbody>
@@ -112,6 +128,25 @@ export function MyReposPanel() {
                   </span>
                 </td>
                 <td className="px-3 py-2 text-text-dim">{r.adminNote ?? '—'}</td>
+                <td className="px-3 py-2">
+                  {r.status === 'approved' ? (
+                    <div className="flex flex-col gap-1">
+                      <button
+                        type="button"
+                        onClick={() => scan(r)}
+                        disabled={scanning === r.id}
+                        className="border border-line px-2 py-1 text-xs text-text hover:border-accent disabled:opacity-40"
+                      >
+                        {scanning === r.id ? 'Scanning…' : 'Scan'}
+                      </button>
+                      {scanMessage?.id === r.id && (
+                        <span className="text-xs text-text-dim">{scanMessage.text}</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-text-dim">—</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

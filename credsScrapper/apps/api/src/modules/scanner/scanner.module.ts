@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
 import { provideUseCase } from '../../shared/di/provide-use-case';
+import { IdentityModule } from '../identity/identity.module';
+import { AdminGuard } from '../identity/infrastructure/guards/admin.guard';
 import { DiscoveryFeedPort } from './application/ports/discovery-feed.port';
 import { GitOperationsPort } from './application/ports/git-operations.port';
+import { GithubRepoLookupPort } from './application/ports/github-repo-lookup.port';
+import { KeyValidatorPort } from './application/ports/key-validator.port';
 import { LoggerPort } from './application/ports/logger.port';
 import { ProgressPort } from './application/ports/progress.port';
 import { StateRepositoryPort } from './application/ports/state-repository.port';
@@ -17,11 +21,13 @@ import { RunScanLoopUseCase } from './application/use-cases/run-scan-loop.use-ca
 import { ScanRepositoryUseCase } from './application/use-cases/scan-repository.use-case';
 import { SetFindingStatusUseCase } from './application/use-cases/set-finding-status.use-case';
 import { GhArchiveHttpAdapter } from './infrastructure/discovery/gharchive-http-adapter';
+import { GithubApiRepoLookupAdapter } from './infrastructure/discovery/github-api-repo-lookup.adapter';
 import { FsWorkdirCleanerAdapter } from './infrastructure/fs/fs-workdir-cleaner.adapter';
 import { FsWorkdirJoinerAdapter } from './infrastructure/fs/fs-workdir-joiner.adapter';
 import { GitCliAdapter } from './infrastructure/git/git-cli-adapter';
 import { InMemoryJobRunner } from './infrastructure/jobs/in-memory-job-runner';
 import { NestLoggerAdapter } from './infrastructure/logging/nest-logger.adapter';
+import { LiveKeyValidatorAdapter } from './infrastructure/validation/live-key-validator.adapter';
 import { PrismaService } from './infrastructure/persistence/prisma.service';
 import { PrismaStateRepository } from './infrastructure/persistence/prisma-state-repository';
 import { ProgressGateway } from './infrastructure/websocket/progress.gateway';
@@ -35,6 +41,7 @@ import { ScanController } from './presentation/scan.controller';
 // infrastructure implementation, and wires the framework-free use-cases
 // into Nest's DI container via provideUseCase.
 @Module({
+  imports: [IdentityModule],
   controllers: [DiscoverController, ScanController, FindingsController, JobsController],
   providers: [
     PrismaService,
@@ -92,7 +99,16 @@ import { ScanController } from './presentation/scan.controller';
       [StateRepositoryPort],
       (state) => new SetFindingStatusUseCase(state),
     ),
+    { provide: KeyValidatorPort, useClass: LiveKeyValidatorAdapter },
+    { provide: GithubRepoLookupPort, useClass: GithubApiRepoLookupAdapter },
   ],
-  exports: [StateRepositoryPort, PrismaService],
+  exports: [
+    StateRepositoryPort,
+    PrismaService,
+    KeyValidatorPort,
+    GithubRepoLookupPort,
+    ScanRepositoryUseCase,
+    WorkdirJoinerPort,
+  ],
 })
 export class ScannerModule {}

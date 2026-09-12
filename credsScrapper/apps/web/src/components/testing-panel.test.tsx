@@ -10,7 +10,7 @@ describe('TestingPanel', () => {
     vi.spyOn(apiClient, 'fetchMyTestableRepos').mockResolvedValue([
       { repoId: 1, owner: 'acme', name: 'widgets', count: 1 },
     ]);
-    vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue({
+    vi.spyOn(apiClient, 'fetchMyFindings').mockResolvedValue({
       items: [
         {
           id: 10,
@@ -30,7 +30,7 @@ describe('TestingPanel', () => {
       ],
       total: 1,
     });
-    vi.spyOn(apiClient, 'updateFindingStatus').mockResolvedValue({ ok: true });
+    vi.spyOn(apiClient, 'updateMyFindingStatus').mockResolvedValue({ ok: true });
   });
 
   it('loads a repo worklist and logs a marked verdict', async () => {
@@ -44,13 +44,13 @@ describe('TestingPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Valid' }));
 
     await waitFor(() =>
-      expect(apiClient.updateFindingStatus).toHaveBeenCalledWith(10, EFindingStatus.VALID),
+      expect(apiClient.updateMyFindingStatus).toHaveBeenCalledWith(10, EFindingStatus.VALID),
     );
     expect(screen.getByText(/marked valid/)).toBeInTheDocument();
   });
 
   it('logs a failure and keeps the last-known status when the PATCH rejects', async () => {
-    vi.spyOn(apiClient, 'updateFindingStatus').mockRejectedValue(new Error('network error'));
+    vi.spyOn(apiClient, 'updateMyFindingStatus').mockRejectedValue(new Error('network error'));
 
     render(<TestingPanel />);
 

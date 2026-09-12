@@ -1,24 +1,17 @@
-import { fetchFindings, fetchQueueStatus, fetchScannedRepos } from '../lib/api-client';
+import { fetchQueueStatus } from '../lib/api-client';
 import { AuthProvider } from '../lib/auth-context';
 import { Dashboard } from './dashboard';
 
 export default async function Page() {
-  // Never fake data: if the API isn't reachable yet, the dashboard states
-  // that plainly instead of inventing a queue status or an empty findings
-  // list that looks like "nothing found" rather than "couldn't ask".
-  const [queueStatus, findingsPage, scannedRepos] = await Promise.all([
-    fetchQueueStatus().catch(() => null),
-    fetchFindings().catch(() => ({ items: [], total: 0 })),
-    fetchScannedRepos().catch(() => []),
-  ]);
+  // Findings and scanned-repos are no longer fetched here: those endpoints
+  // are now admin-only or scoped to the caller's own repos (JWT-gated), and
+  // SSR has no access to the browser's localStorage token. Dashboard fetches
+  // the role-appropriate data itself, client-side, after login state is known.
+  const queueStatus = await fetchQueueStatus().catch(() => null);
 
   return (
     <AuthProvider>
-      <Dashboard
-        initialQueueStatus={queueStatus}
-        initialFindingsPage={findingsPage}
-        initialScannedRepos={scannedRepos}
-      />
+      <Dashboard initialQueueStatus={queueStatus} />
     </AuthProvider>
   );
 }

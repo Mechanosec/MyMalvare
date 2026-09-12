@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@
 import { Request } from 'express';
 import { AuthGuard } from './auth.guard';
 import { EUserRole } from '../../domain/constant/user-role.constant';
-import { IAuthenticatedUser } from '../../domain/types/user.type';
+import { IAuthenticatedUser } from '../../domain/types/authenticated-user.type';
 
 @Injectable()
 export class AdminGuard extends AuthGuard implements CanActivate {

@@ -5,6 +5,7 @@ import {
   fetchFindings,
   fetchFindingsRepoOptions,
   fetchFindingsSecretTypeCounts,
+  fetchMyFindings,
   FINDINGS_PAGE_SIZE,
 } from '../lib/api-client';
 import { EFindingStatus } from '../lib/constant/finding-status.constant';
@@ -18,9 +19,11 @@ import { SecretValue } from './secret-value';
 import { SortableHeader } from './sortable-header';
 
 interface IFindingsTableProps {
-  readonly initialPage: IFindingsPage;
+  readonly isAdmin: boolean;
   readonly refreshKey: number;
 }
+
+const EMPTY_PAGE: IFindingsPage = { items: [], total: 0 };
 
 type TSortKey = 'repo' | 'file' | 'type' | 'line';
 
@@ -48,7 +51,7 @@ interface ICommittedFilters {
 
 const NO_FILTERS: ICommittedFilters = { secretTypes: [], repoIds: [], statuses: [], search: '' };
 
-export function FindingsTable({ initialPage, refreshKey }: IFindingsTableProps) {
+export function FindingsTable({ isAdmin, refreshKey }: IFindingsTableProps) {
   const [secretTypes, setSecretTypes] = useState<ESecretType[]>([]);
   const [repoIds, setRepoIds] = useState<number[]>([]);
   const [statuses, setStatuses] = useState<EFindingStatus[]>([]);
@@ -60,14 +63,18 @@ export function FindingsTable({ initialPage, refreshKey }: IFindingsTableProps) 
   // one per click/keystroke.
   const [committed, setCommitted] = useState<ICommittedFilters>(NO_FILTERS);
   const [page, setPage] = useState(0);
-  const [findingsPage, setFindingsPage] = useState(initialPage);
+  const [findingsPage, setFindingsPage] = useState<IFindingsPage>(EMPTY_PAGE);
   const [sortKey, setSortKey] = useState<TSortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
+    // Repo-scoped filter options and secret-type counts across the whole
+    // database are admin-only endpoints - a regular user's findings are
+    // already scoped to their own repos, so there's nothing to filter by.
+    if (!isAdmin) return;
     fetchFindingsRepoOptions().then(setRepoOptions).catch(() => setRepoOptions([]));
     fetchFindingsSecretTypeCounts().then(setSecretTypeCounts).catch(() => setSecretTypeCounts([]));
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -78,16 +85,22 @@ export function FindingsTable({ initialPage, refreshKey }: IFindingsTableProps) 
   }, [secretTypes, repoIds, statuses, search]);
 
   useEffect(() => {
-    fetchFindings({
-      secretTypes: committed.secretTypes.length ? committed.secretTypes : undefined,
-      repoIds: committed.repoIds.length ? committed.repoIds : undefined,
-      statuses: committed.statuses.length ? committed.statuses : undefined,
-      search: committed.search || undefined,
-      offset: page * FINDINGS_PAGE_SIZE,
-    })
-      .then(setFindingsPage)
-      .catch(() => setFindingsPage({ items: [], total: 0 }));
-  }, [committed, page, refreshKey]);
+    const fetchPage = isAdmin
+      ? fetchFindings({
+          secretTypes: committed.secretTypes.length ? committed.secretTypes : undefined,
+          repoIds: committed.repoIds.length ? committed.repoIds : undefined,
+          statuses: committed.statuses.length ? committed.statuses : undefined,
+          search: committed.search || undefined,
+          offset: page * FINDINGS_PAGE_SIZE,
+        })
+      : fetchMyFindings({
+          secretTypes: committed.secretTypes.length ? committed.secretTypes : undefined,
+          statuses: committed.statuses.length ? committed.statuses : undefined,
+          search: committed.search || undefined,
+          offset: page * FINDINGS_PAGE_SIZE,
+        });
+    fetchPage.then(setFindingsPage).catch(() => setFindingsPage(EMPTY_PAGE));
+  }, [isAdmin, committed, page, refreshKey]);
 
   function toggleSort(key: TSortKey) {
     if (key === sortKey) {
@@ -128,16 +141,18 @@ export function FindingsTable({ initialPage, refreshKey }: IFindingsTableProps) 
           onChange={setSecretTypes}
         />
 
-        <MultiSelect
-          label="Repository"
-          options={repoOptions.map((repo) => ({
-            value: repo.repoId,
-            label: `${repo.owner}/${repo.name}`,
-            count: repo.count,
-          }))}
-          selected={repoIds}
-          onChange={setRepoIds}
-        />
+        {isAdmin && (
+          <MultiSelect
+            label="Repository"
+            options={repoOptions.map((repo) => ({
+              value: repo.repoId,
+              label: `${repo.owner}/${repo.name}`,
+              count: repo.count,
+            }))}
+            selected={repoIds}
+            onChange={setRepoIds}
+          />
+        )}
 
         <MultiSelect
           label="Status"

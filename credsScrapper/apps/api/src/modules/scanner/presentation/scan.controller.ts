@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { AdminGuard } from '../../identity/infrastructure/guards/admin.guard';
 import { GetScannedReposUseCase } from '../application/use-cases/get-scanned-repos.use-case';
 import { GetScanStatusUseCase } from '../application/use-cases/get-scan-status.use-case';
 import { RunScanLoopUseCase } from '../application/use-cases/run-scan-loop.use-case';
@@ -27,7 +28,12 @@ export class ScanController {
     private readonly jobRunner: InMemoryJobRunner,
   ) {}
 
+  // Admin-only: this drains the shared candidate queue (arbitrary
+  // third-party repos discovered via GH Archive) - a regular user's scope
+  // is their own approved repo, via repo-authorizations.controller.ts's
+  // mine/scan-repo route instead.
   @Post()
+  @UseGuards(AdminGuard)
   start(@Body() dto: StartScanDto): { jobId: string } {
     const jobId = this.jobRunner.start(EJobType.SCAN, (onProgress) =>
       this.runScanLoop.execute({
@@ -47,7 +53,11 @@ export class ScanController {
     return this.getScanStatus.execute();
   }
 
+  // Admin-only: lists every scanned repo (owner/name/finding count) across
+  // the whole database - a regular user's scope is their own approved
+  // repos, via repo-authorizations.controller.ts's mine/scanned-repos.
   @Get('repos')
+  @UseGuards(AdminGuard)
   async repos(@Query('limit') limit?: string): Promise<IScannedRepoRecord[]> {
     return this.getScannedRepos.execute(limit ? Number(limit) : undefined);
   }

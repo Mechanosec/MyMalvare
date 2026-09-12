@@ -97,6 +97,18 @@ export class FakeStateRepository extends StateRepositoryPort {
     }
   }
 
+  async startRepoScan(repoId: number, owner: string, name: string): Promise<void> {
+    const existing = this.scanned.get(repoId);
+    this.scanned.set(repoId, {
+      ...existing,
+      repoId,
+      owner,
+      name,
+      status: EScanStatus.IN_PROGRESS,
+      startedAt: new Date(),
+    });
+  }
+
   async requeueStale(): Promise<number> {
     let count = 0;
     for (const row of this.scanned.values()) {

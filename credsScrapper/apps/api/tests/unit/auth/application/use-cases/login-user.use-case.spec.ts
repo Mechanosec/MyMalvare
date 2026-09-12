@@ -1,8 +1,8 @@
 import { LoginUserUseCase } from '../../../../../src/modules/auth/application/use-cases/login-user.use-case';
 import { UserRepositoryPort } from '../../../../../src/modules/auth/application/ports/user-repository.port';
 import { PasswordHasherPort } from '../../../../../src/modules/auth/application/ports/password-hasher.port';
-import { TokenPort } from '../../../../../src/modules/auth/application/ports/token.port';
-import { EUserRole } from '../../../../../src/modules/auth/domain/constant/user-role.constant';
+import { TokenPort } from '../../../../../src/modules/identity/application/ports/token.port';
+import { EUserRole } from '../../../../../src/modules/identity/domain/constant/user-role.constant';
 
 describe('LoginUserUseCase', () => {
   const existingUser = { id: 1, email: 'a@b.com', passwordHash: 'hashed', role: EUserRole.USER, createdAt: new Date() };

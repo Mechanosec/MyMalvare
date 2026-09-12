@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { UserRepositoryPort } from '../../application/ports/user-repository.port';
-import { EUserRole } from '../../domain/constant/user-role.constant';
+import { EUserRole } from '../../../identity/domain/constant/user-role.constant';
 import { IUser } from '../../domain/types/user.type';
 import { PrismaService } from '../../../scanner/infrastructure/persistence/prisma.service';
 

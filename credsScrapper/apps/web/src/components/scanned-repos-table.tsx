@@ -1,15 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { fetchScannedRepos } from '../lib/api-client';
+import { useMemo, useState } from 'react';
 import { EScanStatus } from '../lib/constant/scan-status.constant';
 import { IScannedRepo } from '../lib/types/scanned-repo.type';
 import { SortableHeader } from './sortable-header';
 import { StatusBadge } from './status-badge';
 
 interface IScannedReposTableProps {
-  readonly initialRepos: IScannedRepo[];
-  readonly refreshKey: number;
+  readonly repos: IScannedRepo[];
 }
 
 type TSortKey = 'repo' | 'status' | 'findings' | 'scannedAt';
@@ -32,19 +30,11 @@ function formatTime(value: string | null): string {
   return new Date(value).toLocaleString();
 }
 
-export function ScannedReposTable({ initialRepos, refreshKey }: IScannedReposTableProps) {
-  const [repos, setRepos] = useState(initialRepos);
+export function ScannedReposTable({ repos }: IScannedReposTableProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<EScanStatus | ''>('');
   const [sortKey, setSortKey] = useState<TSortKey | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-
-  useEffect(() => {
-    if (refreshKey === 0) return;
-    fetchScannedRepos()
-      .then(setRepos)
-      .catch(() => setRepos([]));
-  }, [refreshKey]);
 
   function toggleSort(key: TSortKey) {
     if (key === sortKey) {

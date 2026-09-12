@@ -2,8 +2,8 @@ import { BadRequestException, Body, Controller, Get, Post, Req, UnauthorizedExce
 import { Request } from 'express';
 import { RegisterUserUseCase } from '../application/use-cases/register-user.use-case';
 import { LoginUserUseCase } from '../application/use-cases/login-user.use-case';
-import { AuthGuard } from '../infrastructure/guards/auth.guard';
-import { IAuthenticatedUser } from '../domain/types/user.type';
+import { AuthGuard } from '../../identity/infrastructure/guards/auth.guard';
+import { IAuthenticatedUser } from '../../identity/domain/types/authenticated-user.type';
 
 @Controller('auth')
 export class AuthController {

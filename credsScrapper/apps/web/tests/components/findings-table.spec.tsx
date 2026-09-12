@@ -50,17 +50,19 @@ describe('FindingsTable', () => {
     vi.useRealTimers();
   });
 
-  it('renders the initial page, then confirms it via a fetch with no filter', async () => {
+  it('fetches and renders findings on mount with no filter', async () => {
     const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([finding]));
-    render(<FindingsTable initialPage={page([finding])} refreshKey={0} />);
+    render(<FindingsTable isAdmin refreshKey={0} />);
 
-    expect(screen.getByText('octocat/hello-world')).toBeInTheDocument();
-    await vi.waitFor(() => expect(fetchFindings).toHaveBeenCalledWith(NO_FILTER_QUERY));
+    await vi.waitFor(() => {
+      expect(fetchFindings).toHaveBeenCalledWith(NO_FILTER_QUERY);
+      expect(screen.getByText('octocat/hello-world')).toBeInTheDocument();
+    });
   });
 
   it('re-fetches with the selected secret type when the filter changes', async () => {
     const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([finding]));
-    render(<FindingsTable initialPage={page([])} refreshKey={0} />);
+    render(<FindingsTable isAdmin refreshKey={0} />);
 
     fireEvent.click(screen.getByLabelText('Secret type'));
     fireEvent.click(screen.getByText(ESecretType.GITHUB_PAT.replace(/_/g, ' ')));
@@ -75,7 +77,7 @@ describe('FindingsTable', () => {
 
   it('coalesces rapid checkbox clicks into a single debounced fetch instead of one per click', async () => {
     const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([finding]));
-    render(<FindingsTable initialPage={page([])} refreshKey={0} />);
+    render(<FindingsTable isAdmin refreshKey={0} />);
     const callsBeforeClicks = fetchFindings.mock.calls.length;
 
     fireEvent.click(screen.getByLabelText('Secret type'));
@@ -102,7 +104,7 @@ describe('FindingsTable', () => {
 
   it('re-fetches with the selected repository when the filter changes', async () => {
     const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([finding]));
-    render(<FindingsTable initialPage={page([])} refreshKey={0} />);
+    render(<FindingsTable isAdmin refreshKey={0} />);
 
     fireEvent.click(screen.getByLabelText('Repository'));
     const listbox = screen.getByRole('listbox');
@@ -116,7 +118,7 @@ describe('FindingsTable', () => {
 
   it('debounces the search box and searches server-side across the whole dataset', async () => {
     const fetchFindings = vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([finding]));
-    render(<FindingsTable initialPage={page([])} refreshKey={0} />);
+    render(<FindingsTable isAdmin refreshKey={0} />);
 
     fireEvent.change(screen.getByLabelText('Search findings'), {
       target: { value: 'octocat/hello' },
@@ -138,7 +140,7 @@ describe('FindingsTable', () => {
 
   it('shows an empty state when there are no findings', () => {
     vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue(page([]));
-    render(<FindingsTable initialPage={page([])} refreshKey={0} />);
+    render(<FindingsTable isAdmin refreshKey={0} />);
     expect(screen.getByText('No findings match this filter.')).toBeInTheDocument();
   });
 
@@ -146,7 +148,11 @@ describe('FindingsTable', () => {
     const fetchFindings = vi
       .spyOn(apiClient, 'fetchFindings')
       .mockResolvedValue(page([finding], 120));
-    render(<FindingsTable initialPage={page([finding], 120)} refreshKey={0} />);
+    render(<FindingsTable isAdmin refreshKey={0} />);
+
+    // Wait for the initial fetch to resolve AND the resulting re-render to
+    // land (total: 120 -> a page "2" button exists) before clicking Next.
+    await vi.waitFor(() => expect(screen.getAllByRole('button', { name: '2' })).toHaveLength(2));
 
     // Pagination appears above and below the table, so every query here
     // expects two matches.

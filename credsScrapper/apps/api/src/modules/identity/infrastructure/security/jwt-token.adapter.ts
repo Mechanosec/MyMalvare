@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import { EUserRole } from '../../domain/constant/user-role.constant';
-import { IAuthenticatedUser } from '../../domain/types/user.type';
+import { IAuthenticatedUser } from '../../domain/types/authenticated-user.type';
 import { TokenPort } from '../../application/ports/token.port';
 
 const EXPIRES_IN = '7d';

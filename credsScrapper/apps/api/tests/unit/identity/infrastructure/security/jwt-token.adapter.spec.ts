@@ -1,5 +1,5 @@
-import { JwtTokenAdapter } from '../../../../../src/modules/auth/infrastructure/security/jwt-token.adapter';
-import { EUserRole } from '../../../../../src/modules/auth/domain/constant/user-role.constant';
+import { JwtTokenAdapter } from '../../../../../src/modules/identity/infrastructure/security/jwt-token.adapter';
+import { EUserRole } from '../../../../../src/modules/identity/domain/constant/user-role.constant';
 
 const TEST_SECRET = 'a-fixed-32-plus-char-test-secret-value';
 
@@ -31,5 +31,13 @@ describe('JwtTokenAdapter', () => {
     const token = otherAdapter.sign(payload);
     process.env.JWT_SECRET = TEST_SECRET;
     expect(new JwtTokenAdapter().verify(token)).toBeNull();
+  });
+
+  it('throws at construction when JWT_SECRET is missing or too short', () => {
+    delete process.env.JWT_SECRET;
+    expect(() => new JwtTokenAdapter()).toThrow('JWT_SECRET must be set to a strong random value (32+ chars)');
+
+    process.env.JWT_SECRET = 'too-short';
+    expect(() => new JwtTokenAdapter()).toThrow('JWT_SECRET must be set to a strong random value (32+ chars)');
   });
 });
