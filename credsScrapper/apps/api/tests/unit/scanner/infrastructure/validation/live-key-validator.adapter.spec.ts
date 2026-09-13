@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import { LiveKeyValidatorAdapter } from '../../../../../src/modules/scanner/infrastructure/validation/live-key-validator.adapter';
 import { EFindingStatus } from '../../../../../src/modules/scanner/domain/constant/finding-status.constant';
 import { ESecretType } from '../../../../../src/modules/scanner/domain/constant/secret-type.constant';
@@ -359,5 +360,111 @@ describe('LiveKeyValidatorAdapter', () => {
       'https://api.clickup.com/api/v2/user',
       expect.objectContaining({ headers: { Authorization: 'pk_fake' } }),
     );
+  });
+
+  it('returns UNKNOWN for an AWS access key ID with no paired secret key, without making a request', async () => {
+    global.fetch = jest.fn() as never;
+
+    const status = await adapter.validate(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAABCDEFGH12345678');
+
+    expect(status).toBe(EFindingStatus.UNKNOWN);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns VALID for an AWS credential pair that sts:GetCallerIdentity confirms with 200', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as never;
+
+    const status = await adapter.validate(
+      ESecretType.AWS_ACCESS_KEY_ID,
+      'AKIAABCDEFGH12345678',
+      'a'.repeat(40),
+    );
+
+    expect(status).toBe(EFindingStatus.VALID);
+    const [url, options] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toBe('https://sts.amazonaws.com/?Action=GetCallerIdentity&Version=2011-06-15');
+    expect(options.headers.Authorization).toMatch(/^AWS4-HMAC-SHA256 Credential=AKIAABCDEFGH12345678\//);
+    expect(options.headers['x-amz-date']).toMatch(/^\d{8}T\d{6}Z$/);
+  });
+
+  it('returns INVALID for an AWS credential pair that sts:GetCallerIdentity 403s', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 403 }) as never;
+
+    const status = await adapter.validate(
+      ESecretType.AWS_ACCESS_KEY_ID,
+      'AKIAABCDEFGH12345678',
+      'a'.repeat(40),
+    );
+
+    expect(status).toBe(EFindingStatus.INVALID);
+  });
+
+  function makeGcpKey(overrides: Record<string, unknown> = {}) {
+    const { privateKey } = crypto.generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    return JSON.stringify({
+      type: 'service_account',
+      project_id: 'fake-project',
+      private_key: privateKey,
+      client_email: 'svc@fake-project.iam.gserviceaccount.com',
+      token_uri: 'https://oauth2.googleapis.com/token',
+      ...overrides,
+    });
+  }
+
+  it('returns VALID for a GCP service account key that the token endpoint accepts with 200', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as never;
+
+    const status = await adapter.validate(ESecretType.GCP_SERVICE_ACCOUNT_KEY, makeGcpKey());
+
+    expect(status).toBe(EFindingStatus.VALID);
+    const [url, options] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toBe('https://oauth2.googleapis.com/token');
+    expect(options.method).toBe('POST');
+    expect(String(options.body)).toContain('grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer');
+  });
+
+  it('returns INVALID for a GCP service account key the token endpoint rejects with invalid_grant (400)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 400 }) as never;
+
+    const status = await adapter.validate(ESecretType.GCP_SERVICE_ACCOUNT_KEY, makeGcpKey());
+
+    expect(status).toBe(EFindingStatus.INVALID);
+  });
+
+  it('returns UNKNOWN for a GCP key value that is not valid JSON, without making a request', async () => {
+    global.fetch = jest.fn() as never;
+
+    const status = await adapter.validate(ESecretType.GCP_SERVICE_ACCOUNT_KEY, 'not json');
+
+    expect(status).toBe(EFindingStatus.UNKNOWN);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('ignores an attacker-controlled token_uri and always posts to the real Google endpoint', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as never;
+
+    await adapter.validate(
+      ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+      makeGcpKey({ token_uri: 'https://internal.attacker.example/steal' }),
+    );
+
+    const [url] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toBe('https://oauth2.googleapis.com/token');
+  });
+
+  it('returns UNKNOWN for a GCP key JSON missing private_key/client_email, without making a request', async () => {
+    global.fetch = jest.fn() as never;
+
+    const status = await adapter.validate(
+      ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+      JSON.stringify({ type: 'service_account' }),
+    );
+
+    expect(status).toBe(EFindingStatus.UNKNOWN);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

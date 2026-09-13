@@ -11,6 +11,17 @@ import { ISecretPattern } from '../types/secret-pattern.type';
 export const PATTERNS: readonly ISecretPattern[] = [
   // AWS
   { secretType: ESecretType.AWS_ACCESS_KEY_ID, pattern: /(?:AKIA|ASIA)[0-9A-Z]{16}/g },
+  // AWS secret keys are a bare 40-char base64-ish string with no fixed
+  // prefix - unlike every other pattern here, this one requires a
+  // variable-name lookbehind (aws_secret_access_key / secretAccessKey /
+  // etc, immediately before an assignment) to have any hope of not
+  // matching arbitrary base64 noise. match[0] is still just the 40-char
+  // value itself, same contract as every other pattern.
+  {
+    secretType: ESecretType.AWS_SECRET_ACCESS_KEY,
+    pattern:
+      /(?<=(?:aws_secret_access_key|aws_secret_key|secret_access_key|secretAccessKey|awsSecretAccessKey)\s{0,20}[:=]\s{0,5}["']?)[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])/gi,
+  },
   // GitHub
   { secretType: ESecretType.GITHUB_PAT, pattern: /ghp_[A-Za-z0-9]{36}/g },
   { secretType: ESecretType.GITHUB_OAUTH_TOKEN, pattern: /gho_[A-Za-z0-9]{36}/g },

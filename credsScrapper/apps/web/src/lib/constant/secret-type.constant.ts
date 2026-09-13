@@ -3,6 +3,7 @@
 // (same approach datatector's own web app takes for its enums).
 export enum ESecretType {
   AWS_ACCESS_KEY_ID = 'aws_access_key_id',
+  AWS_SECRET_ACCESS_KEY = 'aws_secret_access_key',
   GITHUB_PAT = 'github_pat',
   GITHUB_OAUTH_TOKEN = 'github_oauth_token',
   GITHUB_APP_TOKEN = 'github_app_token',
@@ -79,6 +80,13 @@ export enum ESecretType {
 // Testing any other type always resolves to unknown, so the Testing tab
 // only ever offers these.
 export const TESTABLE_SECRET_TYPES: readonly ESecretType[] = [
+  // Testing an AWS key needs both halves of the pair - triggering "Test"
+  // on the access key ID finding looks up a matching AWS_SECRET_ACCESS_KEY
+  // finding in the same repo (see admin-test-finding.use-case.ts /
+  // test-finding.use-case.ts). AWS_SECRET_ACCESS_KEY itself has no
+  // standalone "Test" button - it's never independently testable.
+  ESecretType.AWS_ACCESS_KEY_ID,
+  ESecretType.GCP_SERVICE_ACCOUNT_KEY,
   ESecretType.TELEGRAM_BOT_TOKEN,
   ESecretType.GITHUB_PAT,
   ESecretType.GITHUB_OAUTH_TOKEN,

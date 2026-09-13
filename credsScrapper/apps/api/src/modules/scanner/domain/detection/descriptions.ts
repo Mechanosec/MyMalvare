@@ -3,6 +3,7 @@ import { ESecretType } from '../constant/secret-type.constant';
 // Ported 1:1 from credsScrapper/app/detection/descriptions.py.
 export const DESCRIPTIONS: Readonly<Record<ESecretType, string>> = {
   [ESecretType.AWS_ACCESS_KEY_ID]: 'AWS Access Key ID',
+  [ESecretType.AWS_SECRET_ACCESS_KEY]: 'AWS Secret Access Key',
   [ESecretType.GITHUB_PAT]: 'GitHub Personal Access Token',
   [ESecretType.GITHUB_OAUTH_TOKEN]: 'GitHub OAuth Token',
   [ESecretType.GITHUB_APP_TOKEN]: 'GitHub App/Installation Token',

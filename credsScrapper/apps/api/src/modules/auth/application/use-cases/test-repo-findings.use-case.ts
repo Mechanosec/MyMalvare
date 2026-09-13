@@ -2,6 +2,7 @@ import { RepoAuthorizationRepositoryPort } from '../ports/repo-authorization-rep
 import { ERepoAuthorizationStatus } from '../../domain/constant/repo-authorization-status.constant';
 import { StateRepositoryPort } from '../../../scanner/application/ports/state-repository.port';
 import { KeyValidatorPort } from '../../../scanner/application/ports/key-validator.port';
+import { ESecretType } from '../../../scanner/domain/constant/secret-type.constant';
 import { IFindingRecord } from '../../../scanner/domain/types/finding-record.type';
 
 export class TestRepoFindingsUseCase {
@@ -33,8 +34,10 @@ export class TestRepoFindingsUseCase {
       return null;
     }
 
+    const pairedAwsSecret = items.find((f) => f.secretType === ESecretType.AWS_SECRET_ACCESS_KEY)?.secretValue;
     for (const finding of items) {
-      const status = await this.validator.validate(finding.secretType, finding.secretValue);
+      const pairedValue = finding.secretType === ESecretType.AWS_ACCESS_KEY_ID ? pairedAwsSecret : undefined;
+      const status = await this.validator.validate(finding.secretType, finding.secretValue, pairedValue);
       await this.state.recordTestResult(finding.id, status);
     }
 

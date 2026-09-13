@@ -14,5 +14,16 @@ export abstract class KeyValidatorPort {
    * than guessing, since a false INVALID would wrongly tell someone a
    * live key is dead.
    */
-  abstract validate(secretType: ESecretType, secretValue: string): Promise<EFindingStatus>;
+  /**
+   * pairedValue is for the rare secret type whose live check needs a
+   * second value alongside secretValue - today only AWS_ACCESS_KEY_ID,
+   * paired with a matching AWS_SECRET_ACCESS_KEY finding from the same
+   * repo (the caller resolves that lookup; see find-paired-aws-secret.ts).
+   * Every other type ignores it.
+   */
+  abstract validate(
+    secretType: ESecretType,
+    secretValue: string,
+    pairedValue?: string,
+  ): Promise<EFindingStatus>;
 }

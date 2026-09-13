@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import * as crypto from 'node:crypto';
+import * as jwt from 'jsonwebtoken';
 import { KeyValidatorPort } from '../../application/ports/key-validator.port';
 import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 
 const TIMEOUT_MS = 5000;
 
-type TChecker = (secretValue: string) => Promise<EFindingStatus>;
+type TChecker = (secretValue: string, pairedValue?: string) => Promise<EFindingStatus>;
 
 async function checkBearer(url: string, value: string, extraHeaders: Record<string, string> = {}): Promise<EFindingStatus> {
   const res = await fetch(url, {
@@ -37,16 +39,139 @@ const checkStripeSecretKey: TChecker = (value) => checkBearer('https://api.strip
 // DigitalOcean's /v2/account works the same for a PAT and an OAuth token.
 const checkDigitalOceanToken: TChecker = (value) => checkBearer('https://api.digitalocean.com/v2/account', value);
 
+// AWS has no bearer-token auth - every request is SigV4-signed with both
+// halves of the credential pair. sts:GetCallerIdentity is AWS's own
+// documented way to validate a credential: a plain GET with no request
+// body, needs no IAM permissions beyond "this key can authenticate at
+// all" (every principal can call it), and touches nothing in the
+// account - purely a read of "who does this signature belong to".
+// https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html
+async function checkAwsCredentials(accessKeyId: string, secretAccessKey: string): Promise<EFindingStatus> {
+  const region = 'us-east-1';
+  const service = 'sts';
+  const host = 'sts.amazonaws.com';
+  const method = 'GET';
+  const canonicalUri = '/';
+  const canonicalQuerystring = 'Action=GetCallerIdentity&Version=2011-06-15';
+
+  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+
+  const hash = (data: string) => crypto.createHash('sha256').update(data).digest('hex');
+  const hmac = (key: Buffer | string, data: string) => crypto.createHmac('sha256', key).update(data).digest();
+
+  const canonicalHeaders = `host:${host}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'host;x-amz-date';
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    canonicalQuerystring,
+    canonicalHeaders,
+    signedHeaders,
+    hash(''),
+  ].join('\n');
+
+  const algorithm = 'AWS4-HMAC-SHA256';
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const stringToSign = [algorithm, amzDate, credentialScope, hash(canonicalRequest)].join('\n');
+
+  const kDate = hmac(`AWS4${secretAccessKey}`, dateStamp);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, service);
+  const kSigning = hmac(kService, 'aws4_request');
+  const signature = hmac(kSigning, stringToSign).toString('hex');
+
+  const authorizationHeader = `${algorithm} Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  const res = await fetch(`https://${host}${canonicalUri}?${canonicalQuerystring}`, {
+    method,
+    headers: { 'x-amz-date': amzDate, Authorization: authorizationHeader },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  // AWS returns 403 for both "bad access key id" (InvalidClientTokenId)
+  // and "bad secret key" (SignatureDoesNotMatch) - either way the pair
+  // is dead. A malformed request from our own signing bug would show up
+  // as some other 4xx, which correctly falls through to UNKNOWN instead
+  // of a false INVALID.
+  if (res.status === 403) return EFindingStatus.INVALID;
+  if (res.ok) return EFindingStatus.VALID;
+  return EFindingStatus.UNKNOWN;
+}
+
+// A GCP service account key is a full JSON credentials file (see
+// extractGcpServiceAccountJson in domain/detection/engine.ts) - live-
+// testing it means proving the private_key inside actually signs for the
+// client_email Google has on file. Exchanging a self-signed JWT assertion
+// for an OAuth access token (RFC 7523) does exactly that and nothing
+// else: no Cloud API is ever called, so this never touches any resource
+// the service account can access, and a dead/deleted/disabled key
+// reliably comes back as invalid_grant.
+// The token_uri field of the JSON is attacker-controlled (it comes from
+// scanned repo content) and is never used as a fetch target - the real
+// Google OAuth endpoint is the only value that ever makes sense here, so
+// it's hardcoded rather than trusted from the parsed key.
+const GCP_TOKEN_URI = 'https://oauth2.googleapis.com/token';
+
+async function checkGcpServiceAccountKey(secretValue: string): Promise<EFindingStatus> {
+  let key: { private_key?: unknown; client_email?: unknown };
+  try {
+    key = JSON.parse(secretValue);
+  } catch {
+    return EFindingStatus.UNKNOWN;
+  }
+  if (typeof key.private_key !== 'string' || typeof key.client_email !== 'string') {
+    return EFindingStatus.UNKNOWN;
+  }
+  const now = Math.floor(Date.now() / 1000);
+
+  let assertion: string;
+  try {
+    assertion = jwt.sign(
+      {
+        iss: key.client_email,
+        scope: 'https://www.googleapis.com/auth/cloud-platform.read-only',
+        aud: GCP_TOKEN_URI,
+        iat: now,
+        exp: now + 60,
+      },
+      key.private_key,
+      { algorithm: 'RS256' },
+    );
+  } catch {
+    // Malformed private_key (not real PEM) - not our call to make.
+    return EFindingStatus.UNKNOWN;
+  }
+
+  const res = await fetch(GCP_TOKEN_URI, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion,
+    }),
+    redirect: 'manual',
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (res.status === 400 || res.status === 401) return EFindingStatus.INVALID;
+  if (res.ok) return EFindingStatus.VALID;
+  return EFindingStatus.UNKNOWN;
+}
+
 // One read-only, side-effect-free request per service - a plain identity/
 // "who am I" check, never an action the credential's real owner would
 // notice or that touches their data. Services with no entry here always
-// resolve to UNKNOWN (see the port's contract) - usually because the
-// secret type needs a paired value we don't have (e.g. AWS access key ID
-// needs its secret key too), needs a per-account host we don't know
-// (Shopify shop domain, self-hosted Grafana/Vault/Databricks), or isn't a
-// bearer credential at all (private keys, OAuth client secrets, webhook
-// signing secrets).
+// resolve to UNKNOWN (see the port's contract) - usually because it
+// needs a per-account host we don't know (Shopify shop domain,
+// self-hosted Grafana/Vault/Databricks), or isn't a bearer credential at
+// all (private keys, OAuth client secrets, webhook signing secrets).
 const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
+  [ESecretType.AWS_ACCESS_KEY_ID]: async (value, pairedValue) => {
+    if (!pairedValue) return EFindingStatus.UNKNOWN;
+    return checkAwsCredentials(value, pairedValue);
+  },
+
+  [ESecretType.GCP_SERVICE_ACCOUNT_KEY]: (value) => checkGcpServiceAccountKey(value),
+
   [ESecretType.TELEGRAM_BOT_TOKEN]: async (value) => {
     const res = await fetch(`https://api.telegram.org/bot${value}/getMe`, {
       signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -325,11 +450,11 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
 
 @Injectable()
 export class LiveKeyValidatorAdapter extends KeyValidatorPort {
-  async validate(secretType: ESecretType, secretValue: string): Promise<EFindingStatus> {
+  async validate(secretType: ESecretType, secretValue: string, pairedValue?: string): Promise<EFindingStatus> {
     const check = CHECKERS[secretType];
     if (!check) return EFindingStatus.UNKNOWN;
     try {
-      return await check(secretValue);
+      return await check(secretValue, pairedValue);
     } catch {
       return EFindingStatus.UNKNOWN; // network error/timeout - never guess INVALID
     }

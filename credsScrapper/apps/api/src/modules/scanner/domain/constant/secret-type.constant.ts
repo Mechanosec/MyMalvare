@@ -2,6 +2,7 @@
 // slugs (plus GENERIC_HIGH_ENTROPY, from entropy fallback detection).
 export enum ESecretType {
   AWS_ACCESS_KEY_ID = 'aws_access_key_id',
+  AWS_SECRET_ACCESS_KEY = 'aws_secret_access_key',
   GITHUB_PAT = 'github_pat',
   GITHUB_OAUTH_TOKEN = 'github_oauth_token',
   GITHUB_APP_TOKEN = 'github_app_token',

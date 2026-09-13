@@ -50,9 +50,27 @@ describe('AdminTestFindingUseCase', () => {
 
     const result = await useCase.execute(10);
 
-    expect(validator.validate).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token');
+    expect(validator.validate).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token', undefined);
     expect(state.recordTestResult).toHaveBeenCalledWith(10, EFindingStatus.VALID);
     expect(result).toMatchObject({ id: 10, status: EFindingStatus.VALID });
     expect(result?.checkedAt).toBeInstanceOf(Date);
+  });
+
+  it('looks up and passes a paired AWS secret key when testing an AWS access key ID finding', async () => {
+    const finding = makeFinding({ secretType: ESecretType.AWS_ACCESS_KEY_ID, secretValue: 'AKIAFAKE' });
+    const state = {
+      getFindingById: jest.fn().mockResolvedValue(finding),
+      recordTestResult: jest.fn(),
+      listFindings: jest.fn().mockResolvedValue({ items: [{ secretValue: 'b'.repeat(40) }], total: 1 }),
+    } as unknown as StateRepositoryPort;
+    const validator = { validate: jest.fn().mockResolvedValue(EFindingStatus.VALID) } as unknown as KeyValidatorPort;
+    const useCase = new AdminTestFindingUseCase(state, validator);
+
+    await useCase.execute(10);
+
+    expect(state.listFindings).toHaveBeenCalledWith(
+      expect.objectContaining({ repoIds: [42], secretTypes: [ESecretType.AWS_SECRET_ACCESS_KEY] }),
+    );
+    expect(validator.validate).toHaveBeenCalledWith(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAFAKE', 'b'.repeat(40));
   });
 });

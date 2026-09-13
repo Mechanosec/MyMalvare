@@ -3,6 +3,11 @@ import { PATTERNS } from '../../../../../src/modules/scanner/domain/detection/pa
 
 const SAMPLES: Array<[ESecretType, string]> = [
   [ESecretType.AWS_ACCESS_KEY_ID, 'AKIAABCDEFGH12345678'],
+  // Only present here for the "every declared type has a sample" coverage
+  // check below - this type's pattern requires a variable-name context the
+  // generic `TOKEN = '${sample}'` wrapper doesn't provide, so its actual
+  // detection behavior is exercised by the two dedicated tests further down.
+  [ESecretType.AWS_SECRET_ACCESS_KEY, 'a'.repeat(40)],
   [ESecretType.GITHUB_PAT, 'ghp_' + 'a'.repeat(36)],
   [ESecretType.GITHUB_OAUTH_TOKEN, 'gho_' + 'a'.repeat(36)],
   [ESecretType.GITHUB_APP_TOKEN, 'ghu_' + 'a'.repeat(36)],
@@ -105,9 +110,24 @@ describe('PATTERNS', () => {
     expect(patternTypes).toEqual(sampleTypes);
   });
 
-  it.each(SAMPLES)('detects %s from its sample token', (secretType: ESecretType, sample: string) => {
-    const hits = matchAny(`TOKEN = '${sample}'`);
-    expect(hits).toContainEqual([secretType, sample]);
+  it.each(SAMPLES.filter(([type]) => type !== ESecretType.AWS_SECRET_ACCESS_KEY))(
+    'detects %s from its sample token',
+    (secretType: ESecretType, sample: string) => {
+      const hits = matchAny(`TOKEN = '${sample}'`);
+      expect(hits).toContainEqual([secretType, sample]);
+    },
+  );
+
+  it('detects an AWS secret key when preceded by a recognizable variable name', () => {
+    const value = 'a'.repeat(40);
+    const hits = matchAny(`aws_secret_access_key = '${value}'`);
+    expect(hits).toContainEqual([ESecretType.AWS_SECRET_ACCESS_KEY, value]);
+  });
+
+  it('does not flag a bare 40-char base64-ish string as an AWS secret key without that context', () => {
+    const value = 'a'.repeat(40);
+    const hits = matchAny(`TOKEN = '${value}'`);
+    expect(hits.filter(([type]) => type === ESecretType.AWS_SECRET_ACCESS_KEY)).toEqual([]);
   });
 
   it('does not false-positive on normal code', () => {

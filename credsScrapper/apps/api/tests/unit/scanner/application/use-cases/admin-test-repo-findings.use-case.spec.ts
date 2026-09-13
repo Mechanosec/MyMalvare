@@ -39,9 +39,33 @@ describe('AdminTestRepoFindingsUseCase', () => {
 
     const result = await useCase.execute(10);
 
-    expect(validator.validate).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token');
+    expect(validator.validate).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token', undefined);
     expect(state.recordTestResult).toHaveBeenCalledWith(1, EFindingStatus.VALID);
     expect(result).toEqual([{ ...finding, status: EFindingStatus.VALID }]);
+  });
+
+  it('pairs an AWS access key ID with the AWS secret key already in the fetched findings, no extra query', async () => {
+    const accessKey = makeFinding({ id: 1, secretType: ESecretType.AWS_ACCESS_KEY_ID, secretValue: 'AKIAFAKE' });
+    const secretKey = makeFinding({
+      id: 2,
+      secretType: ESecretType.AWS_SECRET_ACCESS_KEY,
+      secretValue: 'b'.repeat(40),
+    });
+    const state = {
+      listFindings: jest
+        .fn()
+        .mockResolvedValueOnce({ items: [accessKey, secretKey], total: 2 })
+        .mockResolvedValueOnce({ items: [accessKey, secretKey], total: 2 }),
+      recordTestResult: jest.fn(),
+    } as unknown as StateRepositoryPort;
+    const validator = { validate: jest.fn().mockResolvedValue(EFindingStatus.VALID) } as unknown as KeyValidatorPort;
+    const useCase = new AdminTestRepoFindingsUseCase(state, validator);
+
+    await useCase.execute(10);
+
+    expect(state.listFindings).toHaveBeenCalledTimes(2);
+    expect(validator.validate).toHaveBeenCalledWith(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAFAKE', 'b'.repeat(40));
+    expect(validator.validate).toHaveBeenCalledWith(ESecretType.AWS_SECRET_ACCESS_KEY, 'b'.repeat(40), undefined);
   });
 
   it('is a no-op when the repo has no findings', async () => {

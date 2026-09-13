@@ -118,4 +118,46 @@ describe('scanText', () => {
     const findings = scanText(text);
     expect(findings.map((f) => f.secretType)).toContain(ESecretType.GITHUB_PAT);
   });
+
+  it('captures the whole GCP service account JSON as secretValue, not just the "type": "service_account" marker', () => {
+    const key = {
+      type: 'service_account',
+      project_id: 'my-test-project',
+      private_key_id: 'abc123',
+      private_key: '-----BEGIN PRIVATE KEY-----\\nMIIfake\\n-----END PRIVATE KEY-----\\n',
+      client_email: 'svc@my-test-project.iam.gserviceaccount.com',
+      client_id: '123456789',
+      token_uri: 'https://oauth2.googleapis.com/token',
+    };
+    const text = `const credentials = ${JSON.stringify(key, null, 2)};\n`;
+
+    const findings = scanText(text);
+
+    const gcpFinding = findings.find((f) => f.secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY);
+    expect(gcpFinding).toBeDefined();
+    expect(JSON.parse(gcpFinding!.secretValue)).toEqual(key);
+  });
+
+  it('falls back to the bare marker when the surrounding braces do not parse as valid JSON', () => {
+    const text = 'some text "type": "service_account" more text with no real braces around it\n';
+
+    const findings = scanText(text);
+
+    const gcpFinding = findings.find((f) => f.secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY);
+    expect(gcpFinding?.secretValue).toBe('"type": "service_account"');
+  });
+
+  it("does not skip a real GCP key as a placeholder just because its project_id says 'test'", () => {
+    const key = {
+      type: 'service_account',
+      project_id: 'my-app-test-1234',
+      private_key: 'a'.repeat(50),
+      client_email: 'svc@my-app-test-1234.iam.gserviceaccount.com',
+    };
+    const text = `${JSON.stringify(key)}\n`;
+
+    const findings = scanText(text);
+
+    expect(findings.some((f) => f.secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY)).toBe(true);
+  });
 });

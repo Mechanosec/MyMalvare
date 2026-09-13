@@ -41,7 +41,19 @@ function lineNumberAt(lineOffsets: readonly number[], offset: number): number {
 // real, sensitive secret type whose own prefix contains the word.
 const PLACEHOLDER_MARKERS = ['example', 'placeholder', 'sample', 'changeme', 'dummy', 'fake'];
 
+// GCP_SERVICE_ACCOUNT_KEY's secretValue is the whole credentials JSON
+// (see extractGcpServiceAccountJson above), not a single token - a real
+// key's own project_id/client_email fields commonly contain "test" (a
+// GCP test/staging project) or even "example"/"sample" (a project named
+// after a demo app), which would otherwise make this heuristic silently
+// drop a genuine, high-severity leaked key. path-exclusion.ts's
+// test/fixture-directory skip is this type's actual placeholder defense.
+const PLACEHOLDER_SKIP_EXEMPT = new Set([ESecretType.GCP_SERVICE_ACCOUNT_KEY]);
+
 function isPlaceholder(secretType: ESecretType, value: string, context: string | null): boolean {
+  if (PLACEHOLDER_SKIP_EXEMPT.has(secretType)) {
+    return false;
+  }
   const haystack = `${value} ${context ?? ''}`.toLowerCase();
   if (PLACEHOLDER_MARKERS.some((marker) => haystack.includes(marker))) {
     return true;
@@ -91,6 +103,69 @@ function stripMimeBase64Blocks(text: string): string {
   return text.replace(MIME_BASE64_BLOCK_RE, '[stripped-base64-block]\n');
 }
 
+// The GCP pattern only anchors on the "type": "service_account" marker
+// (a flat regex can't match a whole, possibly-nested, possibly-huge JSON
+// object) - but live-testing a GCP key needs the actual private_key and
+// client_email fields, not just proof the marker is present. This finds
+// the enclosing {...} around the marker and returns it as the finding's
+// real secretValue when it parses as valid JSON with the fields a service
+// account key actually has; otherwise the caller falls back to the bare
+// marker, same as before this existed. Bounded to a window around the
+// marker (real service-account key files are a few KB) so this can't
+// turn into an unbounded scan of a huge diff.
+const GCP_JSON_SEARCH_WINDOW = 20_000;
+
+interface IGcpJsonSpan {
+  readonly json: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+function extractGcpServiceAccountJson(text: string, markerIndex: number): IGcpJsonSpan | null {
+  const searchStart = Math.max(0, markerIndex - GCP_JSON_SEARCH_WINDOW);
+  const searchEnd = Math.min(text.length, markerIndex + GCP_JSON_SEARCH_WINDOW);
+
+  let openBrace = -1;
+  for (let i = markerIndex; i >= searchStart; i -= 1) {
+    if (text[i] === '{') {
+      openBrace = i;
+      break;
+    }
+  }
+  if (openBrace === -1) {
+    return null;
+  }
+
+  let depth = 0;
+  let closeBrace = -1;
+  for (let i = openBrace; i < searchEnd; i += 1) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        closeBrace = i;
+        break;
+      }
+    }
+  }
+  if (closeBrace === -1) {
+    return null;
+  }
+
+  const candidate = text.slice(openBrace, closeBrace + 1);
+  try {
+    const parsed: unknown = JSON.parse(candidate);
+    const hasRequiredFields =
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof (parsed as Record<string, unknown>).private_key === 'string' &&
+      typeof (parsed as Record<string, unknown>).client_email === 'string';
+    return hasRequiredFields ? { json: candidate, start: openBrace, end: closeBrace + 1 } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function scanText(rawText: string): IFinding[] {
   const text = stripMimeBase64Blocks(stripDataUriBlobs(rawText));
   const lineOffsets = buildLineOffsets(text);
@@ -100,15 +175,25 @@ export function scanText(rawText: string): IFinding[] {
   for (const { secretType, pattern } of PATTERNS) {
     for (const match of text.matchAll(pattern)) {
       const start = match.index ?? 0;
-      const value = match[0];
-      matchedSpans.push([start, start + value.length]);
+      let value = match[0];
+      let spanEnd = start + value.length;
+      let lineStart = start;
+      if (secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY) {
+        const jsonSpan = extractGcpServiceAccountJson(text, start);
+        if (jsonSpan) {
+          value = jsonSpan.json;
+          spanEnd = jsonSpan.end;
+          lineStart = jsonSpan.start;
+        }
+      }
+      matchedSpans.push([start, spanEnd]);
       if (isPlaceholder(secretType, value, null)) {
         continue;
       }
       findings.push({
         secretType,
         secretValue: value,
-        lineNumber: lineNumberAt(lineOffsets, start),
+        lineNumber: lineNumberAt(lineOffsets, lineStart),
         context: null,
       });
     }
