@@ -44,3 +44,18 @@ export interface ISecretTypeCount {
   readonly secretType: ESecretType;
   readonly count: number;
 }
+
+export interface IStatusCount {
+  readonly status: EFindingStatus;
+  readonly count: number;
+}
+
+/** One finding to persist via addFindings - everything except the repo/owner/name it belongs to (those are shared across a whole scan's batch). */
+export interface IFindingInput {
+  readonly filePath: string;
+  readonly commitSha: string;
+  readonly secretType: ESecretType;
+  readonly secretValue: string;
+  readonly lineNumber: number;
+  readonly context: string | null;
+}

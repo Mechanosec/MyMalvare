@@ -185,6 +185,118 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
     });
   });
 
+  describe('addFindings batch dedup', () => {
+    it('inserts every finding in the batch', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+      await repo.addFindings(1, 'acme', 'widgets', [
+        { filePath: 'a.py', commitSha: 'sha1', secretType: 'AWS_ACCESS_KEY_ID' as never, secretValue: 'v1', lineNumber: 1, context: null },
+        { filePath: 'b.py', commitSha: 'sha1', secretType: 'GITHUB_PAT' as never, secretValue: 'v2', lineNumber: 1, context: null },
+      ]);
+
+      const page = await repo.listFindings({ repoIds: [1] });
+      expect(page.items).toHaveLength(2);
+
+      await prisma.$disconnect();
+    });
+
+    it('merges two occurrences of the same secret within a single batch call, promoting to the path-based one', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+      await repo.addFindings(1, 'acme', 'widgets', [
+        { filePath: '<commit-diff>', commitSha: 'old-sha', secretType: 'AWS_ACCESS_KEY_ID' as never, secretValue: 'AKIAABCDEFGH12345678', lineNumber: 1, context: null },
+        { filePath: 'src/config.ts', commitSha: 'head-sha', secretType: 'AWS_ACCESS_KEY_ID' as never, secretValue: 'AKIAABCDEFGH12345678', lineNumber: 3, context: null },
+      ]);
+
+      const page = await repo.listFindings({ repoIds: [1] });
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0].filePath).toBe('src/config.ts');
+      expect(page.items[0].commitSha).toBe('head-sha');
+      expect([...page.items[0].leakCommits].sort()).toEqual(['head-sha', 'old-sha']);
+
+      await prisma.$disconnect();
+    });
+
+    it('merges a batch against a pre-existing row without overwriting its real values with placeholders', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+      await repo.addFinding(1, 'acme', 'widgets', 'src/config.ts', 'head-sha', 'AWS_ACCESS_KEY_ID' as never, 'AKIAABCDEFGH12345678', 3, 'ctx');
+
+      // Same secret, seen again in a later commit - this should only add
+      // to leakCommits, and must NOT clobber the existing path-based
+      // filePath/commitSha/lineNumber/context with empty placeholder
+      // values (the bug this test guards against).
+      await repo.addFindings(1, 'acme', 'widgets', [
+        { filePath: '<commit-diff>', commitSha: 'new-sha', secretType: 'AWS_ACCESS_KEY_ID' as never, secretValue: 'AKIAABCDEFGH12345678', lineNumber: 1, context: null },
+      ]);
+
+      const page = await repo.listFindings({ repoIds: [1] });
+      expect(page.items).toHaveLength(1);
+      expect(page.items[0].filePath).toBe('src/config.ts');
+      expect(page.items[0].commitSha).toBe('head-sha');
+      expect(page.items[0].lineNumber).toBe(3);
+      expect(page.items[0].context).toBe('ctx');
+      expect([...page.items[0].leakCommits].sort()).toEqual(['head-sha', 'new-sha']);
+
+      await prisma.$disconnect();
+    });
+
+    it('inserts correctly across the createMany chunk boundary (500 rows)', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+      const findings = Array.from({ length: 1200 }, (_, i) => ({
+        filePath: `file-${i}.py`,
+        commitSha: 'sha',
+        secretType: 'AWS_ACCESS_KEY_ID' as never,
+        secretValue: `value-${i}`,
+        lineNumber: 1,
+        context: null,
+      }));
+      await repo.addFindings(1, 'acme', 'widgets', findings);
+
+      const page = await repo.listFindings({ repoIds: [1], limit: 2000 });
+      expect(page.total).toBe(1200);
+
+      await prisma.$disconnect();
+    });
+
+    it('updates correctly across the transaction chunk boundary on a re-scan (600 pre-existing rows, each getting a new commit)', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+      const firstScan = Array.from({ length: 600 }, (_, i) => ({
+        filePath: `file-${i}.py`,
+        commitSha: 'old-sha',
+        secretType: 'AWS_ACCESS_KEY_ID' as never,
+        secretValue: `value-${i}`,
+        lineNumber: 1,
+        context: null,
+      }));
+      await repo.addFindings(1, 'acme', 'widgets', firstScan);
+
+      // Re-scan: same 600 secrets, seen again in a new commit - every one
+      // of these routes through the toUpdate path, not toInsert.
+      const rescan = firstScan.map((f) => ({ ...f, commitSha: 'new-sha' }));
+      await repo.addFindings(1, 'acme', 'widgets', rescan);
+
+      const page = await repo.listFindings({ repoIds: [1], limit: 1000 });
+      expect(page.total).toBe(600);
+      expect([...page.items[0].leakCommits].sort()).toEqual(['new-sha', 'old-sha']);
+      expect([...page.items[599].leakCommits].sort()).toEqual(['new-sha', 'old-sha']);
+
+      await prisma.$disconnect();
+    });
+
+    it('does nothing for an empty batch', async () => {
+      const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+      await repo.addFindings(1, 'acme', 'widgets', []);
+
+      const page = await repo.listFindings({ repoIds: [1] });
+      expect(page.items).toHaveLength(0);
+
+      await prisma.$disconnect();
+    });
+  });
+
   describe('updateFindingStatus', () => {
     it('persists the given status', async () => {
       const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));

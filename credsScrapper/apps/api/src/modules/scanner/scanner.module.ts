@@ -17,6 +17,7 @@ import { PiscinaScanWorkerAdapter } from './infrastructure/workers/piscina-scan-
 import { DiscoverReposUseCase } from './application/use-cases/discover-repos.use-case';
 import { GetFindingsRepoOptionsUseCase } from './application/use-cases/get-findings-repo-options.use-case';
 import { GetFindingsSecretTypeCountsUseCase } from './application/use-cases/get-findings-secret-type-counts.use-case';
+import { GetFindingsStatusCountsUseCase } from './application/use-cases/get-findings-status-counts.use-case';
 import { GetFindingsUseCase } from './application/use-cases/get-findings.use-case';
 import { GetScannedReposUseCase } from './application/use-cases/get-scanned-repos.use-case';
 import { GetScanStatusUseCase } from './application/use-cases/get-scan-status.use-case';
@@ -99,6 +100,11 @@ import { ScanController } from './presentation/scan.controller';
       GetFindingsSecretTypeCountsUseCase,
       [StateRepositoryPort],
       (state) => new GetFindingsSecretTypeCountsUseCase(state),
+    ),
+    provideUseCase(
+      GetFindingsStatusCountsUseCase,
+      [StateRepositoryPort],
+      (state) => new GetFindingsStatusCountsUseCase(state),
     ),
     provideUseCase(
       GetScanStatusUseCase,

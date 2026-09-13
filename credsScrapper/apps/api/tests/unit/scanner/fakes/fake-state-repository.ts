@@ -4,11 +4,13 @@ import { EFindingStatus } from '../../../../src/modules/scanner/domain/constant/
 import { EScanStatus } from '../../../../src/modules/scanner/domain/constant/scan-status.constant';
 import { ESecretType } from '../../../../src/modules/scanner/domain/constant/secret-type.constant';
 import {
+  IFindingInput,
   IFindingRecord,
   IFindingsFilter,
   IFindingsPage,
   IFindingsRepoOption,
   ISecretTypeCount,
+  IStatusCount,
 } from '../../../../src/modules/scanner/domain/types/finding-record.type';
 import { IQueueStatus } from '../../../../src/modules/scanner/domain/types/queue-status.type';
 import { IRepoRef } from '../../../../src/modules/scanner/domain/types/repo-ref.type';
@@ -160,6 +162,27 @@ export class FakeStateRepository extends StateRepositoryPort {
     });
   }
 
+  async addFindings(
+    repoId: number,
+    owner: string,
+    name: string,
+    findings: readonly IFindingInput[],
+  ): Promise<void> {
+    for (const finding of findings) {
+      await this.addFinding(
+        repoId,
+        owner,
+        name,
+        finding.filePath,
+        finding.commitSha,
+        finding.secretType,
+        finding.secretValue,
+        finding.lineNumber,
+        finding.context,
+      );
+    }
+  }
+
   async updateFindingStatus(id: number, status: EFindingStatus): Promise<void> {
     const row = this.findings[id];
     if (row) {
@@ -262,6 +285,19 @@ export class FakeStateRepository extends StateRepositoryPort {
       counts.set(f.secretType, (counts.get(f.secretType) ?? 0) + 1);
     }
     return [...counts.entries()].map(([secretType, count]) => ({ secretType, count }));
+  }
+
+  async listFindingsStatusCounts(
+    repoId?: number,
+    secretTypes?: readonly ESecretType[],
+  ): Promise<IStatusCount[]> {
+    const counts = new Map<EFindingStatus, number>();
+    for (const f of this.findings) {
+      if (repoId !== undefined && f.repoId !== repoId) continue;
+      if (secretTypes?.length && !secretTypes.includes(f.secretType)) continue;
+      counts.set(f.status, (counts.get(f.status) ?? 0) + 1);
+    }
+    return [...counts.entries()].map(([status, count]) => ({ status, count }));
   }
 
   async listScannedRepos(limit: number): Promise<IScannedRepoRecord[]> {

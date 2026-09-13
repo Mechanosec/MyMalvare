@@ -6,11 +6,13 @@ import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { EScanStatus } from '../../domain/constant/scan-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 import {
+  IFindingInput,
   IFindingRecord,
   IFindingsFilter,
   IFindingsPage,
   IFindingsRepoOption,
   ISecretTypeCount,
+  IStatusCount,
 } from '../../domain/types/finding-record.type';
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
@@ -198,6 +200,152 @@ export class PrismaStateRepository extends StateRepositoryPort {
     });
   }
 
+  async addFindings(
+    repoId: number,
+    owner: string,
+    name: string,
+    findings: readonly IFindingInput[],
+  ): Promise<void> {
+    if (findings.length === 0) {
+      return;
+    }
+
+    interface IMergeState {
+      readonly id?: number;
+      readonly secretType: ESecretType;
+      readonly secretValue: string;
+      filePath: string;
+      commitSha: string;
+      lineNumber: number;
+      context: string | null;
+      readonly leakCommits: Set<string>;
+      changed: boolean;
+      // Whether filePath/commitSha/lineNumber/context were actually
+      // (re)written during this call - distinct from `changed` (which
+      // also covers a leakCommits-only update) so an existing row's real
+      // values are never overwritten with this function's placeholder
+      // seed values (commitSha: '', lineNumber: 0, context: null) below.
+      promoted: boolean;
+    }
+
+    const byKey = new Map<string, IMergeState>();
+    const keyOf = (secretType: string, secretValue: string) => `${secretType}|${secretValue}`;
+
+    // One query for every finding this repo already has, instead of one
+    // findFirst per incoming finding - a repo scan can produce hundreds of
+    // thousands of findings, and that was turning "persist the results"
+    // into a multi-minute tail after the scan itself had already finished.
+    const existingRows = await this.prisma.finding.findMany({
+      where: { repoId },
+      select: { id: true, secretType: true, secretValue: true, filePath: true, leakCommits: true },
+    });
+    for (const row of existingRows) {
+      byKey.set(keyOf(row.secretType, row.secretValue), {
+        id: row.id,
+        secretType: row.secretType as ESecretType,
+        secretValue: row.secretValue,
+        filePath: row.filePath,
+        commitSha: '',
+        lineNumber: 0,
+        context: null,
+        leakCommits: new Set(parseLeakCommits(row.leakCommits)),
+        changed: false,
+        promoted: false,
+      });
+    }
+
+    // Same "does this new sighting add a commit, or upgrade a diff-based
+    // placeholder to a real file path" merge addFinding always did - just
+    // applied against an in-memory map instead of a DB round-trip per item,
+    // and also covers duplicates arriving within this same batch (e.g. the
+    // same secret appearing in both commit history and the working tree).
+    for (const finding of findings) {
+      const key = keyOf(finding.secretType, finding.secretValue);
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, {
+          secretType: finding.secretType,
+          secretValue: finding.secretValue,
+          filePath: finding.filePath,
+          commitSha: finding.commitSha,
+          lineNumber: finding.lineNumber,
+          context: finding.context,
+          leakCommits: new Set([finding.commitSha]),
+          changed: true,
+          promoted: true,
+        });
+        continue;
+      }
+
+      const hadCommit = existing.leakCommits.has(finding.commitSha);
+      existing.leakCommits.add(finding.commitSha);
+
+      const isIncomingPathBased = finding.filePath !== '<commit-diff>';
+      const isExistingDiffBased = existing.filePath === '<commit-diff>';
+      if (isIncomingPathBased && isExistingDiffBased) {
+        existing.filePath = finding.filePath;
+        existing.commitSha = finding.commitSha;
+        existing.lineNumber = finding.lineNumber;
+        existing.context = finding.context;
+        existing.changed = true;
+        existing.promoted = true;
+      } else if (!hadCommit) {
+        existing.changed = true;
+      }
+    }
+
+    const toInsert: Prisma.FindingCreateManyInput[] = [];
+    const toUpdate: Array<{ id: number; data: Prisma.FindingUpdateInput }> = [];
+    for (const state of byKey.values()) {
+      if (state.id === undefined) {
+        toInsert.push({
+          repoId,
+          owner,
+          name,
+          filePath: state.filePath,
+          commitSha: state.commitSha,
+          secretType: state.secretType,
+          secretValue: state.secretValue,
+          lineNumber: state.lineNumber,
+          context: state.context,
+          leakCommits: JSON.stringify([...state.leakCommits]),
+        });
+      } else if (state.changed) {
+        toUpdate.push({
+          id: state.id,
+          data: {
+            leakCommits: JSON.stringify([...state.leakCommits]),
+            ...(state.promoted
+              ? {
+                  filePath: state.filePath,
+                  commitSha: state.commitSha,
+                  lineNumber: state.lineNumber,
+                  context: state.context,
+                }
+              : {}),
+          },
+        });
+      }
+    }
+
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < toInsert.length; i += CHUNK_SIZE) {
+      await this.prisma.finding.createMany({ data: toInsert.slice(i, i + CHUNK_SIZE) });
+    }
+    // A re-scan of an already-known noisy repo routes almost everything
+    // through here instead of toInsert (same findings, new commit sighting)
+    // - one update per row can't be avoided (each row's leakCommits/promoted
+    // fields differ), but batching them into transactions instead of N
+    // sequential awaits is still the same round-trip-count fix as toInsert.
+    for (let i = 0; i < toUpdate.length; i += CHUNK_SIZE) {
+      await this.prisma.$transaction(
+        toUpdate
+          .slice(i, i + CHUNK_SIZE)
+          .map(({ id, data }) => this.prisma.finding.update({ where: { id }, data })),
+      );
+    }
+  }
+
   async updateFindingStatus(id: number, status: EFindingStatus): Promise<void> {
     await this.prisma.finding.update({ where: { id }, data: { status } });
   }
@@ -305,6 +453,24 @@ export class PrismaStateRepository extends StateRepositoryPort {
     });
     return rows.map((row) => ({
       secretType: row.secretType as ESecretType,
+      count: row._count._all,
+    }));
+  }
+
+  async listFindingsStatusCounts(
+    repoId?: number,
+    secretTypes?: readonly ESecretType[],
+  ): Promise<IStatusCount[]> {
+    const rows = await this.prisma.finding.groupBy({
+      by: ['status'],
+      where: {
+        repoId: repoId !== undefined ? repoId : undefined,
+        secretType: secretTypes?.length ? { in: [...secretTypes] } : undefined,
+      },
+      _count: { _all: true },
+    });
+    return rows.map((row) => ({
+      status: row.status as EFindingStatus,
       count: row._count._all,
     }));
   }

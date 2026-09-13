@@ -7,8 +7,10 @@ import {
   fetchFindings,
   fetchFindingsRepoOptions,
   fetchFindingsSecretTypeCounts,
+  fetchFindingsStatusCounts,
   fetchMyFindings,
   fetchMySecretTypeCounts,
+  fetchMyStatusCounts,
   fetchMyTestableRepos,
   FINDINGS_PAGE_SIZE,
   testMyFinding,
@@ -16,7 +18,7 @@ import {
 } from '../lib/api-client';
 import { EFindingStatus } from '../lib/constant/finding-status.constant';
 import { ESecretType, TESTABLE_SECRET_TYPES } from '../lib/constant/secret-type.constant';
-import { IFinding, IFindingsRepoOption, ISecretTypeCount } from '../lib/types/finding.type';
+import { IFinding, IFindingsRepoOption, ISecretTypeCount, IStatusCount } from '../lib/types/finding.type';
 import { FindingStatusBadge } from './finding-status-badge';
 import { MultiSelect } from './multi-select';
 import { Pagination } from './pagination';
@@ -43,6 +45,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
   const [secretTypes, setSecretTypes] = useState<ESecretType[]>([]);
   const [statuses, setStatuses] = useState<EFindingStatus[]>([]);
   const [secretTypeCounts, setSecretTypeCounts] = useState<ISecretTypeCount[]>([]);
+  const [statusCounts, setStatusCounts] = useState<IStatusCount[]>([]);
   const [findings, setFindings] = useState<readonly IFinding[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -72,6 +75,22 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
     const fetchCounts = isAdmin ? () => fetchFindingsSecretTypeCounts(repoId) : () => fetchMySecretTypeCounts(repoId);
     fetchCounts().then(setSecretTypeCounts).catch(() => setSecretTypeCounts([]));
   }, [isAdmin, repoId]);
+
+  function refreshStatusCounts(targetRepoId: number, targetSecretTypes: readonly ESecretType[]) {
+    const scopedTypes = targetSecretTypes.length ? targetSecretTypes : TESTABLE_SECRET_TYPES;
+    const fetchCounts = isAdmin
+      ? () => fetchFindingsStatusCounts(targetRepoId, [...scopedTypes])
+      : () => fetchMyStatusCounts(targetRepoId, [...scopedTypes]);
+    fetchCounts().then(setStatusCounts).catch(() => setStatusCounts([]));
+  }
+
+  useEffect(() => {
+    if (repoId === null) {
+      setStatusCounts([]);
+      return;
+    }
+    refreshStatusCounts(repoId, secretTypes);
+  }, [isAdmin, repoId, secretTypes]);
 
   async function loadPage(targetPage: number) {
     if (repoId === null) return;
@@ -130,6 +149,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
         ...prev,
         `Tested ${finding.secretType} in ${finding.filePath}: ${updated.status}`,
       ]);
+      if (repoId !== null) refreshStatusCounts(repoId, secretTypes);
     } catch {
       setLog((prev) => [...prev, `Failed to test ${finding.secretType} in ${finding.filePath}`]);
     } finally {
@@ -144,6 +164,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
       const updated = await (isAdmin ? adminTestRepoFindings(repoId) : testMyRepoFindings(repoId));
       setLog((prev) => [...prev, `Tested ${updated.length} finding(s) for repo ${repoId}`]);
       await loadPage(page);
+      refreshStatusCounts(repoId, secretTypes);
     } catch {
       setLog((prev) => [...prev, `Failed to test findings for repo ${repoId}`]);
     } finally {
@@ -168,6 +189,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
     setLog((prev) => [...prev, `Tested ${succeeded}/${targets.length} selected finding(s)`]);
     setSelectedIds(new Set());
     setTestingSelected(false);
+    if (repoId !== null) refreshStatusCounts(repoId, secretTypes);
   }
 
   function toggleSelected(id: number) {
@@ -224,7 +246,11 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
 
         <MultiSelect
           label="Status"
-          options={Object.values(EFindingStatus).map((value) => ({ value, label: value }))}
+          options={Object.values(EFindingStatus).map((value) => ({
+            value,
+            label: value,
+            count: statusCounts.find((c) => c.status === value)?.count,
+          }))}
           selected={statuses}
           onChange={setStatuses}
         />

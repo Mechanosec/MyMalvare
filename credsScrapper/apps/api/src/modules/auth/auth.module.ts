@@ -28,6 +28,7 @@ import { GetMyFindingsUseCase } from './application/use-cases/get-my-findings.us
 import { GetMyScannedReposUseCase } from './application/use-cases/get-my-scanned-repos.use-case';
 import { SetMyFindingStatusUseCase } from './application/use-cases/set-my-finding-status.use-case';
 import { GetMySecretTypeCountsUseCase } from './application/use-cases/get-my-secret-type-counts.use-case';
+import { GetMyStatusCountsUseCase } from './application/use-cases/get-my-status-counts.use-case';
 import { AuthController } from './presentation/auth.controller';
 import { RepoAuthorizationsController } from './presentation/repo-authorizations.controller';
 
@@ -88,6 +89,12 @@ import { RepoAuthorizationsController } from './presentation/repo-authorizations
       [ListMyTestableReposUseCase, StateRepositoryPort],
       (listMyTestableRepos, state) =>
         new GetMySecretTypeCountsUseCase(listMyTestableRepos, state),
+    ),
+    provideUseCase(
+      GetMyStatusCountsUseCase,
+      [ListMyTestableReposUseCase, StateRepositoryPort],
+      (listMyTestableRepos, state) =>
+        new GetMyStatusCountsUseCase(listMyTestableRepos, state),
     ),
     provideUseCase(
       TestRepoFindingsUseCase,

@@ -1,3 +1,4 @@
+import { IFindingInput } from '../../domain/types/finding-record.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { ScanWorkerPort } from '../ports/scan-worker.port';
 import { LoggerPort } from '../ports/logger.port';
@@ -23,7 +24,7 @@ export class ScanRepositoryUseCase {
     onProgress?: (message: string) => void,
   ): Promise<void> {
     await this.workdirCleaner.remove(workdir);
-    let pendingWrites: Promise<void> = Promise.resolve();
+    const collectedFindings: IFindingInput[] = [];
 
     try {
       const result = await this.scanWorker.run(
@@ -36,22 +37,22 @@ export class ScanRepositoryUseCase {
             onProgress?.(event.message);
             return;
           }
-          pendingWrites = pendingWrites.then(() =>
-            this.state.addFinding(
-              repoRef.repoId,
-              repoRef.owner,
-              repoRef.name,
-              event.filePath,
-              event.commitSha,
-              event.finding.secretType,
-              event.finding.secretValue,
-              event.finding.lineNumber,
-              event.finding.context,
-            ),
-          );
+          collectedFindings.push({
+            filePath: event.filePath,
+            commitSha: event.commitSha,
+            secretType: event.finding.secretType,
+            secretValue: event.finding.secretValue,
+            lineNumber: event.finding.lineNumber,
+            context: event.finding.context,
+          });
         },
       );
-      await pendingWrites;
+      // One batch write for everything the scan found, instead of one
+      // findFirst+create round-trip per finding - a noisy repo's history
+      // can produce hundreds of thousands of findings, and persisting
+      // those one at a time was taking minutes after the scan itself had
+      // already finished.
+      await this.state.addFindings(repoRef.repoId, repoRef.owner, repoRef.name, collectedFindings);
 
       if (result.status === 'done') {
         await this.state.markDone(repoRef.repoId, result.headSha);

@@ -35,3 +35,8 @@ export interface ISecretTypeCount {
   readonly secretType: ESecretType;
   readonly count: number;
 }
+
+export interface IStatusCount {
+  readonly status: EFindingStatus;
+  readonly count: number;
+}

@@ -1,11 +1,13 @@
 import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 import {
+  IFindingInput,
   IFindingRecord,
   IFindingsFilter,
   IFindingsPage,
   IFindingsRepoOption,
   ISecretTypeCount,
+  IStatusCount,
 } from '../../domain/types/finding-record.type';
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
@@ -57,6 +59,23 @@ export abstract class StateRepositoryPort {
     context: string | null,
   ): Promise<void>;
 
+  /**
+   * Batch insert for a whole scan's worth of findings at once, skipping
+   * any (secretType, secretValue) pair already recorded for this repo -
+   * one existing-rows lookup plus a few chunked createMany calls, instead
+   * of a per-finding findFirst+create round-trip. A single noisy repo can
+   * produce hundreds of thousands of findings; addFinding one at a time
+   * made persisting those take minutes after the scan itself had already
+   * finished. addFinding (singular) is unchanged and still used directly
+   * by tests that only need to seed one fixture row.
+   */
+  abstract addFindings(
+    repoId: number,
+    owner: string,
+    name: string,
+    findings: readonly IFindingInput[],
+  ): Promise<void>;
+
   abstract updateFindingStatus(id: number, status: EFindingStatus): Promise<void>;
 
   /** Same as updateFindingStatus, but also stamps checkedAt - use for a live key-validation result, never a manual mark. */
@@ -92,6 +111,12 @@ export abstract class StateRepositoryPort {
 
   /** Finding count per secret type, only for types with at least one finding. */
   abstract listFindingsSecretTypeCounts(repoId?: number): Promise<ISecretTypeCount[]>;
+
+  /** Finding count per status (valid/invalid/unknown), optionally restricted to a repo and/or a set of secret types. */
+  abstract listFindingsStatusCounts(
+    repoId?: number,
+    secretTypes?: readonly ESecretType[],
+  ): Promise<IStatusCount[]>;
 
   /** Most recently scanned repos first, newest attempt (started/scanned) on top. */
   abstract listScannedRepos(limit: number): Promise<IScannedRepoRecord[]>;

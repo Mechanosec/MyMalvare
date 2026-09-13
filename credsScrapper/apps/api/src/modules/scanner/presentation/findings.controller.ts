@@ -16,6 +16,7 @@ import { AdminTestRepoFindingsUseCase } from '../application/use-cases/admin-tes
 import { AdminTestFindingUseCase } from '../application/use-cases/admin-test-finding.use-case';
 import { GetFindingsRepoOptionsUseCase } from '../application/use-cases/get-findings-repo-options.use-case';
 import { GetFindingsSecretTypeCountsUseCase } from '../application/use-cases/get-findings-secret-type-counts.use-case';
+import { GetFindingsStatusCountsUseCase } from '../application/use-cases/get-findings-status-counts.use-case';
 import { GetFindingsUseCase } from '../application/use-cases/get-findings.use-case';
 import { EFindingStatus } from '../domain/constant/finding-status.constant';
 import { ESecretType } from '../domain/constant/secret-type.constant';
@@ -24,6 +25,7 @@ import {
   IFindingsPage,
   IFindingsRepoOption,
   ISecretTypeCount,
+  IStatusCount,
 } from '../domain/types/finding-record.type';
 
 function parseCsv<T>(value: string | undefined, map: (raw: string) => T = (raw) => raw as T): T[] | undefined {
@@ -41,6 +43,7 @@ export class FindingsController {
     private readonly getFindings: GetFindingsUseCase,
     private readonly getFindingsRepoOptions: GetFindingsRepoOptionsUseCase,
     private readonly getFindingsSecretTypeCounts: GetFindingsSecretTypeCountsUseCase,
+    private readonly getFindingsStatusCounts: GetFindingsStatusCountsUseCase,
     private readonly setFindingStatus: SetFindingStatusUseCase,
     private readonly adminTestRepoFindings: AdminTestRepoFindingsUseCase,
     private readonly adminTestFinding: AdminTestFindingUseCase,
@@ -76,6 +79,17 @@ export class FindingsController {
   @Get('secret-type-counts')
   async secretTypeCounts(@Query('repoId') repoId?: string): Promise<ISecretTypeCount[]> {
     return this.getFindingsSecretTypeCounts.execute(repoId ? Number(repoId) : undefined);
+  }
+
+  @Get('status-counts')
+  async statusCounts(
+    @Query('repoId') repoId?: string,
+    @Query('secretTypes') secretTypes?: string,
+  ): Promise<IStatusCount[]> {
+    return this.getFindingsStatusCounts.execute(
+      repoId ? Number(repoId) : undefined,
+      parseCsv<ESecretType>(secretTypes),
+    );
   }
 
   @Patch(':id/status')

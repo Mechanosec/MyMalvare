@@ -1,6 +1,6 @@
 import { EFindingStatus } from './constant/finding-status.constant';
 import { ESecretType } from './constant/secret-type.constant';
-import { IFinding, IFindingsPage, IFindingsRepoOption, ISecretTypeCount } from './types/finding.type';
+import { IFinding, IFindingsPage, IFindingsRepoOption, ISecretTypeCount, IStatusCount } from './types/finding.type';
 import { IJobState } from './types/job-progress-event.type';
 import { IQueueStatus } from './types/queue-status.type';
 import { IScannedRepo } from './types/scanned-repo.type';
@@ -124,6 +124,14 @@ export function fetchFindingsSecretTypeCounts(repoId?: number): Promise<ISecretT
   return get<ISecretTypeCount[]>(`/findings/secret-type-counts${repoId !== undefined ? `?repoId=${repoId}` : ''}`);
 }
 
+export function fetchFindingsStatusCounts(repoId?: number, secretTypes?: ESecretType[]): Promise<IStatusCount[]> {
+  const params = new URLSearchParams();
+  if (repoId !== undefined) params.set('repoId', String(repoId));
+  if (secretTypes?.length) params.set('secretTypes', secretTypes.join(','));
+  const query = params.toString();
+  return get<IStatusCount[]>(`/findings/status-counts${query ? `?${query}` : ''}`);
+}
+
 export function fetchMyTestableRepos(secretTypes?: ESecretType[]): Promise<IFindingsRepoOption[]> {
   const query = secretTypes?.length ? `?secretTypes=${secretTypes.join(',')}` : '';
   return get<IFindingsRepoOption[]>(`/repo-authorizations/mine/testable-repos${query}`);
@@ -131,6 +139,12 @@ export function fetchMyTestableRepos(secretTypes?: ESecretType[]): Promise<IFind
 
 export function fetchMySecretTypeCounts(repoId: number): Promise<ISecretTypeCount[]> {
   return get<ISecretTypeCount[]>(`/repo-authorizations/mine/secret-type-counts?repoId=${repoId}`);
+}
+
+export function fetchMyStatusCounts(repoId: number, secretTypes?: ESecretType[]): Promise<IStatusCount[]> {
+  const params = new URLSearchParams({ repoId: String(repoId) });
+  if (secretTypes?.length) params.set('secretTypes', secretTypes.join(','));
+  return get<IStatusCount[]>(`/repo-authorizations/mine/status-counts?${params.toString()}`);
 }
 
 export function updateFindingStatus(id: number, status: EFindingStatus): Promise<{ ok: true }> {

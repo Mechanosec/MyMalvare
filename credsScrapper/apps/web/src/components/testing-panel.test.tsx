@@ -35,6 +35,11 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
       { secretType: ESecretType.GITHUB_PAT, count: 1 },
       { secretType: ESecretType.SLACK_TOKEN, count: 0 },
     ]);
+    vi.spyOn(apiClient, 'fetchMyStatusCounts').mockResolvedValue([
+      { status: EFindingStatus.UNKNOWN, count: 1 },
+      { status: EFindingStatus.VALID, count: 0 },
+      { status: EFindingStatus.INVALID, count: 0 },
+    ]);
   });
 
   it("shows each secret type's count for the selected repo", async () => {
@@ -48,6 +53,22 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
     const listbox = screen.getByRole('listbox');
     expect(within(listbox).getByText('github pat').closest('label')).toHaveTextContent('1');
     expect(within(listbox).getByText('slack token').closest('label')).toHaveTextContent('0');
+  });
+
+  it("shows each status's count (valid/invalid/unknown) for the selected repo", async () => {
+    render(<TestingPanel isAdmin={false} />);
+
+    fireEvent.change(await screen.findByLabelText('Repository'), { target: { value: '1' } });
+
+    await waitFor(() =>
+      expect(apiClient.fetchMyStatusCounts).toHaveBeenCalledWith(1, [...TESTABLE_SECRET_TYPES]),
+    );
+    fireEvent.click(screen.getByLabelText('Status'));
+
+    const listbox = screen.getByRole('listbox');
+    expect(within(listbox).getByText(EFindingStatus.UNKNOWN).closest('label')).toHaveTextContent('1');
+    expect(within(listbox).getByText(EFindingStatus.VALID).closest('label')).toHaveTextContent('0');
+    expect(within(listbox).getByText(EFindingStatus.INVALID).closest('label')).toHaveTextContent('0');
   });
 
   it('only offers secret types with a live checker in the filter, not every detected type', async () => {
@@ -146,6 +167,11 @@ describe('TestingPanel (admin, unscoped to any repo)', () => {
     });
     vi.spyOn(apiClient, 'fetchFindingsSecretTypeCounts').mockResolvedValue([
       { secretType: ESecretType.GITHUB_PAT, count: 1 },
+    ]);
+    vi.spyOn(apiClient, 'fetchFindingsStatusCounts').mockResolvedValue([
+      { status: EFindingStatus.UNKNOWN, count: 1 },
+      { status: EFindingStatus.VALID, count: 0 },
+      { status: EFindingStatus.INVALID, count: 0 },
     ]);
   });
 
