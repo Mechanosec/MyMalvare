@@ -138,6 +138,25 @@ describe('scanText', () => {
     expect(JSON.parse(gcpFinding!.secretValue)).toEqual(key);
   });
 
+  it('captures the whole GCP JSON from unified-diff text where every added line is prefixed with +', () => {
+    const key = {
+      type: 'service_account',
+      project_id: 'my-test-project',
+      private_key: '-----BEGIN PRIVATE KEY-----\\nMIIfake\\n-----END PRIVATE KEY-----\\n',
+      client_email: 'svc@my-test-project.iam.gserviceaccount.com',
+    };
+    const diffText = `${JSON.stringify(key, null, 2)}\n`
+      .split('\n')
+      .map((line) => (line.length ? `+${line}` : line))
+      .join('\n');
+
+    const findings = scanText(diffText);
+
+    const gcpFinding = findings.find((f) => f.secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY);
+    expect(gcpFinding).toBeDefined();
+    expect(JSON.parse(gcpFinding!.secretValue)).toEqual(key);
+  });
+
   it('falls back to the bare marker when the surrounding braces do not parse as valid JSON', () => {
     const text = 'some text "type": "service_account" more text with no real braces around it\n';
 

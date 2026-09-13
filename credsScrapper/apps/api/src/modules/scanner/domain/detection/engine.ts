@@ -121,6 +121,41 @@ interface IGcpJsonSpan {
   readonly end: number;
 }
 
+// Commit-diff text (see run-scan-job.use-case.ts's scanText(diffText) call)
+// is a unified diff: every added line is prefixed with '+' (context lines
+// with ' ', removed with '-'), so a JSON object spanning multiple diff
+// lines fails JSON.parse as-is even though it's a genuine key. The
+// candidate string starts exactly at the opening '{', so that '{' itself
+// already had its own leading diff-marker char sliced away - only lines
+// after the first can still carry one. Tried only as a fallback after the
+// raw candidate fails to parse, so a real, non-diff JSON file (which
+// parses fine as-is) is never touched by this; a plain multi-line JSON
+// file whose indentation happens to start with a space still parses fine
+// with one leading space stripped, so this fallback can't break that case.
+function stripDiffLinePrefixes(candidate: string): string {
+  return candidate
+    .split('\n')
+    .map((line, i) => {
+      if (i === 0 || line.length === 0) return line;
+      return line[0] === '+' || line[0] === '-' || line[0] === ' ' ? line.slice(1) : line;
+    })
+    .join('\n');
+}
+
+function parseGcpKeyJson(candidate: string): Record<string, unknown> | null {
+  for (const text of [candidate, stripDiffLinePrefixes(candidate)]) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // try the next candidate
+    }
+  }
+  return null;
+}
+
 function extractGcpServiceAccountJson(text: string, markerIndex: number): IGcpJsonSpan | null {
   const searchStart = Math.max(0, markerIndex - GCP_JSON_SEARCH_WINDOW);
   const searchEnd = Math.min(text.length, markerIndex + GCP_JSON_SEARCH_WINDOW);
@@ -153,17 +188,17 @@ function extractGcpServiceAccountJson(text: string, markerIndex: number): IGcpJs
   }
 
   const candidate = text.slice(openBrace, closeBrace + 1);
-  try {
-    const parsed: unknown = JSON.parse(candidate);
-    const hasRequiredFields =
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      typeof (parsed as Record<string, unknown>).private_key === 'string' &&
-      typeof (parsed as Record<string, unknown>).client_email === 'string';
-    return hasRequiredFields ? { json: candidate, start: openBrace, end: closeBrace + 1 } : null;
-  } catch {
+  const parsed = parseGcpKeyJson(candidate);
+  const hasRequiredFields =
+    typeof parsed?.private_key === 'string' && typeof parsed?.client_email === 'string';
+  if (!hasRequiredFields) {
     return null;
   }
+  // Re-serialize from the parsed object rather than keeping whichever raw
+  // candidate matched, so a diff-prefixed match's stored secretValue is
+  // clean JSON (JSON.parse-able as-is by the live-key-validator adapter),
+  // not literal '+'-prefixed lines.
+  return { json: JSON.stringify(parsed), start: openBrace, end: closeBrace + 1 };
 }
 
 export function scanText(rawText: string): IFinding[] {
