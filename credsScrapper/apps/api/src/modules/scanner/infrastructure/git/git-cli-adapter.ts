@@ -21,7 +21,33 @@ export class GitCliAdapter extends GitOperationsPort {
     // starts with "-" is always treated as a positional path/URL, never
     // as an injected option. Mirrors the same fix in the Python
     // reference (credsScrapper/app/scan/git_ops.py's clone_bare).
-    await execFileAsync('git', ['clone', '--bare', '--', source, destDir]);
+    //
+    // We only ever clone public repos anonymously - never supply
+    // credentials. A candidate that's since gone private/renamed/deleted
+    // should fail cleanly (caught upstream, marks the repo failed), not
+    // trigger any interactive credential prompt. Three independent paths
+    // git can use to ask for one, all disabled here: (1) its own
+    // terminal prompt (GIT_TERMINAL_PROMPT=0), (2) a configured
+    // credential.helper - GitHub Desktop/gh CLI on a dev machine can pop
+    // a browser OAuth window (-c credential.helper=), and (3) GIT_ASKPASS
+    // - confirmed live in this repo's own dev environment: VS Code's
+    // integrated terminal sets GIT_ASKPASS to its own askpass script,
+    // which git invokes regardless of the other two settings, popping an
+    // interactive "Username" prompt in the editor. Overriding it (and
+    // SSH_ASKPASS, in case a candidate's source URL is ever ssh://) to
+    // empty makes git treat "no askpass available" as fail-fast instead.
+    await execFileAsync(
+      'git',
+      ['-c', 'credential.helper=', 'clone', '--bare', '--', source, destDir],
+      {
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: '0',
+          GIT_ASKPASS: '',
+          SSH_ASKPASS: '',
+        },
+      },
+    );
   }
 
   async getHeadCommit(repoPath: string): Promise<string> {

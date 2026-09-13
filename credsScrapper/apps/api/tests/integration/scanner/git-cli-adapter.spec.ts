@@ -102,4 +102,45 @@ describe('GitCliAdapter (real git, no mocks)', () => {
     const content = await adapter.readFileAtHead(bareDir, 'image.png');
     expect(content).toBeNull();
   });
+
+  it('never lets a credential prompt or helper run - disables all three paths on the clone command itself', async () => {
+    // A candidate repo that's since gone private/renamed/deleted would
+    // otherwise make git try to authenticate through any of three
+    // independent mechanisms: its own terminal prompt (hangs forever
+    // with no TTY attached), a configured credential.helper (can pop a
+    // browser OAuth window on a dev machine with GitHub Desktop/gh CLI
+    // installed), or GIT_ASKPASS - confirmed live in this repo's own dev
+    // environment, where VS Code's integrated terminal sets it to its
+    // own askpass script, which git invokes regardless of the other two
+    // settings and pops an interactive "Username" prompt in the editor.
+    // Swap in a fake `git` on PATH to inspect the real argv/env this
+    // adapter invokes it with, without needing a real auth-requiring
+    // git server (flaky and slow to simulate reliably in a test).
+    const fakeBinDir = path.join(tmpDir, 'fake-bin');
+    await fs.mkdir(fakeBinDir);
+    const callLogPath = path.join(tmpDir, 'git-call.json');
+    await fs.writeFile(
+      path.join(fakeBinDir, 'git'),
+      `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(callLogPath)}, JSON.stringify({ argv: process.argv.slice(2), env: { GIT_TERMINAL_PROMPT: process.env.GIT_TERMINAL_PROMPT, GIT_ASKPASS: process.env.GIT_ASKPASS, SSH_ASKPASS: process.env.SSH_ASKPASS } }));\n`,
+    );
+    await fs.chmod(path.join(fakeBinDir, 'git'), 0o755);
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${fakeBinDir}:${originalPath}`;
+    // Simulate VS Code's own environment injection, to prove our
+    // override wins even when it's already set to something real.
+    process.env.GIT_ASKPASS = '/fake/vscode-askpass.sh';
+    try {
+      await adapter.cloneBare('https://github.com/example/private-repo.git', path.join(tmpDir, 'unused'));
+    } finally {
+      process.env.PATH = originalPath;
+      delete process.env.GIT_ASKPASS;
+    }
+
+    const call = JSON.parse(await fs.readFile(callLogPath, 'utf8'));
+    expect(call.argv.slice(0, 2)).toEqual(['-c', 'credential.helper=']);
+    expect(call.env.GIT_TERMINAL_PROMPT).toBe('0');
+    expect(call.env.GIT_ASKPASS).toBe('');
+    expect(call.env.SSH_ASKPASS).toBe('');
+  });
 });
