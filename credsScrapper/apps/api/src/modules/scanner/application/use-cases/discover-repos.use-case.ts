@@ -13,8 +13,10 @@ export class DiscoverReposUseCase {
     private readonly logger: LoggerPort,
   ) {}
 
+  // GH Archive publishes an hour's file with some lag - 1 hour back is
+  // often still a 404, 2 hours back reliably exists.
   async execute(
-    date: Date = new Date(Date.now() - 60 * 60 * 1000),
+    date: Date = new Date(Date.now() - 2 * 60 * 60 * 1000),
     onProgress?: (message: string) => void,
   ): Promise<number> {
     const report = (message: string) => {
@@ -31,10 +33,14 @@ export class DiscoverReposUseCase {
         added += 1;
       }
       if (seen % 2000 === 0) {
-        report(`discovery: processed ${seen} push events, ${added} new candidates so far`);
+        report(
+          `discovery: processed ${seen} push events, ${added} new candidates so far`,
+        );
       }
     }
-    report(`discovery: finished, ${seen} push events processed, ${added} new candidates added`);
+    report(
+      `discovery: finished, ${seen} push events processed, ${added} new candidates added`,
+    );
     return added;
   }
 }
