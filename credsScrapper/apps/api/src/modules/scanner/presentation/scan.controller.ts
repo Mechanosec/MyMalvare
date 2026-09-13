@@ -1,12 +1,14 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Post, Query, UseGuards } from '@nestjs/common';
 import { AdminGuard } from '../../identity/infrastructure/guards/admin.guard';
 import { GetScannedReposUseCase } from '../application/use-cases/get-scanned-repos.use-case';
 import { GetScanStatusUseCase } from '../application/use-cases/get-scan-status.use-case';
+import { AdminScanRepoUseCase } from '../application/use-cases/admin-scan-repo.use-case';
 import { JobQueuePort } from '../application/ports/job-queue.port';
 import { EJobType } from '../domain/constant/job-status.constant';
 import { IQueueStatus } from '../domain/types/queue-status.type';
 import { IScannedRepoRecord } from '../domain/types/scanned-repo-record.type';
 import { StartScanDto } from './dto/start-scan.dto';
+import { ScanRepoDto } from './dto/scan-repo.dto';
 
 // Server-controlled, not client-controlled (see StartScanDto's comment) -
 // the caller has no legitimate reason to choose an arbitrary filesystem
@@ -19,6 +21,7 @@ export class ScanController {
     private readonly getScanStatus: GetScanStatusUseCase,
     private readonly getScannedRepos: GetScannedReposUseCase,
     private readonly jobQueue: JobQueuePort,
+    private readonly adminScanRepo: AdminScanRepoUseCase,
   ) {}
 
   // Admin-only: this drains the shared candidate queue (arbitrary
@@ -44,6 +47,22 @@ export class ScanController {
   @UseGuards(AdminGuard)
   async status(): Promise<IQueueStatus> {
     return this.getScanStatus.execute();
+  }
+
+  // Admin-only: scans exactly the given owner/name, bypassing the shared
+  // discovery queue entirely - lets an admin (re-)scan one specific repo
+  // on demand instead of waiting for it to come up in the GH Archive feed.
+  @Post('repo')
+  @UseGuards(AdminGuard)
+  async scanRepo(@Body() dto: ScanRepoDto): Promise<{ repoId: number; jobId: string }> {
+    if (!dto.owner || !dto.name) {
+      throw new BadRequestException('owner and name are required');
+    }
+    const result = await this.adminScanRepo.execute(dto.owner, dto.name);
+    if (result === 'not-found') {
+      throw new NotFoundException(`GitHub repo ${dto.owner}/${dto.name} not found`);
+    }
+    return result;
   }
 
   // Admin-only: lists every scanned repo (owner/name/finding count) across

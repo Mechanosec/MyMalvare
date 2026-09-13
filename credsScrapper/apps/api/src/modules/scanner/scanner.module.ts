@@ -4,6 +4,7 @@ import { IdentityModule } from '../identity/identity.module';
 import { AdminGuard } from '../identity/infrastructure/guards/admin.guard';
 import { AdminTestRepoFindingsUseCase } from './application/use-cases/admin-test-repo-findings.use-case';
 import { AdminTestFindingUseCase } from './application/use-cases/admin-test-finding.use-case';
+import { AdminScanRepoUseCase } from './application/use-cases/admin-scan-repo.use-case';
 import { DiscoveryFeedPort } from './application/ports/discovery-feed.port';
 import { GithubRepoLookupPort } from './application/ports/github-repo-lookup.port';
 import { KeyValidatorPort } from './application/ports/key-validator.port';
@@ -132,6 +133,12 @@ import { ScanController } from './presentation/scan.controller';
       AdminTestFindingUseCase,
       [StateRepositoryPort, KeyValidatorPort],
       (state, validator) => new AdminTestFindingUseCase(state, validator),
+    ),
+    provideUseCase(
+      AdminScanRepoUseCase,
+      [StateRepositoryPort, GithubRepoLookupPort, JobQueuePort, WorkdirJoinerPort],
+      (state, githubLookup, jobQueue, workdirJoiner) =>
+        new AdminScanRepoUseCase(state, githubLookup, jobQueue, workdirJoiner),
     ),
     { provide: KeyValidatorPort, useClass: LiveKeyValidatorAdapter },
     { provide: GithubRepoLookupPort, useClass: GithubApiRepoLookupAdapter },

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { startDiscover, startScan } from '../lib/api-client';
+import { startDiscover, startScan, startScanRepo } from '../lib/api-client';
 
 interface IScanControlsProps {
   readonly onJobStarted: (jobId: string) => void;
@@ -10,6 +10,8 @@ interface IScanControlsProps {
 export function ScanControls({ onJobStarted }: IScanControlsProps) {
   const [workers, setWorkers] = useState(1);
   const [maxRepos, setMaxRepos] = useState('');
+  const [repoOwner, setRepoOwner] = useState('');
+  const [repoName, setRepoName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -37,6 +39,20 @@ export function ScanControls({ onJobStarted }: IScanControlsProps) {
       onJobStarted(jobId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Scan failed');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function runScanRepo() {
+    if (!repoOwner.trim() || !repoName.trim()) return;
+    setError(null);
+    setPending(true);
+    try {
+      const { jobId } = await startScanRepo(repoOwner.trim(), repoName.trim());
+      onJobStarted(jobId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Scan repo failed');
     } finally {
       setPending(false);
     }
@@ -84,6 +100,39 @@ export function ScanControls({ onJobStarted }: IScanControlsProps) {
       >
         Scan
       </button>
+
+      <div className="flex items-end gap-2 border-l border-line pl-3">
+        <label className="flex flex-col gap-1 text-xs text-text-dim">
+          Owner
+          <input
+            type="text"
+            placeholder="octocat"
+            value={repoOwner}
+            onChange={(e) => setRepoOwner(e.target.value)}
+            className="w-28 border border-line bg-surface-2 px-2 py-1.5 font-mono text-sm text-text outline-none placeholder:text-text-dim focus:border-accent"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-xs text-text-dim">
+          Repo
+          <input
+            type="text"
+            placeholder="hello-world"
+            value={repoName}
+            onChange={(e) => setRepoName(e.target.value)}
+            className="w-32 border border-line bg-surface-2 px-2 py-1.5 font-mono text-sm text-text outline-none placeholder:text-text-dim focus:border-accent"
+          />
+        </label>
+
+        <button
+          type="button"
+          onClick={runScanRepo}
+          disabled={pending || !repoOwner.trim() || !repoName.trim()}
+          className="border border-accent px-4 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-40"
+        >
+          Scan repo
+        </button>
+      </div>
 
       {error && <p className="text-sm text-critical">{error}</p>}
     </div>

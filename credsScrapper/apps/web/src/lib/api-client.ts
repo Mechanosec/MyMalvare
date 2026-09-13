@@ -196,6 +196,10 @@ export function startScan(body: IStartScanBody): Promise<{ jobId: string }> {
   return post<{ jobId: string }>('/scan', body);
 }
 
+export function startScanRepo(owner: string, name: string): Promise<{ repoId: number; jobId: string }> {
+  return post<{ repoId: number; jobId: string }>('/scan/repo', { owner, name });
+}
+
 export function fetchJob(jobId: string): Promise<IJobState> {
   return get<IJobState>(`/jobs/${jobId}`);
 }

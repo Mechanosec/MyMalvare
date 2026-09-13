@@ -4,11 +4,7 @@ import { StateRepositoryPort } from '../../../scanner/application/ports/state-re
 import { GithubRepoLookupPort } from '../../../scanner/application/ports/github-repo-lookup.port';
 import { JobQueuePort } from '../../../scanner/application/ports/job-queue.port';
 import { WorkdirJoinerPort } from '../../../scanner/application/ports/workdir-joiner.port';
-
-// Server-controlled, not client-controlled - same reasoning as
-// scanner/presentation/scan.controller.ts's identical constant (a caller
-// has no legitimate reason to choose an arbitrary filesystem path here).
-const SCAN_WORKDIR = process.env.SCAN_WORKDIR ?? 'workdir';
+import { enqueueRepoScan } from '../../../scanner/application/use-cases/enqueue-repo-scan';
 
 export class ScanMyRepoUseCase {
   constructor(
@@ -44,20 +40,6 @@ export class ScanMyRepoUseCase {
       return null;
     }
 
-    const repoId = await this.githubLookup.resolveRepoId(owner, name);
-    if (repoId === null) {
-      return 'not-found';
-    }
-
-    await this.state.startRepoScan(repoId, owner, name);
-    await this.workdirJoiner.ensureDir(SCAN_WORKDIR);
-    const workdir = this.workdirJoiner.join(SCAN_WORKDIR, `repo-${repoId}`);
-    const jobId = await this.jobQueue.enqueue('scan-repo', {
-      repoRef: { repoId, owner, name },
-      cloneSource: `https://github.com/${owner}/${name}.git`,
-      workdir,
-    });
-
-    return { repoId, jobId };
+    return enqueueRepoScan(this.state, this.githubLookup, this.jobQueue, this.workdirJoiner, owner, name);
   }
 }
