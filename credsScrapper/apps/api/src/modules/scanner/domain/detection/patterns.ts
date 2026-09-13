@@ -95,8 +95,15 @@ export const PATTERNS: readonly ISecretPattern[] = [
   { secretType: ESecretType.PLANETSCALE_API_TOKEN, pattern: /pscale_tkn_[A-Za-z0-9_-]{32,64}/g },
   // HashiCorp Vault
   { secretType: ESecretType.HASHICORP_VAULT_TOKEN, pattern: /hvs\.[A-Za-z0-9_-]{24,90}/g },
-  // Airtable
-  { secretType: ESecretType.AIRTABLE_API_KEY, pattern: /\bkey[A-Za-z0-9]{14}\b/g },
+  // Airtable - a real key is 14 random alnum chars; requiring at least one
+  // digit rules out the common false positive of an ordinary 14-letter
+  // camelCase identifier that happens to start with "key" (e.g.
+  // keyTypeFromRoutes, keyboardActiveRef), which the plain \w{14} version
+  // reliably matched in bundled/minified JS.
+  {
+    secretType: ESecretType.AIRTABLE_API_KEY,
+    pattern: /\bkey(?=[A-Za-z0-9]{0,13}[0-9])[A-Za-z0-9]{14}\b/g,
+  },
   // OpenAI / Anthropic
   { secretType: ESecretType.OPENAI_API_KEY, pattern: /sk-(?:proj-)?[A-Za-z0-9]{20,}/g },
   { secretType: ESecretType.ANTHROPIC_API_KEY, pattern: /sk-ant-[A-Za-z0-9_-]{90,120}/g },

@@ -48,7 +48,7 @@ const SAMPLES: Array<[ESecretType, string]> = [
   [ESecretType.PLANETSCALE_PASSWORD, 'pscale_pw_' + 'a'.repeat(32)],
   [ESecretType.PLANETSCALE_API_TOKEN, 'pscale_tkn_' + 'a'.repeat(32)],
   [ESecretType.HASHICORP_VAULT_TOKEN, 'hvs.' + 'a'.repeat(24)],
-  [ESecretType.AIRTABLE_API_KEY, 'key' + 'a'.repeat(14)],
+  [ESecretType.AIRTABLE_API_KEY, 'key' + 'a'.repeat(13) + '1'],
   [ESecretType.OPENAI_API_KEY, 'sk-' + 'a'.repeat(20)],
   [ESecretType.ANTHROPIC_API_KEY, 'sk-ant-' + 'a'.repeat(90)],
   [
@@ -95,6 +95,17 @@ describe('PATTERNS', () => {
 
   it('does not false-positive on normal code', () => {
     const hits = matchAny("def handler(request, response):\n    return {'status': 'ok'}");
+    expect(hits).toEqual([]);
+  });
+
+  it.each([
+    'keyTypeFromRoutes',
+    'keywordRulesError',
+    'keyboardActiveRef',
+    'keyedSeqFromValue',
+    'keyEditFormSchema',
+  ])('does not treat the camelCase identifier %s as an Airtable API key', (identifier) => {
+    const hits = matchAny(`const ${identifier} = 1;`);
     expect(hits).toEqual([]);
   });
 });

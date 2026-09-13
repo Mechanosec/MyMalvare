@@ -81,4 +81,41 @@ describe('scanText', () => {
       context: null,
     });
   });
+
+  it('strips a data: URI base64 blob before scanning, so it cannot produce a false-positive match', () => {
+    // A base64 blob this long has a very high chance of coincidentally
+    // containing "EAA" followed by 20+ alphanumeric chars (the Facebook
+    // access token pattern) or a long run of "A"s (the Twitter bearer
+    // token pattern) - exactly what real embedded SVG/CSS assets do.
+    const blob = 'EAAA' + 'B'.repeat(20) + 'AAAAAAAAAAAAAAAAAAAAA' + 'C'.repeat(40);
+    const svg = `<image href="data:image/png;base64,${blob}" />\n`;
+    expect(scanText(svg)).toEqual([]);
+  });
+
+  it('keeps the data:...;base64, lead-in when stripping a blob', () => {
+    const svg = 'data:font/woff;base64,AAAA1234\nreal_text_after\n';
+    const findings = scanText(svg);
+    expect(findings).toEqual([]);
+  });
+
+  it('strips a raw MIME/email base64 attachment block before scanning', () => {
+    // Simulates a base64-encoded attachment inside a raw .eml/mbox
+    // message: several RFC 2045-wrapped lines that are pure base64
+    // alphabet, which reliably collide with the Facebook/Twitter
+    // patterns and the entropy scanner the same way a data: URI does.
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const line = (seed: number) =>
+      Array.from({ length: 64 }, (_, i) => chars[(seed + i) % chars.length]).join('');
+    const email =
+      'Subject: test\nContent-Transfer-Encoding: base64\n\n' +
+      Array.from({ length: 6 }, (_, i) => line(i)).join('\n') +
+      '\n\nreal_code_after_the_attachment()\n';
+    expect(scanText(email)).toEqual([]);
+  });
+
+  it('does not strip a single secret line that happens to look base64-ish', () => {
+    const text = "token = 'ghp_" + 'a'.repeat(36) + "'\n";
+    const findings = scanText(text);
+    expect(findings.map((f) => f.secretType)).toContain(ESecretType.GITHUB_PAT);
+  });
 });

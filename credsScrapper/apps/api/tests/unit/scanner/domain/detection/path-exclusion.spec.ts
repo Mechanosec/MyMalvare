@@ -13,6 +13,15 @@ describe('isExcludedPath', () => {
     'testdata/sample.txt',
     'internal/auth_test.go',
     'spec/models/user_spec.py',
+    'litellm/proxy/_experimental/out/_next/static/chunks/03_s-zve24zyk.js',
+    'ui/dist/assets/index-5v0iwkLz.js',
+    'app/build/main.js',
+    '.next/static/chunks/main.js',
+    'vendor/github.com/foo/bar.go',
+    'node_modules/lodash/index.js',
+    'src/app.min.js',
+    'litellm/proxy/swagger/swagger-ui-bundle.js',
+    'litellm/proxy/swagger/swagger-ui.css',
   ])('excludes %s', (filePath) => {
     expect(isExcludedPath(filePath)).toBe(true);
   });
@@ -22,6 +31,8 @@ describe('isExcludedPath', () => {
     'ui/litellm-dashboard/src/utils/config.ts',
     'src/protest/handler.ts',
     'config/attestation.py',
+    'src/about/team.ts',
+    'src/shoutout/handler.ts',
   ])('does not exclude %s', (filePath) => {
     expect(isExcludedPath(filePath)).toBe(false);
   });
