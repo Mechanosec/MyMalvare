@@ -139,4 +139,48 @@ export const PATTERNS: readonly ISecretPattern[] = [
   { secretType: ESecretType.GRAFANA_API_KEY, pattern: /eyJrIjoi[A-Za-z0-9+/=]{50,300}/g },
   // Dropbox short-lived token
   { secretType: ESecretType.DROPBOX_SHORT_LIVED_TOKEN, pattern: /sl\.[A-Za-z0-9_-]{130,152}/g },
+  // GitHub fine-grained PAT - a distinct, newer format from the classic
+  // ghp_ pattern above (GITHUB_PAT), not a replacement for it.
+  { secretType: ESecretType.GITHUB_FINE_GRAINED_PAT, pattern: /github_pat_[A-Za-z0-9_]{80,90}/g },
+  // Slack app-level token (xapp-) - distinct from the xox[baprs]- bot/user/
+  // legacy tokens already covered by SLACK_TOKEN above.
+  {
+    secretType: ESecretType.SLACK_APP_LEVEL_TOKEN,
+    pattern: /xapp-[0-9]-[A-Za-z0-9]+-[0-9]+-[a-f0-9]{64}/g,
+  },
+  // Asana personal access token: <user_gid>/<token_gid>:<random hex>. No
+  // literal prefix exists for this format (unlike the others below), so
+  // the digit count is narrowed to Asana's actual gid length (16-19
+  // digits in practice) rather than a wide {9,20} - closer to the real
+  // shape lowers the odds of colliding with an unrelated fraction/ratio
+  // followed by a hash-shaped suffix.
+  {
+    secretType: ESecretType.ASANA_PERSONAL_ACCESS_TOKEN,
+    pattern: /\d{15,19}\/\d{15,19}:[a-fA-F0-9]{32}/g,
+  },
+  // Bitbucket repository/workspace/project access token
+  {
+    secretType: ESecretType.BITBUCKET_ACCESS_TOKEN,
+    pattern: /ATCTT3xFfGN0[A-Za-z0-9_=-]{150,270}/g,
+  },
+  // Supabase personal access token
+  { secretType: ESecretType.SUPABASE_PERSONAL_ACCESS_TOKEN, pattern: /sbp_[a-f0-9]{40}/g },
+  // Render API key
+  { secretType: ESecretType.RENDER_API_KEY, pattern: /rnd_[A-Za-z0-9]{20,40}/g },
+  // Contentful personal access token
+  { secretType: ESecretType.CONTENTFUL_PERSONAL_ACCESS_TOKEN, pattern: /CFPAT-[A-Za-z0-9_-]{43}/g },
+  // Fly.io API token (v2 macaroon)
+  { secretType: ESecretType.FLY_IO_API_TOKEN, pattern: /fm2_[A-Za-z0-9+/_=-]{60,500}/g },
+  // LaunchDarkly API access token: api- followed by a UUID. "api-" alone
+  // isn't a distinctive brand marker (any identifier could be prefixed
+  // that way) - \b requires it start a fresh word, so this can't match
+  // inside an unrelated identifier like "myapi-<uuid>".
+  {
+    secretType: ESecretType.LAUNCHDARKLY_API_ACCESS_TOKEN,
+    pattern: /\bapi-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/g,
+  },
+  // Doppler token - dp.pt. (personal), dp.st. (service), dp.ct. (config)
+  { secretType: ESecretType.DOPPLER_TOKEN, pattern: /dp\.(?:pt|st|ct)\.[A-Za-z0-9]{40,44}/g },
+  // ClickUp personal API token: pk_<numeric user id>_<32 uppercase alnum>
+  { secretType: ESecretType.CLICKUP_PERSONAL_API_TOKEN, pattern: /pk_\d{7,9}_[A-Z0-9]{32}/g },
 ];

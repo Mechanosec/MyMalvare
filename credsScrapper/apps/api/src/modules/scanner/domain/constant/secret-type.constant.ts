@@ -59,6 +59,17 @@ export enum ESecretType {
   FIGMA_PERSONAL_ACCESS_TOKEN = 'figma_personal_access_token',
   GRAFANA_API_KEY = 'grafana_api_key',
   DROPBOX_SHORT_LIVED_TOKEN = 'dropbox_short_lived_token',
+  GITHUB_FINE_GRAINED_PAT = 'github_fine_grained_pat',
+  SLACK_APP_LEVEL_TOKEN = 'slack_app_level_token',
+  ASANA_PERSONAL_ACCESS_TOKEN = 'asana_personal_access_token',
+  BITBUCKET_ACCESS_TOKEN = 'bitbucket_access_token',
+  SUPABASE_PERSONAL_ACCESS_TOKEN = 'supabase_personal_access_token',
+  RENDER_API_KEY = 'render_api_key',
+  CONTENTFUL_PERSONAL_ACCESS_TOKEN = 'contentful_personal_access_token',
+  FLY_IO_API_TOKEN = 'fly_io_api_token',
+  LAUNCHDARKLY_API_ACCESS_TOKEN = 'launchdarkly_api_access_token',
+  DOPPLER_TOKEN = 'doppler_token',
+  CLICKUP_PERSONAL_API_TOKEN = 'clickup_personal_api_token',
   GENERIC_HIGH_ENTROPY = 'generic_high_entropy',
 }
 

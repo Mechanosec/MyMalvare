@@ -259,6 +259,68 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
   // App-only bearer token: fetches one public, fixed tweet rather than
   // anything tied to a specific user's account.
   [ESecretType.TWITTER_BEARER_TOKEN]: (value) => checkBearer('https://api.twitter.com/2/tweets?ids=20', value),
+
+  // Fine-grained PATs authenticate the same way classic ghp_ tokens do.
+  [ESecretType.GITHUB_FINE_GRAINED_PAT]: checkGithubToken,
+
+  [ESecretType.ASANA_PERSONAL_ACCESS_TOKEN]: (value) =>
+    checkBearer('https://app.asana.com/api/1.0/users/me', value),
+
+  [ESecretType.BITBUCKET_ACCESS_TOKEN]: (value) => checkBearer('https://api.bitbucket.org/2.0/user', value),
+
+  // Management API - lists the organizations the token's owner belongs
+  // to, no project-level access needed.
+  [ESecretType.SUPABASE_PERSONAL_ACCESS_TOKEN]: (value) =>
+    checkBearer('https://api.supabase.com/v1/organizations', value),
+
+  [ESecretType.RENDER_API_KEY]: (value) => checkBearer('https://api.render.com/v1/owners', value),
+
+  [ESecretType.CONTENTFUL_PERSONAL_ACCESS_TOKEN]: (value) =>
+    checkBearer('https://api.contentful.com/users/me', value),
+
+  // Fly.io's API is GraphQL-only - same read-only-query pattern already
+  // used for LINEAR_API_KEY above, never a mutation.
+  [ESecretType.FLY_IO_API_TOKEN]: async (value) => {
+    const res = await fetch('https://api.fly.io/graphql', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${value}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: '{ viewer { email } }' }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status === 401) return EFindingStatus.INVALID;
+    if (res.ok) return EFindingStatus.VALID;
+    return EFindingStatus.UNKNOWN;
+  },
+
+  // LaunchDarkly's auth header is the raw token, no "Bearer" prefix -
+  // https://apidocs.launchdarkly.com/#section/Authentication.
+  // caller-identity is a purpose-built read-only "who is this token" check.
+  [ESecretType.LAUNCHDARKLY_API_ACCESS_TOKEN]: async (value) => {
+    const res = await fetch('https://app.launchdarkly.com/api/v2/caller-identity', {
+      headers: { Authorization: value },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status === 401) return EFindingStatus.INVALID;
+    if (res.ok) return EFindingStatus.VALID;
+    return EFindingStatus.UNKNOWN;
+  },
+
+  // /v3/me is scoped to personal tokens (dp.pt.) - a valid service/config
+  // token (dp.st./dp.ct.) can still 403 here despite being genuinely
+  // active, so this check is best-effort like several others above.
+  [ESecretType.DOPPLER_TOKEN]: (value) => checkBearer('https://api.doppler.com/v3/me', value),
+
+  // ClickUp's auth header is the raw token too, no "Bearer" prefix -
+  // https://developer.clickup.com/docs/authentication.
+  [ESecretType.CLICKUP_PERSONAL_API_TOKEN]: async (value) => {
+    const res = await fetch('https://api.clickup.com/api/v2/user', {
+      headers: { Authorization: value },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.status === 401) return EFindingStatus.INVALID;
+    if (res.ok) return EFindingStatus.VALID;
+    return EFindingStatus.UNKNOWN;
+  },
 };
 
 @Injectable()

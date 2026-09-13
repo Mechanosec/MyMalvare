@@ -60,6 +60,17 @@ export const DESCRIPTIONS: Readonly<Record<ESecretType, string>> = {
   [ESecretType.FIGMA_PERSONAL_ACCESS_TOKEN]: 'Figma Personal Access Token',
   [ESecretType.GRAFANA_API_KEY]: 'Grafana API Key',
   [ESecretType.DROPBOX_SHORT_LIVED_TOKEN]: 'Dropbox Short-Lived Access Token',
+  [ESecretType.GITHUB_FINE_GRAINED_PAT]: 'GitHub Fine-Grained Personal Access Token',
+  [ESecretType.SLACK_APP_LEVEL_TOKEN]: 'Slack App-Level Token',
+  [ESecretType.ASANA_PERSONAL_ACCESS_TOKEN]: 'Asana Personal Access Token',
+  [ESecretType.BITBUCKET_ACCESS_TOKEN]: 'Bitbucket Access Token',
+  [ESecretType.SUPABASE_PERSONAL_ACCESS_TOKEN]: 'Supabase Personal Access Token',
+  [ESecretType.RENDER_API_KEY]: 'Render API Key',
+  [ESecretType.CONTENTFUL_PERSONAL_ACCESS_TOKEN]: 'Contentful Personal Access Token',
+  [ESecretType.FLY_IO_API_TOKEN]: 'Fly.io API Token',
+  [ESecretType.LAUNCHDARKLY_API_ACCESS_TOKEN]: 'LaunchDarkly API Access Token',
+  [ESecretType.DOPPLER_TOKEN]: 'Doppler Token',
+  [ESecretType.CLICKUP_PERSONAL_API_TOKEN]: 'ClickUp Personal API Token',
   [ESecretType.GENERIC_HIGH_ENTROPY]: 'Unidentified high-entropy secret (service unknown)',
 };
 

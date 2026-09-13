@@ -69,6 +69,23 @@ const SAMPLES: Array<[ESecretType, string]> = [
   [ESecretType.FIGMA_PERSONAL_ACCESS_TOKEN, 'figd_' + 'a'.repeat(40)],
   [ESecretType.GRAFANA_API_KEY, 'eyJrIjoi' + 'a'.repeat(60)],
   [ESecretType.DROPBOX_SHORT_LIVED_TOKEN, 'sl.' + 'a'.repeat(135)],
+  [ESecretType.GITHUB_FINE_GRAINED_PAT, 'github_pat_' + 'a'.repeat(85)],
+  [
+    ESecretType.SLACK_APP_LEVEL_TOKEN,
+    'xapp-1-TEAM123-4567890123-' + 'a'.repeat(64),
+  ],
+  [ESecretType.ASANA_PERSONAL_ACCESS_TOKEN, '1234567890123456/1234567890123456:' + 'a'.repeat(32)],
+  [ESecretType.BITBUCKET_ACCESS_TOKEN, 'ATCTT3xFfGN0' + 'a'.repeat(160)],
+  [ESecretType.SUPABASE_PERSONAL_ACCESS_TOKEN, 'sbp_' + 'a'.repeat(40)],
+  [ESecretType.RENDER_API_KEY, 'rnd_' + 'a'.repeat(30)],
+  [ESecretType.CONTENTFUL_PERSONAL_ACCESS_TOKEN, 'CFPAT-' + 'a'.repeat(43)],
+  [ESecretType.FLY_IO_API_TOKEN, 'fm2_' + 'a'.repeat(70)],
+  [
+    ESecretType.LAUNCHDARKLY_API_ACCESS_TOKEN,
+    'api-' + 'a'.repeat(8) + '-' + 'a'.repeat(4) + '-' + 'a'.repeat(4) + '-' + 'a'.repeat(4) + '-' + 'a'.repeat(12),
+  ],
+  [ESecretType.DOPPLER_TOKEN, 'dp.pt.' + 'a'.repeat(42)],
+  [ESecretType.CLICKUP_PERSONAL_API_TOKEN, 'pk_' + '1'.repeat(8) + '_' + 'A'.repeat(32)],
 ];
 
 function matchAny(text: string): Array<[ESecretType, string]> {
@@ -106,6 +123,17 @@ describe('PATTERNS', () => {
     'keyEditFormSchema',
   ])('does not treat the camelCase identifier %s as an Airtable API key', (identifier) => {
     const hits = matchAny(`const ${identifier} = 1;`);
+    expect(hits).toEqual([]);
+  });
+
+  it('does not treat "api-" inside an unrelated identifier as a LaunchDarkly token', () => {
+    const uuid = 'c56a4180-65aa-42ec-a945-5fd21dec0538';
+    const hits = matchAny(`const myapi-${uuid} = fetchResource();`);
+    expect(hits).toEqual([]);
+  });
+
+  it('does not treat a shorter numeric ratio with a trailing hash as an Asana token (below the real gid length)', () => {
+    const hits = matchAny("ratio = '12345678901234/98765432109876:" + 'a'.repeat(32) + "'");
     expect(hits).toEqual([]);
   });
 });

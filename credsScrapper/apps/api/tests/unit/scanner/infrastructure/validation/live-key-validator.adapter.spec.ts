@@ -278,4 +278,86 @@ describe('LiveKeyValidatorAdapter', () => {
     const status = await adapter.validate(ESecretType.TWITTER_BEARER_TOKEN, 'fake-bearer');
     expect(status).toBe(EFindingStatus.INVALID);
   });
+
+  it('returns VALID for a GitHub fine-grained PAT that /user confirms with 200', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as never;
+
+    const status = await adapter.validate(ESecretType.GITHUB_FINE_GRAINED_PAT, 'github_pat_fake');
+    expect(status).toBe(EFindingStatus.VALID);
+  });
+
+  it('returns VALID for an Asana token that /users/me confirms', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as never;
+
+    const status = await adapter.validate(ESecretType.ASANA_PERSONAL_ACCESS_TOKEN, 'fake');
+    expect(status).toBe(EFindingStatus.VALID);
+  });
+
+  it('returns INVALID for a Bitbucket token that /user 401s', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 401 }) as never;
+
+    const status = await adapter.validate(ESecretType.BITBUCKET_ACCESS_TOKEN, 'fake');
+    expect(status).toBe(EFindingStatus.INVALID);
+  });
+
+  it('returns VALID for a Supabase PAT that /v1/organizations confirms', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as never;
+
+    const status = await adapter.validate(ESecretType.SUPABASE_PERSONAL_ACCESS_TOKEN, 'fake');
+    expect(status).toBe(EFindingStatus.VALID);
+  });
+
+  it('returns VALID for a Render API key that /v1/owners confirms', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as never;
+
+    const status = await adapter.validate(ESecretType.RENDER_API_KEY, 'fake');
+    expect(status).toBe(EFindingStatus.VALID);
+  });
+
+  it('returns VALID for a Contentful PAT that /users/me confirms', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as never;
+
+    const status = await adapter.validate(ESecretType.CONTENTFUL_PERSONAL_ACCESS_TOKEN, 'fake');
+    expect(status).toBe(EFindingStatus.VALID);
+  });
+
+  it('returns VALID for a Fly.io token via the read-only GraphQL viewer query', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as never;
+
+    const status = await adapter.validate(ESecretType.FLY_IO_API_TOKEN, 'fm2_fake');
+    expect(status).toBe(EFindingStatus.VALID);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api.fly.io/graphql',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('returns INVALID for a LaunchDarkly token that caller-identity 401s, using the raw token as the auth header', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 401 }) as never;
+
+    const status = await adapter.validate(ESecretType.LAUNCHDARKLY_API_ACCESS_TOKEN, 'api-fake');
+    expect(status).toBe(EFindingStatus.INVALID);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://app.launchdarkly.com/api/v2/caller-identity',
+      expect.objectContaining({ headers: { Authorization: 'api-fake' } }),
+    );
+  });
+
+  it('returns VALID for a Doppler token that /v3/me confirms', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200 }) as never;
+
+    const status = await adapter.validate(ESecretType.DOPPLER_TOKEN, 'dp.pt.fake');
+    expect(status).toBe(EFindingStatus.VALID);
+  });
+
+  it('returns INVALID for a ClickUp token that /user 401s, using the raw token as the auth header', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 401 }) as never;
+
+    const status = await adapter.validate(ESecretType.CLICKUP_PERSONAL_API_TOKEN, 'pk_fake');
+    expect(status).toBe(EFindingStatus.INVALID);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://api.clickup.com/api/v2/user',
+      expect.objectContaining({ headers: { Authorization: 'pk_fake' } }),
+    );
+  });
 });
