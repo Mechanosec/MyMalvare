@@ -38,12 +38,24 @@ function countDigits(s: string): number {
   return count;
 }
 
-export function findHighEntropyTokens(text: string): string[] {
-  const tokens: string[] = [];
+export interface IHighEntropyToken {
+  readonly token: string;
+  readonly index: number;
+}
+
+export function findHighEntropyTokens(text: string): IHighEntropyToken[] {
+  const tokens: IHighEntropyToken[] = [];
   for (const match of text.matchAll(GENERIC_TOKEN_RE)) {
     const token = match[0];
     if (shannonEntropy(token) > ENTROPY_THRESHOLD && countDigits(token) >= MIN_DIGITS) {
-      tokens.push(token);
+      // matchAll already gives us the exact position - the caller used to
+      // re-find it with text.indexOf(token), which is O(text.length) per
+      // token. On a large commit-history diff (real repos can produce a
+      // 150MB+ diff with 170k+ high-entropy tokens) that turned into an
+      // effectively-quadratic scan and hung the whole worker for a minute
+      // or more on a single repo. Returning the index we already have
+      // makes this O(text.length) total instead.
+      tokens.push({ token, index: match.index ?? 0 });
     }
   }
   return tokens;

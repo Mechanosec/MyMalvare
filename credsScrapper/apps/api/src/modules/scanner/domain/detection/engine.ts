@@ -5,14 +5,34 @@ import { PATTERNS } from './patterns';
 
 // Ported 1:1 from credsScrapper/app/detection/engine.py.
 
-function lineNumberAt(text: string, offset: number): number {
-  let count = 0;
-  for (let i = 0; i < offset; i += 1) {
-    if (text[i] === '\n') {
-      count += 1;
+// Counting newlines from the start of the text on every call is O(text
+// length) per finding - fine for a small file, but a real repo's full
+// commit-history diff can be 150MB+ with 100k+ findings, which turned a
+// single scan into a multi-minute (or effectively infinite) hang.
+// Building the newline index once per scanText call and binary-searching
+// it makes this O(text length) total instead of O(text length x findings).
+function buildLineOffsets(text: string): number[] {
+  const offsets: number[] = [];
+  let index = text.indexOf('\n');
+  while (index !== -1) {
+    offsets.push(index);
+    index = text.indexOf('\n', index + 1);
+  }
+  return offsets;
+}
+
+function lineNumberAt(lineOffsets: readonly number[], offset: number): number {
+  let low = 0;
+  let high = lineOffsets.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (lineOffsets[mid] < offset) {
+      low = mid + 1;
+    } else {
+      high = mid;
     }
   }
-  return count + 1;
+  return low + 1;
 }
 
 // Docs/tests litter real-looking secrets with placeholder markers (AWS's
@@ -73,6 +93,7 @@ function stripMimeBase64Blocks(text: string): string {
 
 export function scanText(rawText: string): IFinding[] {
   const text = stripMimeBase64Blocks(stripDataUriBlobs(rawText));
+  const lineOffsets = buildLineOffsets(text);
   const findings: IFinding[] = [];
   const matchedSpans: Array<[number, number]> = [];
 
@@ -87,17 +108,13 @@ export function scanText(rawText: string): IFinding[] {
       findings.push({
         secretType,
         secretValue: value,
-        lineNumber: lineNumberAt(text, start),
+        lineNumber: lineNumberAt(lineOffsets, start),
         context: null,
       });
     }
   }
 
-  for (const token of findHighEntropyTokens(text)) {
-    const start = text.indexOf(token);
-    if (start === -1) {
-      continue;
-    }
+  for (const { token, index: start } of findHighEntropyTokens(text)) {
     const overlapsPatternMatch = matchedSpans.some(([s, e]) => start >= s && start < e);
     if (overlapsPatternMatch) {
       continue;
@@ -109,7 +126,7 @@ export function scanText(rawText: string): IFinding[] {
     findings.push({
       secretType: ESecretType.GENERIC_HIGH_ENTROPY,
       secretValue: token,
-      lineNumber: lineNumberAt(text, start),
+      lineNumber: lineNumberAt(lineOffsets, start),
       context,
     });
   }

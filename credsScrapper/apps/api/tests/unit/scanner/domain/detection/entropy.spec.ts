@@ -24,12 +24,14 @@ describe('findHighEntropyTokens', () => {
 
   it('finds a random-looking token', () => {
     const token = 'Xk9pQ2mZ7vL4tR8wN1cJ6hF3sD0aY5bE9';
-    expect(findHighEntropyTokens(`SECRET = '${token}'`)).toContain(token);
+    const tokens = findHighEntropyTokens(`SECRET = '${token}'`).map((t) => t.token);
+    expect(tokens).toContain(token);
   });
 
   it('skips a low-entropy long token', () => {
     const token = 'a'.repeat(40);
-    expect(findHighEntropyTokens(`PADDING = '${token}'`)).not.toContain(token);
+    const tokens = findHighEntropyTokens(`PADDING = '${token}'`).map((t) => t.token);
+    expect(tokens).not.toContain(token);
   });
 
   // Real false-positive strings measured against actual scan data before
@@ -46,6 +48,19 @@ describe('findHighEntropyTokens', () => {
 
   it('still flags a real-looking high-entropy token', () => {
     const token = 'DoQpr4WEetHgRDf3uqguqwW35IOb0yzSQnP5QWv1jTw';
-    expect(findHighEntropyTokens(token)).toContain(token);
+    const tokens = findHighEntropyTokens(token).map((t) => t.token);
+    expect(tokens).toContain(token);
+  });
+
+  it('reports the exact character index of each token from the regex match, not a re-search', () => {
+    // engine.ts used to call text.indexOf(token) to recover this, which
+    // is O(text.length) per token - on a large real diff (150MB+, 170k+
+    // tokens) that made a single scan take over a minute. Returning the
+    // index matchAll already gives us avoids that re-search entirely.
+    const token = 'Xk9pQ2mZ7vL4tR8wN1cJ6hF3sD0aY5bE9';
+    const text = `prefix ${token} suffix`;
+    const [result] = findHighEntropyTokens(text);
+    expect(result.token).toBe(token);
+    expect(result.index).toBe(text.indexOf(token));
   });
 });
