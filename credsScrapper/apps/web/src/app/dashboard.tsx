@@ -182,7 +182,7 @@ export function Dashboard() {
               {user.role === 'admin' ? (
                 <>
                   <ScanControls onJobStarted={handleJobStarted} />
-                  <ProgressPanel key={jobId} jobId={jobId} />
+                  <ProgressPanel key={jobId} jobId={jobId} showStopButton />
                 </>
               ) : (
                 <p className="border border-line bg-surface px-4 py-3 text-sm text-text-dim">

@@ -44,4 +44,26 @@ describe('DiscoverReposUseCase', () => {
       'discovery: finished, 1 push events processed, 1 new candidates added',
     );
   });
+
+  it('stops at the next 2000-event checkpoint once shouldStop reports true, not processing the rest of the feed', async () => {
+    const state = new FakeStateRepository();
+    // The stop check only runs at the same cadence as the progress report
+    // (every 2000 events) - a feed needs to actually reach that checkpoint
+    // for shouldStop to ever be consulted.
+    const events = Array.from({ length: 4000 }, (_, i) => pushEvent(i + 1, `octocat/repo${i + 1}`));
+    const feed = new FakeFeed(events);
+    const useCase = new DiscoverReposUseCase(feed, state, new FakeLogger());
+    const messages: string[] = [];
+
+    const added = await useCase.execute(
+      new Date(),
+      (message) => messages.push(message),
+      async () => true,
+    );
+
+    expect(added).toBe(2000);
+    expect(messages[messages.length - 1]).toBe(
+      'discovery: stopped by request, 2000 push events processed, 2000 new candidates added',
+    );
+  });
 });

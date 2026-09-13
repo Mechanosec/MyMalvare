@@ -15,6 +15,10 @@ class FakeJobQueue extends JobQueuePort {
   async getJob(): Promise<null> {
     return null;
   }
+  async requestStop(): Promise<void> {}
+  async isStopRequested(): Promise<boolean> {
+    return false;
+  }
 }
 
 function makeApproval(overrides: Partial<Record<string, unknown>> = {}) {

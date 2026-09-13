@@ -3,6 +3,7 @@ import { Job, Worker } from 'bullmq';
 import { DiscoverReposUseCase } from '../../application/use-cases/discover-repos.use-case';
 import { RunScanLoopUseCase } from '../../application/use-cases/run-scan-loop.use-case';
 import { ScanRepositoryUseCase } from '../../application/use-cases/scan-repository.use-case';
+import { JobQueuePort } from '../../application/ports/job-queue.port';
 import { ProgressPort } from '../../application/ports/progress.port';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { IJobProgressEvent } from '../../domain/types/job-progress-event.type';
@@ -40,6 +41,7 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
     private readonly runScanLoop: RunScanLoopUseCase,
     private readonly scanRepository: ScanRepositoryUseCase,
     private readonly progress: ProgressPort,
+    private readonly jobQueue: JobQueuePort,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -80,11 +82,13 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
       this.progress.emit(event);
     };
 
+    const shouldStop = () => this.jobQueue.isStopRequested(job.id!);
+
     try {
       if (job.name === 'discover') {
         const data = job.data as IDiscoverJobData;
         const date = data.date ? new Date(data.date) : undefined;
-        processed = await this.discoverRepos.execute(date, onProgress);
+        processed = await this.discoverRepos.execute(date, onProgress, shouldStop);
       } else if (job.name === 'scan') {
         const data = job.data as IScanLoopJobData;
         processed = await this.runScanLoop.execute({
@@ -94,6 +98,7 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
           maxRepos: data.maxRepos,
           staleTimeoutSeconds: data.staleTimeoutSeconds,
           onProgress,
+          shouldStop,
         });
       } else if (job.name === 'scan-repo') {
         const data = job.data as IScanRepoJobData;

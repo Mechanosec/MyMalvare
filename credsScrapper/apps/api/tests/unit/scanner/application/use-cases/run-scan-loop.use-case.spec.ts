@@ -163,4 +163,31 @@ describe('RunScanLoopUseCase', () => {
     expect(messages).toContain('scan: octocat/repo1 - done, 0 findings total');
     expect(messages).toContain('scan: loop finished, 1 repos processed this run');
   });
+
+  it('stops before claiming the next repo once shouldStop reports true, leaving later candidates untouched', async () => {
+    const state = new FakeStateRepository();
+    for (let i = 1; i <= 5; i += 1) {
+      await state.addCandidate(i, 'octocat', `repo${i}`);
+    }
+    const scanner = new RecordingScanner(state);
+    const useCase = new RunScanLoopUseCase(
+      state,
+      scanner as never,
+      new FakeLogger(),
+      new FakeWorkdirJoiner(),
+    );
+    const messages: string[] = [];
+
+    const processed = await useCase.execute({
+      workdirRoot: 'w',
+      sourceUrlFn: () => 'x',
+      workers: 1,
+      shouldStop: async () => scanner.scanned.length >= 2,
+      onProgress: (message) => messages.push(message),
+    });
+
+    expect(processed).toBe(2);
+    expect(scanner.scanned).toHaveLength(2);
+    expect(messages).toContain('scan: stopped by request, 2 repos processed this run');
+  });
 });

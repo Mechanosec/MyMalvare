@@ -12,6 +12,8 @@ export interface RunScanLoopOptions {
   readonly maxRepos?: number;
   readonly workers?: number;
   readonly onProgress?: (message: string, processed: number) => void;
+  /** Checked once per repo, between claiming one and the next - a cooperative stop, not an immediate kill: a repo already being cloned/scanned finishes first. */
+  readonly shouldStop?: () => Promise<boolean>;
 }
 
 // Ported from credsScrapper/app/scan/orchestrator.py's run_scan_loop.
@@ -40,9 +42,11 @@ export class RunScanLoopUseCase {
       maxRepos,
       workers = 1,
       onProgress,
+      shouldStop,
     } = options;
 
     let processed = 0;
+    let stopped = false;
     const report = (message: string) => {
       this.logger.log(message);
       onProgress?.(message, processed);
@@ -63,6 +67,10 @@ export class RunScanLoopUseCase {
     const workerLoop = async (): Promise<void> => {
       for (;;) {
         if (maxRepos !== undefined && reserved >= maxRepos) {
+          return;
+        }
+        if (shouldStop && (await shouldStop())) {
+          stopped = true;
           return;
         }
         reserved += 1;
@@ -89,7 +97,11 @@ export class RunScanLoopUseCase {
     report(`scan: starting ${workerCount} concurrent workers`);
     await Promise.all(Array.from({ length: workerCount }, () => workerLoop()));
 
-    report(`scan: loop finished, ${processed} repos processed this run`);
+    report(
+      stopped
+        ? `scan: stopped by request, ${processed} repos processed this run`
+        : `scan: loop finished, ${processed} repos processed this run`,
+    );
     return processed;
   }
 }

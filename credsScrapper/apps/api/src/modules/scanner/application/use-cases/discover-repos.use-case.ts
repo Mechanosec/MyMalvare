@@ -18,6 +18,7 @@ export class DiscoverReposUseCase {
   async execute(
     date: Date = new Date(Date.now() - 2 * 60 * 60 * 1000),
     onProgress?: (message: string) => void,
+    shouldStop?: () => Promise<boolean>,
   ): Promise<number> {
     const report = (message: string) => {
       this.logger.log(message);
@@ -27,6 +28,7 @@ export class DiscoverReposUseCase {
     report('discovery: starting to read events');
     let seen = 0;
     let added = 0;
+    let stopped = false;
     for await (const ref of parsePushEvents(this.feed.fetchHourLines(date))) {
       seen += 1;
       if (await this.state.addCandidate(ref.repoId, ref.owner, ref.name)) {
@@ -36,10 +38,19 @@ export class DiscoverReposUseCase {
         report(
           `discovery: processed ${seen} push events, ${added} new candidates so far`,
         );
+        // Checked at the same cadence as the progress report above,
+        // rather than every event - this loop can run tens of thousands
+        // of iterations a second, and a stop check is a Redis round-trip.
+        if (shouldStop && (await shouldStop())) {
+          stopped = true;
+          break;
+        }
       }
     }
     report(
-      `discovery: finished, ${seen} push events processed, ${added} new candidates added`,
+      stopped
+        ? `discovery: stopped by request, ${seen} push events processed, ${added} new candidates added`
+        : `discovery: finished, ${seen} push events processed, ${added} new candidates added`,
     );
     return added;
   }

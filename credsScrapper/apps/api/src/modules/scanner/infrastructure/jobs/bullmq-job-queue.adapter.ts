@@ -42,6 +42,14 @@ export class BullmqJobQueueAdapter
     connection: redisConnection,
   });
 
+  // Stop requests are process-local: main.ts boots one Nest process, and
+  // this adapter is the same singleton instance BullmqJobWorker injects
+  // (both live in ScannerModule) - no cross-process coordination needed,
+  // so a plain in-memory Set is simpler and correct here. Would need to
+  // move to a shared store (e.g. a Redis key) only if the worker were
+  // ever split into its own process.
+  private readonly stopRequests = new Set<string>();
+
   constructor() {
     super();
     this.queue.on('error', (err) => {
@@ -78,6 +86,14 @@ export class BullmqJobQueueAdapter
       error: job.failedReason,
       log: progress.log,
     };
+  }
+
+  async requestStop(jobId: string): Promise<void> {
+    this.stopRequests.add(jobId);
+  }
+
+  async isStopRequested(jobId: string): Promise<boolean> {
+    return this.stopRequests.has(jobId);
   }
 
   private mapStatus(bullState: string): EJobStatus {

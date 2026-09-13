@@ -24,8 +24,14 @@ class RecordingScanRepository {
 
 class RecordingDiscoverRepos {
   calls: unknown[] = [];
-  execute = async (date?: Date, onProgress?: (message: string) => void): Promise<number> => {
+  lastShouldStop?: () => Promise<boolean>;
+  execute = async (
+    date?: Date,
+    onProgress?: (message: string) => void,
+    shouldStop?: () => Promise<boolean>,
+  ): Promise<number> => {
     this.calls.push(date);
+    this.lastShouldStop = shouldStop;
     onProgress?.('discovery: finished, 0 push events processed, 0 new candidates added');
     return 0;
   };
@@ -33,8 +39,13 @@ class RecordingDiscoverRepos {
 
 class RecordingRunScanLoop {
   calls: unknown[] = [];
-  execute = async (options: { workdirRoot: string }): Promise<number> => {
+  lastShouldStop?: () => Promise<boolean>;
+  execute = async (options: {
+    workdirRoot: string;
+    shouldStop?: () => Promise<boolean>;
+  }): Promise<number> => {
     this.calls.push({ workdirRoot: options.workdirRoot });
+    this.lastShouldStop = options.shouldStop;
     return 0;
   };
 }
@@ -62,7 +73,13 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
     runScanLoop = new RecordingRunScanLoop();
     scanRepository = new RecordingScanRepository();
     progress = new RecordingProgress();
-    worker = new BullmqJobWorker(discover as never, runScanLoop as never, scanRepository as never, progress as never);
+    worker = new BullmqJobWorker(
+      discover as never,
+      runScanLoop as never,
+      scanRepository as never,
+      progress as never,
+      queueAdapter,
+    );
     await worker.start();
   });
 
@@ -145,5 +162,25 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
     await waitForStatus(job.id!, EJobStatus.DONE);
 
     expect(runScanLoop.calls).toEqual([{ workdirRoot: 'workdir' }]);
+  });
+
+  it('wires a shouldStop callback into DiscoverReposUseCase.execute that reflects a real requestStop() through JobQueuePort', async () => {
+    const job = await queue.add('discover', {});
+
+    await waitForStatus(job.id!, EJobStatus.DONE);
+
+    expect(await discover.lastShouldStop?.()).toBe(false);
+    await queueAdapter.requestStop(job.id!);
+    expect(await discover.lastShouldStop?.()).toBe(true);
+  });
+
+  it('wires a shouldStop callback into RunScanLoopUseCase.execute that reflects a real requestStop() through JobQueuePort', async () => {
+    const job = await queue.add('scan', { workdirRoot: 'workdir' });
+
+    await waitForStatus(job.id!, EJobStatus.DONE);
+
+    expect(await runScanLoop.lastShouldStop?.()).toBe(false);
+    await queueAdapter.requestStop(job.id!);
+    expect(await runScanLoop.lastShouldStop?.()).toBe(true);
   });
 });

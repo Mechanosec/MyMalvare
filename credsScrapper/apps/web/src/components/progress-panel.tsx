@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
-import { API_URL, fetchJob } from '../lib/api-client';
+import { API_URL, fetchJob, stopJob } from '../lib/api-client';
 import { EJobStatus } from '../lib/constant/job-status.constant';
 import { IJobProgressEvent } from '../lib/types/job-progress-event.type';
 
 interface IProgressPanelProps {
   readonly jobId: string | null;
+  /** Admin discover/scan jobs only - see jobs.controller.ts's :id/stop route. */
+  readonly showStopButton?: boolean;
 }
 
 const DOT_TONE: Record<EJobStatus, string> = {
@@ -31,9 +33,20 @@ function formatLine(event: IJobProgressEvent): string {
 
 // The parent renders this with `key={jobId}` so a new job remounts it
 // with fresh state, instead of resetting state from inside the effect.
-export function ProgressPanel({ jobId }: IProgressPanelProps) {
+export function ProgressPanel({ jobId, showStopButton }: IProgressPanelProps) {
   const [events, setEvents] = useState<IJobProgressEvent[]>([]);
+  const [stopping, setStopping] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+
+  async function handleStop() {
+    if (!jobId) return;
+    setStopping(true);
+    try {
+      await stopJob(jobId);
+    } catch {
+      setStopping(false);
+    }
+  }
 
   useEffect(() => {
     if (!jobId) return;
@@ -123,6 +136,16 @@ export function ProgressPanel({ jobId }: IProgressPanelProps) {
       <div className="flex items-center gap-3 border-b border-line px-4 py-2">
         <span className={`h-2 w-2 rounded-full ${DOT_TONE[latest.status]}`} />
         <p className="text-sm text-text-dim">Job {latest.status}</p>
+        {showStopButton && (latest.status === EJobStatus.QUEUED || latest.status === EJobStatus.RUNNING) && (
+          <button
+            type="button"
+            onClick={handleStop}
+            disabled={stopping}
+            className="border border-critical/50 px-2 py-0.5 text-xs font-medium text-critical transition-colors hover:bg-critical/10 disabled:opacity-40"
+          >
+            {stopping ? 'Stopping…' : 'Stop'}
+          </button>
+        )}
         <span className="ml-auto font-mono text-xs text-text-dim">
           {events.length} {events.length === 1 ? 'line' : 'lines'}
         </span>

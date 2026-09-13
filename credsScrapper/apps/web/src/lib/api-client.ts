@@ -200,6 +200,10 @@ export function fetchJob(jobId: string): Promise<IJobState> {
   return get<IJobState>(`/jobs/${jobId}`);
 }
 
+export function stopJob(jobId: string): Promise<{ ok: true }> {
+  return post<{ ok: true }>(`/jobs/${jobId}/stop`);
+}
+
 export function fetchScannedRepos(limit = 100): Promise<IScannedRepo[]> {
   return get<IScannedRepo[]>(`/scan/repos?limit=${limit}`);
 }
