@@ -25,7 +25,7 @@ const testedFinding = {
 describe('TestingPanel (regular user, scoped to own approved repos)', () => {
   beforeEach(() => {
     vi.spyOn(apiClient, 'fetchMyTestableRepos').mockResolvedValue([
-      { repoId: 1, owner: 'acme', name: 'widgets', count: 1 },
+      { repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 1, invalidCount: 0, unknownCount: 0 },
     ]);
     vi.spyOn(apiClient, 'fetchMyFindings').mockResolvedValue({
       items: [{ ...testedFinding, status: EFindingStatus.UNKNOWN, checkedAt: null }],
@@ -88,6 +88,18 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
     await waitFor(() =>
       expect(apiClient.fetchMyTestableRepos).toHaveBeenCalledWith([...TESTABLE_SECRET_TYPES]),
     );
+  });
+
+  it('shows the valid/invalid/unknown breakdown right in the repository picker, not just the total', async () => {
+    vi.spyOn(apiClient, 'fetchMyTestableRepos').mockResolvedValue([
+      { repoId: 1, owner: 'acme', name: 'widgets', count: 4, validCount: 1, invalidCount: 2, unknownCount: 1 },
+    ]);
+
+    render(<TestingPanel isAdmin={false} />);
+
+    expect(
+      await screen.findByRole('option', { name: 'acme/widgets (4: 1 valid, 2 invalid, 1 unknown)' }),
+    ).toBeInTheDocument();
   });
 
   it('tests a single finding and shows the live result', async () => {
@@ -159,7 +171,7 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
 describe('TestingPanel (admin, unscoped to any repo)', () => {
   beforeEach(() => {
     vi.spyOn(apiClient, 'fetchFindingsRepoOptions').mockResolvedValue([
-      { repoId: 1, owner: 'acme', name: 'widgets', count: 1 },
+      { repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 1, invalidCount: 0, unknownCount: 0 },
     ]);
     vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue({
       items: [{ ...testedFinding, status: EFindingStatus.UNKNOWN, checkedAt: null }],

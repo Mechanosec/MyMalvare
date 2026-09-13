@@ -20,6 +20,7 @@ import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type'
 import { PrismaService } from './prisma.service';
 import {
   buildSearchConditions,
+  groupRepoOptionsByStatus,
   parseLeakCommits,
   toFindingRecord,
   toRepoRef,
@@ -408,18 +409,13 @@ export class PrismaStateRepository extends StateRepositoryPort {
     secretTypes?: readonly ESecretType[],
   ): Promise<IFindingsRepoOption[]> {
     const rows = await this.prisma.finding.groupBy({
-      by: ['repoId', 'owner', 'name'],
+      by: ['repoId', 'owner', 'name', 'status'],
       where: secretTypes?.length ? { secretType: { in: [...secretTypes] } } : undefined,
       _count: { _all: true },
-      orderBy: { _count: { repoId: 'desc' } },
-      take: limit,
     });
-    return rows.map((row) => ({
-      repoId: row.repoId,
-      owner: row.owner,
-      name: row.name,
-      count: row._count._all,
-    }));
+    return groupRepoOptionsByStatus(rows)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, limit);
   }
 
   async findFindingsRepoOptionsByOwnerName(
@@ -431,18 +427,13 @@ export class PrismaStateRepository extends StateRepositoryPort {
     }
     const wanted = new Set(pairs.map((p) => `${p.owner.toLowerCase()}/${p.name.toLowerCase()}`));
     const rows = await this.prisma.finding.groupBy({
-      by: ['repoId', 'owner', 'name'],
+      by: ['repoId', 'owner', 'name', 'status'],
       where: secretTypes?.length ? { secretType: { in: [...secretTypes] } } : undefined,
       _count: { _all: true },
     });
-    return rows
-      .filter((row) => wanted.has(`${row.owner.toLowerCase()}/${row.name.toLowerCase()}`))
-      .map((row) => ({
-        repoId: row.repoId,
-        owner: row.owner,
-        name: row.name,
-        count: row._count._all,
-      }));
+    return groupRepoOptionsByStatus(
+      rows.filter((row) => wanted.has(`${row.owner.toLowerCase()}/${row.name.toLowerCase()}`)),
+    );
   }
 
   async listFindingsSecretTypeCounts(repoId?: number): Promise<ISecretTypeCount[]> {

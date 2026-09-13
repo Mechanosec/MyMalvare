@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { EFindingStatus } from '../../../src/modules/scanner/domain/constant/finding-status.constant';
 import { PrismaStateRepository } from '../../../src/modules/scanner/infrastructure/persistence/prisma-state-repository';
 import { PrismaService } from '../../../src/modules/scanner/infrastructure/persistence/prisma.service';
 
@@ -119,12 +120,53 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
     await repo.addFinding(2, 'someone', 'repo2', 'c.py', 'sha', 'GITHUB_PAT' as never, 'v', 1, null);
 
     const repoOptions = await repo.listFindingsRepoOptions(10);
-    expect(repoOptions).toContainEqual({ repoId: 1, owner: 'octocat', name: 'repo1', count: 2 });
-    expect(repoOptions).toContainEqual({ repoId: 2, owner: 'someone', name: 'repo2', count: 1 });
+    expect(repoOptions).toContainEqual({
+      repoId: 1,
+      owner: 'octocat',
+      name: 'repo1',
+      count: 2,
+      validCount: 0,
+      invalidCount: 0,
+      unknownCount: 2,
+    });
+    expect(repoOptions).toContainEqual({
+      repoId: 2,
+      owner: 'someone',
+      name: 'repo2',
+      count: 1,
+      validCount: 0,
+      invalidCount: 0,
+      unknownCount: 1,
+    });
 
     const secretTypeCounts = await repo.listFindingsSecretTypeCounts();
     expect(secretTypeCounts).toContainEqual({ secretType: 'AWS_ACCESS_KEY_ID', count: 2 });
     expect(secretTypeCounts).toContainEqual({ secretType: 'GITHUB_PAT', count: 1 });
+
+    await prisma.$disconnect();
+  });
+
+  it('breaks down repo options by status (valid/invalid/unknown), not just a flat total', async () => {
+    const { repo, prisma } = await makeRepository(path.join(tmpDir, 'state.db'));
+
+    await repo.addFinding(1, 'octocat', 'repo1', 'a.py', 'sha', 'AWS_ACCESS_KEY_ID' as never, 'v1', 1, null);
+    await repo.addFinding(1, 'octocat', 'repo1', 'b.py', 'sha', 'GITHUB_PAT' as never, 'v2', 1, null);
+    await repo.addFinding(1, 'octocat', 'repo1', 'c.py', 'sha', 'GITLAB_PAT' as never, 'v3', 1, null);
+    const page = await repo.listFindings({ repoIds: [1] });
+    const [valid, invalid] = page.items;
+    await repo.updateFindingStatus(valid.id, EFindingStatus.VALID);
+    await repo.updateFindingStatus(invalid.id, EFindingStatus.INVALID);
+
+    const [option] = await repo.listFindingsRepoOptions(10);
+    expect(option).toEqual({
+      repoId: 1,
+      owner: 'octocat',
+      name: 'repo1',
+      count: 3,
+      validCount: 1,
+      invalidCount: 1,
+      unknownCount: 1,
+    });
 
     await prisma.$disconnect();
   });

@@ -242,6 +242,28 @@ export class FakeStateRepository extends StateRepositoryPort {
     return { id, foundAt: new Date(), ...row, leakCommits: parseLeakCommits(row.leakCommits) };
   }
 
+  private bumpRepoOption(
+    counts: Map<number, IFindingsRepoOption>,
+    f: { repoId: number; owner: string; name: string; status: EFindingStatus },
+  ): void {
+    const existing = counts.get(f.repoId) ?? {
+      repoId: f.repoId,
+      owner: f.owner,
+      name: f.name,
+      count: 0,
+      validCount: 0,
+      invalidCount: 0,
+      unknownCount: 0,
+    };
+    counts.set(f.repoId, {
+      ...existing,
+      count: existing.count + 1,
+      validCount: existing.validCount + (f.status === EFindingStatus.VALID ? 1 : 0),
+      invalidCount: existing.invalidCount + (f.status === EFindingStatus.INVALID ? 1 : 0),
+      unknownCount: existing.unknownCount + (f.status === EFindingStatus.UNKNOWN ? 1 : 0),
+    });
+  }
+
   async listFindingsRepoOptions(
     limit: number,
     secretTypes?: readonly ESecretType[],
@@ -249,12 +271,7 @@ export class FakeStateRepository extends StateRepositoryPort {
     const counts = new Map<number, IFindingsRepoOption>();
     for (const f of this.findings) {
       if (secretTypes?.length && !secretTypes.includes(f.secretType)) continue;
-      const existing = counts.get(f.repoId);
-      if (existing) {
-        counts.set(f.repoId, { ...existing, count: existing.count + 1 });
-      } else {
-        counts.set(f.repoId, { repoId: f.repoId, owner: f.owner, name: f.name, count: 1 });
-      }
+      this.bumpRepoOption(counts, f);
     }
     return [...counts.values()].slice(0, limit);
   }
@@ -268,12 +285,7 @@ export class FakeStateRepository extends StateRepositoryPort {
     for (const f of this.findings) {
       if (!wanted.has(`${f.owner.toLowerCase()}/${f.name.toLowerCase()}`)) continue;
       if (secretTypes?.length && !secretTypes.includes(f.secretType)) continue;
-      const existing = counts.get(f.repoId);
-      if (existing) {
-        counts.set(f.repoId, { ...existing, count: existing.count + 1 });
-      } else {
-        counts.set(f.repoId, { repoId: f.repoId, owner: f.owner, name: f.name, count: 1 });
-      }
+      this.bumpRepoOption(counts, f);
     }
     return [...counts.values()];
   }

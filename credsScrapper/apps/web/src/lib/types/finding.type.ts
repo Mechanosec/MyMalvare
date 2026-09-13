@@ -29,6 +29,9 @@ export interface IFindingsRepoOption {
   readonly owner: string;
   readonly name: string;
   readonly count: number;
+  readonly validCount: number;
+  readonly invalidCount: number;
+  readonly unknownCount: number;
 }
 
 export interface ISecretTypeCount {

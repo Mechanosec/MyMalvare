@@ -10,7 +10,9 @@ describe('GetFindingsRepoOptionsUseCase', () => {
 
     const options = await useCase.execute();
 
-    expect(options).toEqual([{ repoId: 1, owner: 'octocat', name: 'repo', count: 1 }]);
+    expect(options).toEqual([
+      { repoId: 1, owner: 'octocat', name: 'repo', count: 1, validCount: 0, invalidCount: 0, unknownCount: 1 },
+    ]);
   });
 
   it('counts every finding for a repo, not just the first', async () => {
@@ -21,7 +23,9 @@ describe('GetFindingsRepoOptionsUseCase', () => {
 
     const options = await useCase.execute();
 
-    expect(options).toEqual([{ repoId: 1, owner: 'octocat', name: 'repo', count: 2 }]);
+    expect(options).toEqual([
+      { repoId: 1, owner: 'octocat', name: 'repo', count: 2, validCount: 0, invalidCount: 0, unknownCount: 2 },
+    ]);
   });
 
   it('defaults the limit to 500 when none is given', async () => {

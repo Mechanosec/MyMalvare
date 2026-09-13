@@ -29,6 +29,17 @@ function formatCheckedAt(checkedAt: string | null): string {
   return checkedAt ? `checked ${new Date(checkedAt).toLocaleString()}` : 'never checked';
 }
 
+// e.g. "acme/widgets (4: 1 valid, 3 unknown)" - only non-zero buckets are
+// listed, so a repo with nothing tested yet just reads "(4: 4 unknown)".
+function formatRepoOptionLabel(repo: IFindingsRepoOption): string {
+  const breakdown = [
+    repo.validCount > 0 ? `${repo.validCount} valid` : null,
+    repo.invalidCount > 0 ? `${repo.invalidCount} invalid` : null,
+    repo.unknownCount > 0 ? `${repo.unknownCount} unknown` : null,
+  ].filter((part): part is string => part !== null);
+  return `${repo.owner}/${repo.name} (${repo.count}${breakdown.length ? `: ${breakdown.join(', ')}` : ''})`;
+}
+
 interface ITestingPanelProps {
   readonly isAdmin: boolean;
 }
@@ -227,7 +238,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
             <option value="">Select a repository…</option>
             {repoOptions.map((repo) => (
               <option key={repo.repoId} value={repo.repoId}>
-                {repo.owner}/{repo.name} ({repo.count})
+                {formatRepoOptionLabel(repo)}
               </option>
             ))}
           </select>

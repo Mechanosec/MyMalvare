@@ -7,7 +7,7 @@ import { ECandidateStatus } from '../../domain/constant/candidate-status.constan
 import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { EScanStatus } from '../../domain/constant/scan-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
-import { IFindingRecord } from '../../domain/types/finding-record.type';
+import { IFindingRecord, IFindingsRepoOption } from '../../domain/types/finding-record.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type';
 
@@ -92,6 +92,47 @@ export function buildSearchConditions(search: string): Prisma.FindingWhereInput[
 
 export function scannedRepoStatus(row: TPrismaScannedRepo): EScanStatus {
   return toScanStatus(row.status);
+}
+
+// Collapses one row per (repoId, status) - the shape a `groupBy(['repoId',
+// 'owner', 'name', 'status'])` returns - into one IFindingsRepoOption per
+// repo, so the repo picker can show a valid/invalid/unknown breakdown
+// alongside the total, not just the total.
+export function groupRepoOptionsByStatus(
+  rows: ReadonlyArray<{
+    repoId: number;
+    owner: string;
+    name: string;
+    status: string;
+    _count: { _all: number };
+  }>,
+): IFindingsRepoOption[] {
+  const byRepo = new Map<number, { -readonly [K in keyof IFindingsRepoOption]: IFindingsRepoOption[K] }>();
+  for (const row of rows) {
+    let existing = byRepo.get(row.repoId);
+    if (!existing) {
+      existing = {
+        repoId: row.repoId,
+        owner: row.owner,
+        name: row.name,
+        count: 0,
+        validCount: 0,
+        invalidCount: 0,
+        unknownCount: 0,
+      };
+      byRepo.set(row.repoId, existing);
+    }
+    existing.count += row._count._all;
+    const status = toFindingStatus(row.status);
+    if (status === EFindingStatus.VALID) {
+      existing.validCount += row._count._all;
+    } else if (status === EFindingStatus.INVALID) {
+      existing.invalidCount += row._count._all;
+    } else {
+      existing.unknownCount += row._count._all;
+    }
+  }
+  return [...byRepo.values()];
 }
 
 export function toScannedRepoRecord(
