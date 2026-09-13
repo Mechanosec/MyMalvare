@@ -56,7 +56,7 @@ describe('PiscinaScanWorkerAdapter (real worker threads)', () => {
     expect(findingEvents).toHaveLength(2);
     expect(
       findingEvents.map((e: any) => e.filePath).sort(),
-    ).toEqual(['<commit-diff>', 'config.py']);
+    ).toEqual(['<commit-diff>:config.py', 'config.py']);
     for (const event of findingEvents) {
       expect((event as any).finding.secretValue).toBe('AKIAABCDEFGH12345678');
     }

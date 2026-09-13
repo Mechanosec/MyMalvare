@@ -1,5 +1,6 @@
 import { scanText } from '../../domain/detection/engine';
 import { isExcludedPath } from '../../domain/detection/path-exclusion';
+import { extractDiffFilePath, splitDiffByFile } from '../../domain/detection/split-commit-diff';
 import { IFinding } from '../../domain/types/finding.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { GitOperationsPort } from '../ports/git-operations.port';
@@ -46,14 +47,20 @@ export class RunScanJobUseCase {
       for (const { commitSha, diffText } of await this.git.iterCommitDiffs(
         workdir,
       )) {
-        for (const finding of scanText(diffText)) {
-          onEvent({
-            type: 'finding',
-            filePath: '<commit-diff>',
-            commitSha,
-            finding,
-          });
-          findingsCount += 1;
+        for (const segment of splitDiffByFile(diffText)) {
+          const realPath = extractDiffFilePath(segment.filePath);
+          if (realPath !== null && isExcludedPath(realPath)) {
+            continue;
+          }
+          for (const finding of scanText(segment.text)) {
+            onEvent({
+              type: 'finding',
+              filePath: segment.filePath,
+              commitSha,
+              finding,
+            });
+            findingsCount += 1;
+          }
         }
       }
 

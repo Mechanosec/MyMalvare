@@ -16,6 +16,10 @@ const EXCLUDED_PATH_PATTERNS: readonly RegExp[] = [
   /(^|\/)(dist|build|out|\.next|vendor|node_modules)(\/|$)/i,
   /\.min\.[cm]?[jt]sx?$/i,
   /(^|\/)swagger-ui[^/]*\.(js|css)$/i,
+  // Dependency lockfiles are pinned package hashes/checksums, not
+  // secrets - dense, high-entropy-looking content that's the same kind
+  // of noise as minified/bundled code above.
+  /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|npm-shrinkwrap\.json|composer\.lock|Gemfile\.lock|Cargo\.lock|poetry\.lock|Pipfile\.lock|go\.sum)$/i,
 ];
 
 export function isExcludedPath(filePath: string): boolean {

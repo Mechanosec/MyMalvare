@@ -5,6 +5,7 @@ import { ECandidateStatus } from '../../domain/constant/candidate-status.constan
 import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { EScanStatus } from '../../domain/constant/scan-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
+import { isDiffSourcedFile } from '../../domain/detection/split-commit-diff';
 import {
   IFindingInput,
   IFindingRecord,
@@ -188,8 +189,8 @@ export class PrismaStateRepository extends StateRepositoryPort {
     const leakCommits = new Set<string>(parseLeakCommits(existing.leakCommits));
     leakCommits.add(commitSha);
 
-    const isIncomingPathBased = filePath !== '<commit-diff>';
-    const isExistingDiffBased = existing.filePath === '<commit-diff>';
+    const isIncomingPathBased = !isDiffSourcedFile(filePath);
+    const isExistingDiffBased = isDiffSourcedFile(existing.filePath);
     const shouldPromote = isIncomingPathBased && isExistingDiffBased;
 
     await this.prisma.finding.update({
@@ -281,8 +282,8 @@ export class PrismaStateRepository extends StateRepositoryPort {
       const hadCommit = existing.leakCommits.has(finding.commitSha);
       existing.leakCommits.add(finding.commitSha);
 
-      const isIncomingPathBased = finding.filePath !== '<commit-diff>';
-      const isExistingDiffBased = existing.filePath === '<commit-diff>';
+      const isIncomingPathBased = !isDiffSourcedFile(finding.filePath);
+      const isExistingDiffBased = isDiffSourcedFile(existing.filePath);
       if (isIncomingPathBased && isExistingDiffBased) {
         existing.filePath = finding.filePath;
         existing.commitSha = finding.commitSha;

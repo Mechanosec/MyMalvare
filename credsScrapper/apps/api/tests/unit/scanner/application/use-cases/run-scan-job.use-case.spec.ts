@@ -91,6 +91,54 @@ describe('RunScanJobUseCase', () => {
     expect((findingEvents[0] as any).filePath).toBe('<commit-diff>');
   });
 
+  it('attributes a commit-diff finding to its real file when the diff has a diff --git header', async () => {
+    const git = new FakeGit();
+    git.diffs = [
+      {
+        commitSha: 'deadbeef',
+        diffText: [
+          'diff --git a/src/config.py b/src/config.py',
+          '--- a/src/config.py',
+          '+++ b/src/config.py',
+          '@@ -1,1 +1,2 @@',
+          "+AWS_KEY = 'AKIAABCDEFGH12345678'",
+          '',
+        ].join('\n'),
+      },
+    ];
+    const useCase = new RunScanJobUseCase(git);
+    const events: unknown[] = [];
+
+    await useCase.execute(ref, 'https://example.com/repo.git', 'workdir/repo-1', (e) => events.push(e));
+
+    const findingEvents = events.filter((e: any) => e.type === 'finding');
+    expect(findingEvents).toHaveLength(1);
+    expect((findingEvents[0] as any).filePath).toBe('<commit-diff>:src/config.py');
+  });
+
+  it('excludes a commit-diff finding whose real file is a lockfile', async () => {
+    const git = new FakeGit();
+    git.diffs = [
+      {
+        commitSha: 'deadbeef',
+        diffText: [
+          'diff --git a/package-lock.json b/package-lock.json',
+          '--- a/package-lock.json',
+          '+++ b/package-lock.json',
+          '@@ -1,1 +1,2 @@',
+          "+AWS_KEY = 'AKIAABCDEFGH12345678'",
+          '',
+        ].join('\n'),
+      },
+    ];
+    const useCase = new RunScanJobUseCase(git);
+    const events: unknown[] = [];
+
+    await useCase.execute(ref, 'https://example.com/repo.git', 'workdir/repo-1', (e) => events.push(e));
+
+    expect(events.filter((e: any) => e.type === 'finding')).toHaveLength(0);
+  });
+
   it('resolves failed (not a rejected promise) when cloning throws', async () => {
     const git = new FakeGit();
     git.cloneShouldFail = true;

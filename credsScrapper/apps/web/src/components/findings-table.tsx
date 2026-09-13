@@ -25,6 +25,27 @@ interface IFindingsTableProps {
 
 const EMPTY_PAGE: IFindingsPage = { items: [], total: 0 };
 
+// Mirrors apps/api's domain/detection/split-commit-diff.ts labeling: a
+// finding found in commit history (not the current working tree) has its
+// filePath prefixed this way, carrying the real file it came from - or,
+// for a diff with no parseable "diff --git" header, just the bare
+// sentinel with no file info at all.
+const DIFF_FILE_PREFIX = '<commit-diff>:';
+const UNKNOWN_DIFF_FILE = '<commit-diff>';
+
+function formatFileCell(finding: IFinding): { readonly label: string; readonly sub: string | null } {
+  if (finding.filePath.startsWith(DIFF_FILE_PREFIX)) {
+    return {
+      label: finding.filePath.slice(DIFF_FILE_PREFIX.length),
+      sub: `commit ${finding.commitSha.slice(0, 7)}`,
+    };
+  }
+  if (finding.filePath === UNKNOWN_DIFF_FILE) {
+    return { label: '(file unknown)', sub: `commit ${finding.commitSha.slice(0, 7)}` };
+  }
+  return { label: finding.filePath, sub: null };
+}
+
 type TSortKey = 'repo' | 'file' | 'type' | 'line';
 
 function sortValue(finding: IFinding, key: TSortKey): string | number {
@@ -201,9 +222,15 @@ export function FindingsTable({ isAdmin, refreshKey }: IFindingsTableProps) {
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-text">
                     {finding.owner}/{finding.name}
                   </td>
-                  <td className="max-w-64 truncate px-3 py-2 font-mono text-text-dim" title={finding.filePath}>
-                    {finding.filePath}
-                  </td>
+                  {(() => {
+                    const { label, sub } = formatFileCell(finding);
+                    return (
+                      <td className="max-w-64 px-3 py-2 font-mono text-text-dim" title={sub ? `${label} (${sub})` : label}>
+                        <div className="truncate">{label}</div>
+                        {sub && <div className="truncate text-xs text-text-dim/70">{sub}</div>}
+                      </td>
+                    );
+                  })()}
                   <td className="px-3 py-2">
                     <SecretTypeBadge secretType={finding.secretType} />
                   </td>

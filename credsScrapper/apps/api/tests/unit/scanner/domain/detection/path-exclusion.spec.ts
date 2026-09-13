@@ -22,6 +22,13 @@ describe('isExcludedPath', () => {
     'src/app.min.js',
     'litellm/proxy/swagger/swagger-ui-bundle.js',
     'litellm/proxy/swagger/swagger-ui.css',
+    'docker/ci-cd-tools/package-lock.json',
+    'yarn.lock',
+    'apps/api/pnpm-lock.yaml',
+    'Gemfile.lock',
+    'Cargo.lock',
+    'poetry.lock',
+    'go.sum',
   ])('excludes %s', (filePath) => {
     expect(isExcludedPath(filePath)).toBe(true);
   });
