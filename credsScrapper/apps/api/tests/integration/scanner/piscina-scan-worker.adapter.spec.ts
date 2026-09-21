@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises';
+import { generateKeyPairSync } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -53,8 +54,13 @@ describe('PiscinaScanWorkerAdapter (real worker threads)', () => {
     const key = {
       type: 'service_account',
       description: 'literal } brace',
-      private_key: 'synthetic-only',
-      client_email: 'fixture@example.invalid',
+      project_id: 'example-test-project',
+      private_key: generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+      }).privateKey,
+      client_email: 'fixture@example-test-project.iam.gserviceaccount.com',
     };
     const state = { addFindings: jest.fn(), resetTestResults: jest.fn() };
     const cache = {

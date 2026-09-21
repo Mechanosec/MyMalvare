@@ -1,6 +1,5 @@
 import { StateRepositoryPort } from '../ports/state-repository.port';
 import { KeyValidatorPort } from '../ports/key-validator.port';
-import { ESecretType } from '../../domain/constant/secret-type.constant';
 import { IFindingRecord } from '../../domain/types/finding-record.type';
 
 // Admin-only, unscoped by RepoAuthorization - the caller (FindingsController)
@@ -18,20 +17,11 @@ export class AdminTestRepoFindingsUseCase {
       repoIds: [repoId],
       limit: 1000,
     });
-    // Already have every finding for this repo in hand - no extra query
-    // needed to pair an AWS access key ID with its secret key.
-    const pairedAwsSecret = items.find(
-      (f) => f.secretType === ESecretType.AWS_SECRET_ACCESS_KEY,
-    )?.secretValue;
     for (const finding of items) {
-      const pairedValue =
-        finding.secretType === ESecretType.AWS_ACCESS_KEY_ID
-          ? pairedAwsSecret
-          : undefined;
       const { status, reason } = await this.validator.validateDetailed(
         finding.secretType,
         finding.secretValue,
-        pairedValue,
+        undefined,
       );
       await this.state.recordTestResult(finding.id, status, reason);
     }

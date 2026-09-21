@@ -44,12 +44,16 @@ function makeFinding(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe('TestFindingUseCase', () => {
   it('returns null when the finding does not exist', async () => {
-    const authorizations = { listByUser: jest.fn() } as unknown as RepoAuthorizationRepositoryPort;
+    const authorizations = {
+      listByUser: jest.fn(),
+    } as unknown as RepoAuthorizationRepositoryPort;
     const state = {
       getFindingById: jest.fn().mockResolvedValue(null),
       recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
-    const validator = { validateDetailed: jest.fn() } as unknown as KeyValidatorPort;
+    const validator = {
+      validateDetailed: jest.fn(),
+    } as unknown as KeyValidatorPort;
     const useCase = new TestFindingUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);
@@ -58,15 +62,21 @@ describe('TestFindingUseCase', () => {
     expect(validator.validateDetailed).not.toHaveBeenCalled();
   });
 
-  it('returns null when the user has no approved authorization for the finding\'s repo', async () => {
+  it("returns null when the user has no approved authorization for the finding's repo", async () => {
     const authorizations = {
-      listByUser: jest.fn().mockResolvedValue([makeApproval({ status: ERepoAuthorizationStatus.PENDING })]),
+      listByUser: jest
+        .fn()
+        .mockResolvedValue([
+          makeApproval({ status: ERepoAuthorizationStatus.PENDING }),
+        ]),
     } as unknown as RepoAuthorizationRepositoryPort;
     const state = {
       getFindingById: jest.fn().mockResolvedValue(makeFinding()),
       recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
-    const validator = { validateDetailed: jest.fn() } as unknown as KeyValidatorPort;
+    const validator = {
+      validateDetailed: jest.fn(),
+    } as unknown as KeyValidatorPort;
     const useCase = new TestFindingUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);
@@ -80,10 +90,16 @@ describe('TestFindingUseCase', () => {
       listByUser: jest.fn().mockResolvedValue([makeApproval()]),
     } as unknown as RepoAuthorizationRepositoryPort;
     const state = {
-      getFindingById: jest.fn().mockResolvedValue(makeFinding({ owner: 'someone-else', name: 'other-repo' })),
+      getFindingById: jest
+        .fn()
+        .mockResolvedValue(
+          makeFinding({ owner: 'someone-else', name: 'other-repo' }),
+        ),
       recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
-    const validator = { validateDetailed: jest.fn() } as unknown as KeyValidatorPort;
+    const validator = {
+      validateDetailed: jest.fn(),
+    } as unknown as KeyValidatorPort;
     const useCase = new TestFindingUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);
@@ -101,35 +117,61 @@ describe('TestFindingUseCase', () => {
       getFindingById: jest.fn().mockResolvedValue(finding),
       recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
-    const validator = { validateDetailed: jest.fn().mockResolvedValue({ status: EFindingStatus.VALID, reason: null }) } as unknown as KeyValidatorPort;
+    const validator = {
+      validateDetailed: jest
+        .fn()
+        .mockResolvedValue({ status: EFindingStatus.VALID, reason: null }),
+    } as unknown as KeyValidatorPort;
     const useCase = new TestFindingUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);
 
-    expect(validator.validateDetailed).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token', undefined);
-    expect(state.recordTestResult).toHaveBeenCalledWith(10, EFindingStatus.VALID, null);
+    expect(validator.validateDetailed).toHaveBeenCalledWith(
+      ESecretType.TELEGRAM_BOT_TOKEN,
+      'fake-token',
+      undefined,
+    );
+    expect(state.recordTestResult).toHaveBeenCalledWith(
+      10,
+      EFindingStatus.VALID,
+      null,
+    );
     expect(result).toMatchObject({ id: 10, status: EFindingStatus.VALID });
     expect(result?.checkedAt).toBeInstanceOf(Date);
   });
 
-  it('looks up and passes a paired AWS secret key when testing an AWS access key ID finding', async () => {
-    const finding = makeFinding({ secretType: ESecretType.AWS_ACCESS_KEY_ID, secretValue: 'AKIAFAKE' });
+  it('does not pair an orphan AWS ID with an unrelated repository secret', async () => {
+    const finding = makeFinding({
+      secretType: ESecretType.AWS_ACCESS_KEY_ID,
+      secretValue: 'AKIAFAKE',
+    });
     const authorizations = {
       listByUser: jest.fn().mockResolvedValue([makeApproval()]),
     } as unknown as RepoAuthorizationRepositoryPort;
     const state = {
       getFindingById: jest.fn().mockResolvedValue(finding),
       recordTestResult: jest.fn(),
-      listFindings: jest.fn().mockResolvedValue({ items: [{ secretValue: 'b'.repeat(40) }], total: 1 }),
+      listFindings: jest
+        .fn()
+        .mockResolvedValue({
+          items: [{ secretValue: 'b'.repeat(40) }],
+          total: 1,
+        }),
     } as unknown as StateRepositoryPort;
-    const validator = { validateDetailed: jest.fn().mockResolvedValue({ status: EFindingStatus.VALID, reason: null }) } as unknown as KeyValidatorPort;
+    const validator = {
+      validateDetailed: jest
+        .fn()
+        .mockResolvedValue({ status: EFindingStatus.VALID, reason: null }),
+    } as unknown as KeyValidatorPort;
     const useCase = new TestFindingUseCase(authorizations, state, validator);
 
     await useCase.execute(1, 10);
 
-    expect(state.listFindings).toHaveBeenCalledWith(
-      expect.objectContaining({ repoIds: [42], secretTypes: [ESecretType.AWS_SECRET_ACCESS_KEY] }),
+    expect(state.listFindings).not.toHaveBeenCalled();
+    expect(validator.validateDetailed).toHaveBeenCalledWith(
+      ESecretType.AWS_ACCESS_KEY_ID,
+      'AKIAFAKE',
+      undefined,
     );
-    expect(validator.validateDetailed).toHaveBeenCalledWith(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAFAKE', 'b'.repeat(40));
   });
 });

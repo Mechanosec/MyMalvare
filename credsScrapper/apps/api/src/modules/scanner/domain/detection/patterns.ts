@@ -155,7 +155,7 @@ export const PATTERNS: readonly ISecretPattern[] = [
   },
   {
     secretType: ESecretType.TWITTER_BEARER_TOKEN,
-    pattern: /AAAAAAAAAAAAAAAAAAAAA[A-Za-z0-9%]{35,44}/g,
+    pattern: /AAAAAAAAAAAAAAAAAAAAA[A-Za-z0-9%]{35,}/g,
   },
   // Private keys
   {

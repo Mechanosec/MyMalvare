@@ -1,6 +1,11 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { ESecretType } from '../../../../../src/modules/scanner/domain/constant/secret-type.constant';
 import { scanText } from '../../../../../src/modules/scanner/domain/detection/engine';
 import { PATTERNS } from '../../../../../src/modules/scanner/domain/detection/patterns';
+
+const syntheticPrivateKey = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  .privateKey.export({ type: 'pkcs8', format: 'pem' })
+  .toString();
 
 describe('scanText', () => {
   it('does not evaluate a pattern when its required marker is absent', () => {
@@ -111,26 +116,31 @@ describe('scanText', () => {
     expect(match?.context).toBeNull();
   });
 
-  it('detects an AWS credential pair in a quoted JSON field and a commit diff', () => {
+  it('pairs a complete JSON credential and preserves an incomplete JSON diff as separate findings', () => {
     const accessId = 'AKIAABCDEFGH12345678';
     const secret = 'q'.repeat(40);
-    for (const text of [
+    const findings = scanText(
       JSON.stringify({
         aws_access_key_id: accessId,
         aws_secret_access_key: secret,
       }),
-      `+  "aws_access_key_id": "${accessId}"\n+  "aws_secret_access_key": "${secret}"`,
-    ]) {
-      const findings = scanText(text, [
-        ESecretType.AWS_ACCESS_KEY_ID,
-        ESecretType.AWS_SECRET_ACCESS_KEY,
-      ]);
-      expect(findings.map((finding) => finding.secretType)).toEqual([
-        ESecretType.AWS_ACCESS_KEY_ID,
-        ESecretType.AWS_SECRET_ACCESS_KEY,
-      ]);
-      expect(findings[1].secretValue).toBe(secret);
-    }
+      [ESecretType.AWS_ACCESS_KEY_ID, ESecretType.AWS_SECRET_ACCESS_KEY],
+    );
+    expect(findings).toHaveLength(1);
+    expect(JSON.parse(findings[0].secretValue)).toEqual({
+      access: accessId,
+      private: secret,
+    });
+
+    const partialDiff = `+  "aws_access_key_id": "${accessId}"\n+  "aws_secret_access_key": "${secret}"`;
+    const partial = scanText(partialDiff, [
+      ESecretType.AWS_ACCESS_KEY_ID,
+      ESecretType.AWS_SECRET_ACCESS_KEY,
+    ]);
+    expect(partial.map((finding) => finding.secretValue)).toEqual([
+      accessId,
+      secret,
+    ]);
   });
 
   it('a pattern match has no context', () => {
@@ -218,8 +228,7 @@ describe('scanText', () => {
       type: 'service_account',
       project_id: 'my-test-project',
       private_key_id: 'abc123',
-      private_key:
-        '-----BEGIN PRIVATE KEY-----\\nMIIfake\\n-----END PRIVATE KEY-----\\n',
+      private_key: syntheticPrivateKey,
       client_email: 'svc@my-test-project.iam.gserviceaccount.com',
       client_id: '123456789',
       token_uri: 'https://oauth2.googleapis.com/token',
@@ -239,8 +248,7 @@ describe('scanText', () => {
     const key = {
       type: 'service_account',
       project_id: 'my-test-project',
-      private_key:
-        '-----BEGIN PRIVATE KEY-----\\nMIIfake\\n-----END PRIVATE KEY-----\\n',
+      private_key: syntheticPrivateKey,
       client_email: 'svc@my-test-project.iam.gserviceaccount.com',
     };
     const diffText = `${JSON.stringify(key, null, 2)}\n`
@@ -266,7 +274,7 @@ describe('scanText', () => {
     const gcpFinding = findings.find(
       (f) => f.secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY,
     );
-    expect(gcpFinding?.secretValue).toBe('"type": "service_account"');
+    expect(gcpFinding).toBeUndefined();
   });
 
   it.each([
@@ -276,9 +284,10 @@ describe('scanText', () => {
   ])('preserves complete JSON containing %s inside a string', (description) => {
     const key = {
       type: 'service_account',
+      project_id: 'example-test-project',
       description,
-      private_key: 'synthetic-only',
-      client_email: 'fixture@example.invalid',
+      private_key: syntheticPrivateKey,
+      client_email: 'svc@example-test-project.iam.gserviceaccount.com',
     };
     const finding = scanText(JSON.stringify(key)).find(
       (f) => f.secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY,
@@ -291,7 +300,7 @@ describe('scanText', () => {
     const key = {
       type: 'service_account',
       project_id: 'my-app-test-1234',
-      private_key: 'a'.repeat(50),
+      private_key: syntheticPrivateKey,
       client_email: 'svc@my-app-test-1234.iam.gserviceaccount.com',
     };
     const text = `${JSON.stringify(key)}\n`;

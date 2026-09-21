@@ -26,6 +26,43 @@ describe('LiveKeyValidatorAdapter', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('uses the complete stored AWS pair without a separate secret lookup', async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 }) as never;
+    const access = 'AKIAQ7W8E9R2T3Y4U5I6';
+    const privateKey = 'aB3dE6gH9jK2mN5pQ8sT1vW4yZ7aB3dE6gH9jK2m';
+    const result = await adapter.validateDetailed(
+      ESecretType.AWS_ACCESS_KEY_ID,
+      JSON.stringify({ access, private: privateKey }),
+    );
+    expect(result.status).toBe(EFindingStatus.VALID);
+    const headers = (global.fetch as jest.Mock).mock.calls[0][1].headers;
+    expect(headers.Authorization).toContain(`Credential=${access}/`);
+    expect(headers.Authorization).not.toContain(privateKey);
+  });
+
+  it.each([
+    JSON.stringify({ access: 'AKIAQ7W8E9R2T3Y4U5I6' }),
+    JSON.stringify({ access: 'AKIAQ7W8E9R2T3Y4U5I6', private: 'short' }),
+    JSON.stringify({
+      access: 'ASIAQ7W8E9R2T3Y4U5I6',
+      private: 'a'.repeat(40),
+      sessionToken: 'synthetic',
+    }),
+  ])(
+    'does not request AWS for incomplete, malformed or temporary stored credentials',
+    async (value) => {
+      global.fetch = jest.fn();
+      const result = await adapter.validateDetailed(
+        ESecretType.AWS_ACCESS_KEY_ID,
+        value,
+      );
+      expect(result.status).toBe(EFindingStatus.UNKNOWN);
+      expect(global.fetch).not.toHaveBeenCalled();
+    },
+  );
+
   it('explains malformed GCP JSON without making a request', async () => {
     global.fetch = jest.fn();
     expect(
@@ -53,13 +90,11 @@ describe('LiveKeyValidatorAdapter', () => {
       'Skipped: credential cannot be used in an HTTP header.',
     ],
   ])('reports %s without exposing raw error details', async (code, reason) => {
-    jest
-      .spyOn(global, 'fetch')
-      .mockRejectedValue(
-        Object.assign(new TypeError('synthetic sensitive details'), {
-          cause: { code },
-        }),
-      );
+    jest.spyOn(global, 'fetch').mockRejectedValue(
+      Object.assign(new TypeError('synthetic sensitive details'), {
+        cause: { code },
+      }),
+    );
     expect(
       await adapter.validateDetailed(ESecretType.OPENAI_API_KEY, 'synthetic'),
     ).toEqual({ status: EFindingStatus.UNKNOWN, reason });

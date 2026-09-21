@@ -1,0 +1,33 @@
+{
+  "mode": "read-only",
+  "scope": "GCP structurally incomplete findings only; not a complete noise classification",
+  "database": "/home/mechanosec/PetProjects/MyMalvare/credsScrapper/apps/api/prisma/dev.db",
+  "count": 5,
+  "candidates": [
+    {
+      "id": 4447999,
+      "type": "gcp_service_account_key",
+      "reason": "not_credentials_json"
+    },
+    {
+      "id": 4448748,
+      "type": "gcp_service_account_key",
+      "reason": "missing_or_malformed_private_key"
+    },
+    {
+      "id": 4749115,
+      "type": "gcp_service_account_key",
+      "reason": "missing_or_malformed_private_key"
+    },
+    {
+      "id": 4749116,
+      "type": "gcp_service_account_key",
+      "reason": "not_credentials_json"
+    },
+    {
+      "id": 4750718,
+      "type": "gcp_service_account_key",
+      "reason": "not_credentials_json"
+    }
+  ]
+}

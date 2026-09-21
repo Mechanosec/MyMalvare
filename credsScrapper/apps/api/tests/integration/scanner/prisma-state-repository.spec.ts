@@ -194,6 +194,48 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
     }
   });
 
+  it('preserves one complete AWS pair from detection through SQLite and validation', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'aws-contract.db'),
+    );
+    const access = 'AKIAQ7W8E9R2T3Y4U5I6';
+    const privateKey = 'aB3dE6gH9jK2mN5pQ8sT1vW4yZ7aB3dE6gH9jK2m';
+    const request = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue({ ok: true, status: 200 } as Response);
+    try {
+      const detected = scanText(
+        `AWS_ACCESS_KEY_ID=${access}\nAWS_SECRET_ACCESS_KEY=${privateKey}`,
+      );
+      expect(detected).toHaveLength(1);
+      await repo.addFindings(
+        1,
+        'local',
+        'fixture',
+        detected.map((finding) => ({
+          ...finding,
+          filePath: 'credentials.env',
+          commitSha: 'a'.repeat(40),
+        })),
+      );
+      const { items } = await repo.listFindings({ repoIds: [1] });
+      expect(items).toHaveLength(1);
+      expect(JSON.parse(items[0].secretValue)).toEqual({
+        access,
+        private: privateKey,
+      });
+      const result = await new LiveKeyValidatorAdapter().validateDetailed(
+        items[0].secretType,
+        items[0].secretValue,
+      );
+      expect(result.status).toBe(EFindingStatus.VALID);
+      expect(request).toHaveBeenCalledTimes(1);
+    } finally {
+      request.mockRestore();
+      await prisma.$disconnect();
+    }
+  });
+
   it('preserves a synthetic GCP JSON from detection through SQLite to validator input', async () => {
     const { repo, prisma } = await makeRepository(
       path.join(tmpDir, 'contract.db'),
@@ -206,8 +248,9 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
     const key = {
       type: 'service_account',
       description: 'literal } and escaped " quote',
+      project_id: 'example-test-project',
       private_key: privateKey,
-      client_email: 'fixture@example.invalid',
+      client_email: 'fixture@example-test-project.iam.gserviceaccount.com',
     };
     const request = jest
       .spyOn(global, 'fetch')

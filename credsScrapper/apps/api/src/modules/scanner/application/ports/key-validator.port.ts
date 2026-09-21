@@ -33,8 +33,9 @@ export abstract class KeyValidatorPort {
   /**
    * pairedValue is for the rare secret type whose live check needs a
    * second value alongside secretValue - today only AWS_ACCESS_KEY_ID,
-   * paired with a matching AWS_SECRET_ACCESS_KEY finding from the same
-   * repo (the caller resolves that lookup; see find-paired-aws-secret.ts).
+   * supplied explicitly by a caller that already knows the pair. New AWS
+   * findings carry JSON { access, private } in secretValue; never infer a
+   * pair by selecting another finding from the same repository.
    * Every other type ignores it.
    */
   abstract validate(

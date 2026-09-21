@@ -1,9 +1,7 @@
 import { RepoAuthorizationRepositoryPort } from '../ports/repo-authorization-repository.port';
 import { StateRepositoryPort } from '../../../scanner/application/ports/state-repository.port';
 import { KeyValidatorPort } from '../../../scanner/application/ports/key-validator.port';
-import { ESecretType } from '../../../scanner/domain/constant/secret-type.constant';
 import { IFindingRecord } from '../../../scanner/domain/types/finding-record.type';
-import { findPairedAwsSecretKey } from '../../../scanner/application/use-cases/find-paired-aws-secret';
 import { findOwnedFinding } from './find-owned-finding';
 
 export class TestFindingUseCase {
@@ -28,14 +26,10 @@ export class TestFindingUseCase {
       return null;
     }
 
-    const pairedValue =
-      finding.secretType === ESecretType.AWS_ACCESS_KEY_ID
-        ? await findPairedAwsSecretKey(this.state, finding.repoId)
-        : undefined;
     const { status, reason } = await this.validator.validateDetailed(
       finding.secretType,
       finding.secretValue,
-      pairedValue,
+      undefined,
     );
     await this.state.recordTestResult(finding.id, status, reason);
 

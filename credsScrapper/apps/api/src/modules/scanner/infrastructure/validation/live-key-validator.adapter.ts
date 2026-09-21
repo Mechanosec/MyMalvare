@@ -7,6 +7,7 @@ import {
 } from '../../application/ports/key-validator.port';
 import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
+import { parseAwsCredentials } from '../../domain/detection/aws-credentials';
 
 const TIMEOUT_MS = 5000;
 
@@ -542,6 +543,13 @@ export class LiveKeyValidatorAdapter extends KeyValidatorPort {
         'Skipped: this credential type has no supported validator.',
       );
     if (secretType === ESecretType.AWS_ACCESS_KEY_ID) {
+      const credentials = parseAwsCredentials(secretValue);
+      if (credentials) {
+        secretValue = credentials.access;
+        pairedValue = credentials.private;
+      } else if (secretValue.trimStart().startsWith('{')) {
+        return unknown('Skipped: AWS credentials are incomplete or malformed.');
+      }
       if (secretValue.startsWith('ASIA'))
         return unknown(
           'Skipped: temporary AWS credentials require a session token; this validator does not support it.',
