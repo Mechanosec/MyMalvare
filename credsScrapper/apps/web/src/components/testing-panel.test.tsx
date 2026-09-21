@@ -102,6 +102,27 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows a skipped reason instead of claiming a successful test', async () => {
+    vi.spyOn(apiClient, 'testMyFinding').mockResolvedValue({ ...testedFinding, status: EFindingStatus.UNKNOWN, testReason: 'Skipped: matching AWS Secret Access Key is missing.' });
+    render(<TestingPanel isAdmin={false} />);
+    fireEvent.change(await screen.findByLabelText('Repository'), { target: { value: '1' } });
+    fireEvent.click(screen.getByText('Load keys'));
+    await screen.findByText('src/config.ts');
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+    expect(await screen.findByText('Skipped: matching AWS Secret Access Key is missing.')).toBeInTheDocument();
+    expect(screen.queryByText(/Tested .* valid/)).not.toBeInTheDocument();
+  });
+
+  it('shows the saved reason when findings are loaded again', async () => {
+    vi.mocked(apiClient.fetchMyFindings).mockResolvedValue({
+      items: [{ ...testedFinding, status: EFindingStatus.UNKNOWN, testReason: 'Skipped: GCP credentials are not valid JSON.' }], total: 1,
+    });
+    render(<TestingPanel isAdmin={false} />);
+    fireEvent.change(await screen.findByLabelText('Repository'), { target: { value: '1' } });
+    fireEvent.click(screen.getByText('Load keys'));
+    expect(await screen.findByText('Skipped: GCP credentials are not valid JSON.')).toBeInTheDocument();
+  });
+
   it('tests a single finding and shows the live result', async () => {
     vi.spyOn(apiClient, 'testMyFinding').mockResolvedValue(testedFinding);
 
@@ -114,7 +135,7 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
 
     await waitFor(() => expect(apiClient.testMyFinding).toHaveBeenCalledWith(10));
-    expect(screen.getByText(/Tested .* valid/)).toBeInTheDocument();
+    expect(screen.getByText(/Check .* valid/)).toBeInTheDocument();
   });
 
   it('logs a failure and keeps the last-known status when the live test fails', async () => {
@@ -144,7 +165,7 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test all' }));
 
     await waitFor(() => expect(apiClient.testMyRepoFindings).toHaveBeenCalledWith(1));
-    expect(screen.getByText(/Tested 1 finding/)).toBeInTheDocument();
+    expect(screen.getByText(/Processed 1 finding/)).toBeInTheDocument();
   });
 
   it('tests only the checked findings via "Test selected"', async () => {
@@ -164,7 +185,7 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test selected (1)' }));
 
     await waitFor(() => expect(apiClient.testMyFinding).toHaveBeenCalledWith(10));
-    expect(screen.getByText(/Tested 1\/1 selected finding/)).toBeInTheDocument();
+    expect(screen.getByText(/Processed 1\/1 selected finding/)).toBeInTheDocument();
   });
 });
 
@@ -216,7 +237,7 @@ describe('TestingPanel (admin, unscoped to any repo)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test all' }));
 
     await waitFor(() => expect(apiClient.adminTestRepoFindings).toHaveBeenCalledWith(1));
-    expect(screen.getByText(/Tested 1 finding/)).toBeInTheDocument();
+    expect(screen.getByText(/Processed 1 finding/)).toBeInTheDocument();
   });
 
   it('tests a single finding via the admin endpoint', async () => {
@@ -231,7 +252,7 @@ describe('TestingPanel (admin, unscoped to any repo)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
 
     await waitFor(() => expect(apiClient.adminTestFinding).toHaveBeenCalledWith(10));
-    expect(screen.getByText(/Tested .* valid/)).toBeInTheDocument();
+    expect(screen.getByText(/Check .* valid/)).toBeInTheDocument();
   });
 
   it('does not fetch just from picking a secret type - only once "Load keys" is clicked', async () => {

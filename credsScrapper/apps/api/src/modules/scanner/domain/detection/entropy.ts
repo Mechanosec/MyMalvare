@@ -28,6 +28,20 @@ export function shannonEntropy(s: string): number {
   return entropy;
 }
 
+/** Faster entropy calculation for the ASCII-only GENERIC_TOKEN_RE alphabet. */
+export function shannonEntropyAscii(s: string): number {
+  if (s.length === 0) return 0;
+  const counts = new Uint32Array(128);
+  for (let i = 0; i < s.length; i += 1) counts[s.charCodeAt(i)] += 1;
+  let entropy = 0;
+  for (const count of counts) {
+    if (count === 0) continue;
+    const p = count / s.length;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy;
+}
+
 function countDigits(s: string): number {
   let count = 0;
   for (const ch of s) {
@@ -49,7 +63,7 @@ export function findHighEntropyTokens(text: string): IHighEntropyToken[] {
     const token = match[0];
     if (
       countDigits(token) >= MIN_DIGITS &&
-      shannonEntropy(token) > ENTROPY_THRESHOLD
+      shannonEntropyAscii(token) > ENTROPY_THRESHOLD
     ) {
       // matchAll already gives us the exact position - the caller used to
       // re-find it with text.indexOf(token), which is O(text.length) per

@@ -16,8 +16,14 @@ export class TestRepoFindingsUseCase {
    * Returns null if the user has no APPROVED authorization matching this
    * repo's owner/name - the caller (controller) maps that to a 403.
    */
-  async execute(userId: number, repoId: number): Promise<readonly IFindingRecord[] | null> {
-    const { items } = await this.state.listFindings({ repoIds: [repoId], limit: 1000 });
+  async execute(
+    userId: number,
+    repoId: number,
+  ): Promise<readonly IFindingRecord[] | null> {
+    const { items } = await this.state.listFindings({
+      repoIds: [repoId],
+      limit: 1000,
+    });
     if (items.length === 0) {
       return [];
     }
@@ -34,13 +40,23 @@ export class TestRepoFindingsUseCase {
       return null;
     }
 
-    const pairedAwsSecret = items.find((f) => f.secretType === ESecretType.AWS_SECRET_ACCESS_KEY)?.secretValue;
+    const pairedAwsSecret = items.find(
+      (f) => f.secretType === ESecretType.AWS_SECRET_ACCESS_KEY,
+    )?.secretValue;
     for (const finding of items) {
-      const pairedValue = finding.secretType === ESecretType.AWS_ACCESS_KEY_ID ? pairedAwsSecret : undefined;
-      const status = await this.validator.validate(finding.secretType, finding.secretValue, pairedValue);
-      await this.state.recordTestResult(finding.id, status);
+      const pairedValue =
+        finding.secretType === ESecretType.AWS_ACCESS_KEY_ID
+          ? pairedAwsSecret
+          : undefined;
+      const { status, reason } = await this.validator.validateDetailed(
+        finding.secretType,
+        finding.secretValue,
+        pairedValue,
+      );
+      await this.state.recordTestResult(finding.id, status, reason);
     }
 
-    return (await this.state.listFindings({ repoIds: [repoId], limit: 1000 })).items;
+    return (await this.state.listFindings({ repoIds: [repoId], limit: 1000 }))
+      .items;
   }
 }

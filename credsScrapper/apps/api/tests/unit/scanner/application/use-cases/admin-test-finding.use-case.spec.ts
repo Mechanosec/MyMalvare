@@ -30,13 +30,13 @@ describe('AdminTestFindingUseCase', () => {
       getFindingById: jest.fn().mockResolvedValue(null),
       recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
-    const validator = { validate: jest.fn() } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn() } as unknown as KeyValidatorPort;
     const useCase = new AdminTestFindingUseCase(state, validator);
 
     const result = await useCase.execute(10);
 
     expect(result).toBeNull();
-    expect(validator.validate).not.toHaveBeenCalled();
+    expect(validator.validateDetailed).not.toHaveBeenCalled();
   });
 
   it('validates the finding and persists the result regardless of repo ownership', async () => {
@@ -45,13 +45,13 @@ describe('AdminTestFindingUseCase', () => {
       getFindingById: jest.fn().mockResolvedValue(finding),
       recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
-    const validator = { validate: jest.fn().mockResolvedValue(EFindingStatus.VALID) } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn().mockResolvedValue({ status: EFindingStatus.VALID, reason: null }) } as unknown as KeyValidatorPort;
     const useCase = new AdminTestFindingUseCase(state, validator);
 
     const result = await useCase.execute(10);
 
-    expect(validator.validate).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token', undefined);
-    expect(state.recordTestResult).toHaveBeenCalledWith(10, EFindingStatus.VALID);
+    expect(validator.validateDetailed).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token', undefined);
+    expect(state.recordTestResult).toHaveBeenCalledWith(10, EFindingStatus.VALID, null);
     expect(result).toMatchObject({ id: 10, status: EFindingStatus.VALID });
     expect(result?.checkedAt).toBeInstanceOf(Date);
   });
@@ -63,7 +63,7 @@ describe('AdminTestFindingUseCase', () => {
       recordTestResult: jest.fn(),
       listFindings: jest.fn().mockResolvedValue({ items: [{ secretValue: 'b'.repeat(40) }], total: 1 }),
     } as unknown as StateRepositoryPort;
-    const validator = { validate: jest.fn().mockResolvedValue(EFindingStatus.VALID) } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn().mockResolvedValue({ status: EFindingStatus.VALID, reason: null }) } as unknown as KeyValidatorPort;
     const useCase = new AdminTestFindingUseCase(state, validator);
 
     await useCase.execute(10);
@@ -71,6 +71,6 @@ describe('AdminTestFindingUseCase', () => {
     expect(state.listFindings).toHaveBeenCalledWith(
       expect.objectContaining({ repoIds: [42], secretTypes: [ESecretType.AWS_SECRET_ACCESS_KEY] }),
     );
-    expect(validator.validate).toHaveBeenCalledWith(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAFAKE', 'b'.repeat(40));
+    expect(validator.validateDetailed).toHaveBeenCalledWith(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAFAKE', 'b'.repeat(40));
   });
 });

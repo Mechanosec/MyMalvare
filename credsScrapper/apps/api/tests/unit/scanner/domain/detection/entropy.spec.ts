@@ -1,6 +1,7 @@
 import {
   findHighEntropyTokens,
   shannonEntropy,
+  shannonEntropyAscii,
 } from '../../../../../src/modules/scanner/domain/detection/entropy';
 
 describe('shannonEntropy', () => {
@@ -13,7 +14,20 @@ describe('shannonEntropy', () => {
   });
 
   it('is high for a random-looking token', () => {
-    expect(shannonEntropy('Xk9pQ2mZ7vL4tR8wN1cJ6hF3sD0aY5b')).toBeGreaterThan(4.0);
+    expect(shannonEntropy('Xk9pQ2mZ7vL4tR8wN1cJ6hF3sD0aY5b')).toBeGreaterThan(
+      4.0,
+    );
+  });
+});
+
+describe('shannonEntropyAscii', () => {
+  it.each([
+    ['', 0],
+    ['aaaaaaaa', 0],
+    ['aabb', 1],
+    ['abcd', 2],
+  ])('matches the hand-calculated entropy for %j', (value, expected) => {
+    expect(shannonEntropyAscii(value)).toBe(expected);
   });
 });
 
@@ -24,13 +38,17 @@ describe('findHighEntropyTokens', () => {
 
   it('finds a random-looking token', () => {
     const token = 'Xk9pQ2mZ7vL4tR8wN1cJ6hF3sD0aY5bE9';
-    const tokens = findHighEntropyTokens(`SECRET = '${token}'`).map((t) => t.token);
+    const tokens = findHighEntropyTokens(`SECRET = '${token}'`).map(
+      (t) => t.token,
+    );
     expect(tokens).toContain(token);
   });
 
   it('skips a low-entropy long token', () => {
     const token = 'a'.repeat(40);
-    const tokens = findHighEntropyTokens(`PADDING = '${token}'`).map((t) => t.token);
+    const tokens = findHighEntropyTokens(`PADDING = '${token}'`).map(
+      (t) => t.token,
+    );
     expect(tokens).not.toContain(token);
   });
 

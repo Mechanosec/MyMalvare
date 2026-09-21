@@ -7,7 +7,10 @@ import { ECandidateStatus } from '../../domain/constant/candidate-status.constan
 import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { EScanStatus } from '../../domain/constant/scan-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
-import { IFindingRecord, IFindingsRepoOption } from '../../domain/types/finding-record.type';
+import {
+  IFindingRecord,
+  IFindingsRepoOption,
+} from '../../domain/types/finding-record.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type';
 
@@ -35,13 +38,19 @@ export function toFindingStatus(raw: string): EFindingStatus {
 export function parseLeakCommits(raw: string): string[] {
   try {
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((v): v is string => typeof v === 'string')
+      : [];
   } catch {
     return [];
   }
 }
 
-export function toRepoRef(row: { repoId: number; owner: string; name: string }): IRepoRef {
+export function toRepoRef(row: {
+  repoId: number;
+  owner: string;
+  name: string;
+}): IRepoRef {
   return { repoId: row.repoId, owner: row.owner, name: row.name };
 }
 
@@ -60,6 +69,7 @@ export function toFindingRecord(row: TPrismaFinding): IFindingRecord {
     foundAt: row.foundAt,
     status: toFindingStatus(row.status),
     checkedAt: row.checkedAt,
+    testReason: row.testReason,
     leakCommits: parseLeakCommits(row.leakCommits),
   };
 }
@@ -68,7 +78,9 @@ export function toFindingRecord(row: TPrismaFinding): IFindingRecord {
 // is already case-insensitive for ASCII by default - there is no `mode:
 // "insensitive"` option to pass here (SQLite doesn't support it via
 // Prisma, unlike Postgres/MySQL).
-export function buildSearchConditions(search: string): Prisma.FindingWhereInput[] {
+export function buildSearchConditions(
+  search: string,
+): Prisma.FindingWhereInput[] {
   const conditions: Prisma.FindingWhereInput[] = [
     { filePath: { contains: search } },
     { context: { contains: search } },
@@ -76,7 +88,10 @@ export function buildSearchConditions(search: string): Prisma.FindingWhereInput[
 
   const slashIndex = search.indexOf('/');
   if (slashIndex === -1) {
-    conditions.push({ owner: { contains: search } }, { name: { contains: search } });
+    conditions.push(
+      { owner: { contains: search } },
+      { name: { contains: search } },
+    );
   } else {
     // "owner/name" style queries (how repos are shown in the UI) - match
     // each half against its own column rather than one column containing
@@ -107,7 +122,10 @@ export function groupRepoOptionsByStatus(
     _count: { _all: number };
   }>,
 ): IFindingsRepoOption[] {
-  const byRepo = new Map<number, { -readonly [K in keyof IFindingsRepoOption]: IFindingsRepoOption[K] }>();
+  const byRepo = new Map<
+    number,
+    { -readonly [K in keyof IFindingsRepoOption]: IFindingsRepoOption[K] }
+  >();
   for (const row of rows) {
     let existing = byRepo.get(row.repoId);
     if (!existing) {

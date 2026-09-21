@@ -14,8 +14,16 @@ export class TestFindingUseCase {
   ) {}
 
   /** Returns null if the finding doesn't exist or isn't in one of the caller's own approved repos. */
-  async execute(userId: number, findingId: number): Promise<IFindingRecord | null> {
-    const finding = await findOwnedFinding(this.authorizations, this.state, userId, findingId);
+  async execute(
+    userId: number,
+    findingId: number,
+  ): Promise<IFindingRecord | null> {
+    const finding = await findOwnedFinding(
+      this.authorizations,
+      this.state,
+      userId,
+      findingId,
+    );
     if (!finding) {
       return null;
     }
@@ -24,9 +32,13 @@ export class TestFindingUseCase {
       finding.secretType === ESecretType.AWS_ACCESS_KEY_ID
         ? await findPairedAwsSecretKey(this.state, finding.repoId)
         : undefined;
-    const status = await this.validator.validate(finding.secretType, finding.secretValue, pairedValue);
-    await this.state.recordTestResult(finding.id, status);
+    const { status, reason } = await this.validator.validateDetailed(
+      finding.secretType,
+      finding.secretValue,
+      pairedValue,
+    );
+    await this.state.recordTestResult(finding.id, status, reason);
 
-    return { ...finding, status, checkedAt: new Date() };
+    return { ...finding, status, testReason: reason, checkedAt: new Date() };
   }
 }

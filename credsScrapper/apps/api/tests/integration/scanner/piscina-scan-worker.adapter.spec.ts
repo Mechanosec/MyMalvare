@@ -89,29 +89,26 @@ describe('PiscinaScanWorkerAdapter (real worker threads)', () => {
     );
 
     expect(result.status).toBe('done');
-    // RunScanJobUseCase (Task 2) scans commit diffs and the working tree
-    // at HEAD as two separate passes, so a secret present since the
-    // repo's one commit and still on disk is legitimately reported
-    // twice - once per pass, each tagged with its own filePath. This
-    // isn't a Piscina/thread timing artifact: it reproduces with the
-    // same two events on every run.
+    // The worker compacts the history and HEAD sightings before crossing
+    // the thread boundary, while retaining every commit and preferring the
+    // real HEAD path over the synthetic commit-diff path.
     const findingEvents = events.filter((e: any) => e.type === 'finding');
-    expect(findingEvents).toHaveLength(2);
-    expect(findingEvents.map((e: any) => e.filePath).sort()).toEqual([
-      '<commit-diff>:config.py',
-      'config.py',
+    expect(findingEvents).toHaveLength(1);
+    expect((findingEvents[0] as any).filePath).toBe('config.py');
+    expect((findingEvents[0] as any).finding.secretValue).toBe(
+      'AKIAABCDEFGH12345678',
+    );
+    expect((findingEvents[0] as any).commitShas).toEqual([
+      (findingEvents[0] as any).commitSha,
     ]);
-    for (const event of findingEvents) {
-      expect((event as any).finding.secretValue).toBe('AKIAABCDEFGH12345678');
-    }
   });
-  it('delivers every event across multiple acknowledged batches before resolving', async () => {
+  it('compacts repeated sightings before crossing the worker boundary', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'piscina-batches-'));
     const target = path.join(dir, 'bare');
     try {
       await fs.writeFile(
         path.join(sourceRepo, 'many.env'),
-        "VALUE='AKIAABCDEFGH12345678'\n".repeat(600),
+        "VALUE='AKIAZYXWVUTS98765432'\n".repeat(600),
       );
       await execFileAsync('git', ['-C', sourceRepo, 'add', '.']);
       await execFileAsync('git', [
@@ -134,7 +131,7 @@ describe('PiscinaScanWorkerAdapter (real worker threads)', () => {
         },
       );
       expect(result.status).toBe('done');
-      expect(count).toBe(1200);
+      expect(count).toBe(1);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

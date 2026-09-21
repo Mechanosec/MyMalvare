@@ -22,9 +22,13 @@ export class AdminTestFindingUseCase {
       finding.secretType === ESecretType.AWS_ACCESS_KEY_ID
         ? await findPairedAwsSecretKey(this.state, finding.repoId)
         : undefined;
-    const status = await this.validator.validate(finding.secretType, finding.secretValue, pairedValue);
-    await this.state.recordTestResult(finding.id, status);
+    const { status, reason } = await this.validator.validateDetailed(
+      finding.secretType,
+      finding.secretValue,
+      pairedValue,
+    );
+    await this.state.recordTestResult(finding.id, status, reason);
 
-    return { ...finding, status, checkedAt: new Date() };
+    return { ...finding, status, testReason: reason, checkedAt: new Date() };
   }
 }

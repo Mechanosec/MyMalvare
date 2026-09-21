@@ -35,7 +35,7 @@ async function makeRepository(dbFile: string): Promise<{
       name TEXT NOT NULL, file_path TEXT NOT NULL, commit_sha TEXT NOT NULL,
       secret_type TEXT NOT NULL, secret_value TEXT NOT NULL, line_number INTEGER,
       found_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, context TEXT,
-      status TEXT NOT NULL DEFAULT 'unknown', checked_at DATETIME, leak_commits TEXT NOT NULL DEFAULT '[]'
+      status TEXT NOT NULL DEFAULT 'unknown', test_reason TEXT, checked_at DATETIME, leak_commits TEXT NOT NULL DEFAULT '[]'
     )
   `);
   return { repo: new PrismaStateRepository(prisma), prisma };
@@ -50,6 +50,42 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('persists a skipped reason and clears it after a conclusive result', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'reason.db'),
+    );
+    try {
+      const row = await prisma.finding.create({
+        data: {
+          repoId: 1,
+          owner: 'fixture',
+          name: 'local',
+          filePath: 'config.txt',
+          commitSha: 'a'.repeat(40),
+          secretType: 'aws_access_key_id',
+          secretValue: 'synthetic',
+        },
+      });
+      await repo.recordTestResult(
+        row.id,
+        EFindingStatus.UNKNOWN,
+        'Skipped: matching AWS Secret Access Key is missing.',
+      );
+      expect(await repo.getFindingById(row.id)).toMatchObject({
+        status: EFindingStatus.UNKNOWN,
+        testReason: 'Skipped: matching AWS Secret Access Key is missing.',
+        checkedAt: expect.any(Date),
+      });
+      await repo.recordTestResult(row.id, EFindingStatus.VALID, null);
+      expect(await repo.getFindingById(row.id)).toMatchObject({
+        status: EFindingStatus.VALID,
+        testReason: null,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   it('keeps the last successful checkpoint across attempts and failures, and invalidates unversioned scans', async () => {
@@ -485,6 +521,34 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
       expect(page.items[0].commitSha).toBe('head-sha');
       expect([...page.items[0].leakCommits].sort()).toEqual([
         'head-sha',
+        'old-sha',
+      ]);
+
+      await prisma.$disconnect();
+    });
+
+    it('persists every commit from a compact finding input', async () => {
+      const { repo, prisma } = await makeRepository(
+        path.join(tmpDir, 'state.db'),
+      );
+
+      await repo.addFindings(1, 'acme', 'widgets', [
+        {
+          filePath: 'src/config.ts',
+          commitSha: 'head-sha',
+          commitShas: ['old-sha', 'middle-sha', 'head-sha'],
+          secretType: 'AWS_ACCESS_KEY_ID' as never,
+          secretValue: 'AKIAABCDEFGH12345678',
+          lineNumber: 3,
+          context: null,
+        },
+      ]);
+
+      const page = await repo.listFindings({ repoIds: [1] });
+      expect(page.items).toHaveLength(1);
+      expect([...page.items[0].leakCommits].sort()).toEqual([
+        'head-sha',
+        'middle-sha',
         'old-sha',
       ]);
 

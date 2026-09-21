@@ -5,7 +5,23 @@ import { ESecretType } from '../../domain/constant/secret-type.constant';
 // RepoAuthorization (see auth/application/use-cases/test-repo-findings.use-case.ts)
 // - this is the one place in the codebase allowed to make a live network
 // call using a discovered credential, and only because that gate exists.
+export interface IValidationResult {
+  readonly status: EFindingStatus;
+  readonly reason: string | null;
+}
+
 export abstract class KeyValidatorPort {
+  async validateDetailed(
+    secretType: ESecretType,
+    secretValue: string,
+    pairedValue?: string,
+  ): Promise<IValidationResult> {
+    return {
+      status: await this.validate(secretType, secretValue, pairedValue),
+      reason: null,
+    };
+  }
+
   /**
    * Returns VALID/INVALID only on an unambiguous auth response from the
    * service (e.g. 401/403, or a provider's explicit "invalid credential"

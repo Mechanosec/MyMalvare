@@ -26,7 +26,7 @@ import { SecretTypeBadge } from './secret-type-badge';
 import { SecretValue } from './secret-value';
 
 function formatCheckedAt(checkedAt: string | null): string {
-  return checkedAt ? `checked ${new Date(checkedAt).toLocaleString()}` : 'never checked';
+  return checkedAt ? `last attempt ${new Date(checkedAt).toLocaleString()}` : 'not attempted';
 }
 
 // e.g. "acme/widgets (4: 1 valid, 3 unknown)" - only non-zero buckets are
@@ -158,7 +158,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
       setFindings((prev) => prev.map((f) => (f.id === finding.id ? updated : f)));
       setLog((prev) => [
         ...prev,
-        `Tested ${finding.secretType} in ${finding.filePath}: ${updated.status}`,
+        `Check ${finding.secretType} in ${finding.filePath}: ${updated.testReason ?? updated.status}`,
       ]);
       if (repoId !== null) refreshStatusCounts(repoId, secretTypes);
     } catch {
@@ -173,7 +173,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
     setTestingAll(true);
     try {
       const updated = await (isAdmin ? adminTestRepoFindings(repoId) : testMyRepoFindings(repoId));
-      setLog((prev) => [...prev, `Tested ${updated.length} finding(s) for repo ${repoId}`]);
+      setLog((prev) => [...prev, `Processed ${updated.length} finding(s) for repo ${repoId}`]);
       await loadPage(page);
       refreshStatusCounts(repoId, secretTypes);
     } catch {
@@ -197,7 +197,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
         setLog((prev) => [...prev, `Failed to test ${finding.secretType} in ${finding.filePath}`]);
       }
     }
-    setLog((prev) => [...prev, `Tested ${succeeded}/${targets.length} selected finding(s)`]);
+    setLog((prev) => [...prev, `Processed ${succeeded}/${targets.length} selected finding(s)`]);
     setSelectedIds(new Set());
     setTestingSelected(false);
     if (repoId !== null) refreshStatusCounts(repoId, secretTypes);
@@ -340,6 +340,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
                     </td>
                     <td className="px-3 py-2">
                       <FindingStatusBadge status={finding.status} />
+                      {finding.testReason && <div className="mt-1 text-xs text-text-dim">{finding.testReason}</div>}
                       <div className="mt-0.5 text-xs text-text-dim">{formatCheckedAt(finding.checkedAt)}</div>
                     </td>
                     <td className="px-3 py-2">

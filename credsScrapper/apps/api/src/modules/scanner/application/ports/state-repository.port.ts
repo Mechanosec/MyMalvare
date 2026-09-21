@@ -97,7 +97,11 @@ export abstract class StateRepositoryPort {
   ): Promise<void>;
 
   /** Same as updateFindingStatus, but also stamps checkedAt - use for a live key-validation result, never a manual mark. */
-  abstract recordTestResult(id: number, status: EFindingStatus): Promise<void>;
+  abstract recordTestResult(
+    id: number,
+    status: EFindingStatus,
+    testReason?: string | null,
+  ): Promise<void>;
 
   abstract countFindings(repoId: number): Promise<number>;
 

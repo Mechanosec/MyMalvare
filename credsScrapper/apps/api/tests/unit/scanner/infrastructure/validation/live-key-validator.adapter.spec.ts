@@ -12,6 +12,47 @@ describe('LiveKeyValidatorAdapter', () => {
     jest.restoreAllMocks();
   });
 
+  it('explains missing AWS credentials without making a request', async () => {
+    global.fetch = jest.fn();
+    expect(await adapter.validateDetailed(ESecretType.AWS_ACCESS_KEY_ID, 'AKIA_SYNTHETIC')).toEqual({
+      status: EFindingStatus.UNKNOWN, reason: 'Skipped: matching AWS Secret Access Key is missing.',
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('explains malformed GCP JSON without making a request', async () => {
+    global.fetch = jest.fn();
+    expect(await adapter.validateDetailed(ESecretType.GCP_SERVICE_ACCOUNT_KEY, 'not-json')).toEqual({
+      status: EFindingStatus.UNKNOWN, reason: 'Skipped: GCP credentials are not valid JSON.',
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('reports timeout without including error text or credentials', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new DOMException('sensitive-fixture', 'TimeoutError'));
+    expect(await adapter.validateDetailed(ESecretType.GITHUB_PAT, 'synthetic')).toEqual({
+      status: EFindingStatus.UNKNOWN, reason: 'Inconclusive: provider request timed out.',
+    });
+  });
+
+  it.each([
+    [ESecretType.AWS_ACCESS_KEY_ID, 'ASIA_SYNTHETIC', 'Skipped: temporary AWS credentials require a session token; this validator does not support it.'],
+    [ESecretType.GCP_SERVICE_ACCOUNT_KEY, '{}', 'Skipped: GCP credentials need private_key and client_email.'],
+    [ESecretType.GCP_SERVICE_ACCOUNT_KEY, JSON.stringify({ private_key: 'not-pem', client_email: 'fixture@example.invalid' }), 'Skipped: GCP private key is not a readable PEM key.'],
+    [ESecretType.PRIVATE_KEY_PEM, 'synthetic', 'Skipped: this credential type has no supported validator.'],
+  ])('explains skipped validation for %s', async (type, value, reason) => {
+    global.fetch = jest.fn();
+    expect(await adapter.validateDetailed(type as ESecretType, value)).toEqual({ status: EFindingStatus.UNKNOWN, reason });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes an unexpected provider response from a network error', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 429 });
+    expect((await adapter.validateDetailed(ESecretType.GITHUB_PAT, 'synthetic')).reason).toBe('Inconclusive: provider response did not establish credential validity.');
+    global.fetch = jest.fn().mockRejectedValue(new Error('sensitive-fixture'));
+    expect((await adapter.validateDetailed(ESecretType.GITHUB_PAT, 'synthetic')).reason).toBe('Inconclusive: provider request failed or its response could not be read.');
+  });
+
   it('returns UNKNOWN for a secret type with no registered checker', async () => {
     const status = await adapter.validate(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAABCDEFGH12345678');
     expect(status).toBe(EFindingStatus.UNKNOWN);

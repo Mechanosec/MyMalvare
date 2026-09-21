@@ -108,6 +108,7 @@ describe('ScanRepositoryUseCase', () => {
         type: 'finding',
         filePath: 'config.py',
         commitSha: 'a'.repeat(40),
+        commitShas: ['b'.repeat(40), 'a'.repeat(40)],
         finding: {
           secretType: ESecretType.AWS_ACCESS_KEY_ID,
           secretValue: 'AKIAABCDEFGH12345678',
@@ -117,6 +118,7 @@ describe('ScanRepositoryUseCase', () => {
       },
     ];
     const state = new FakeStateRepository();
+    const persist = jest.spyOn(state, 'addFindings');
     const useCase = new ScanRepositoryUseCase(
       worker,
       state,
@@ -135,6 +137,16 @@ describe('ScanRepositoryUseCase', () => {
     expect(state.scanned.get(1)?.status).toBe(EScanStatus.DONE);
     expect(state.findings).toHaveLength(1);
     expect(state.findings[0].secretValue).toBe('AKIAABCDEFGH12345678');
+    expect(persist).toHaveBeenCalledWith(
+      1,
+      'octocat',
+      'hello-world',
+      expect.arrayContaining([
+        expect.objectContaining({
+          commitShas: ['b'.repeat(40), 'a'.repeat(40)],
+        }),
+      ]),
+    );
   });
 
   it('forwards progress events through onProgress', async () => {

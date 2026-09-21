@@ -49,13 +49,13 @@ describe('TestFindingUseCase', () => {
       getFindingById: jest.fn().mockResolvedValue(null),
       recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
-    const validator = { validate: jest.fn() } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn() } as unknown as KeyValidatorPort;
     const useCase = new TestFindingUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);
 
     expect(result).toBeNull();
-    expect(validator.validate).not.toHaveBeenCalled();
+    expect(validator.validateDetailed).not.toHaveBeenCalled();
   });
 
   it('returns null when the user has no approved authorization for the finding\'s repo', async () => {
@@ -66,13 +66,13 @@ describe('TestFindingUseCase', () => {
       getFindingById: jest.fn().mockResolvedValue(makeFinding()),
       recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
-    const validator = { validate: jest.fn() } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn() } as unknown as KeyValidatorPort;
     const useCase = new TestFindingUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);
 
     expect(result).toBeNull();
-    expect(validator.validate).not.toHaveBeenCalled();
+    expect(validator.validateDetailed).not.toHaveBeenCalled();
   });
 
   it("returns null when the finding isn't among the caller's own approved-repo findings", async () => {
@@ -83,13 +83,13 @@ describe('TestFindingUseCase', () => {
       getFindingById: jest.fn().mockResolvedValue(makeFinding({ owner: 'someone-else', name: 'other-repo' })),
       recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
-    const validator = { validate: jest.fn() } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn() } as unknown as KeyValidatorPort;
     const useCase = new TestFindingUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);
 
     expect(result).toBeNull();
-    expect(validator.validate).not.toHaveBeenCalled();
+    expect(validator.validateDetailed).not.toHaveBeenCalled();
   });
 
   it('validates the finding and persists the result when it is in one of the approved repos', async () => {
@@ -101,13 +101,13 @@ describe('TestFindingUseCase', () => {
       getFindingById: jest.fn().mockResolvedValue(finding),
       recordTestResult: jest.fn(),
     } as unknown as StateRepositoryPort;
-    const validator = { validate: jest.fn().mockResolvedValue(EFindingStatus.VALID) } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn().mockResolvedValue({ status: EFindingStatus.VALID, reason: null }) } as unknown as KeyValidatorPort;
     const useCase = new TestFindingUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);
 
-    expect(validator.validate).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token', undefined);
-    expect(state.recordTestResult).toHaveBeenCalledWith(10, EFindingStatus.VALID);
+    expect(validator.validateDetailed).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token', undefined);
+    expect(state.recordTestResult).toHaveBeenCalledWith(10, EFindingStatus.VALID, null);
     expect(result).toMatchObject({ id: 10, status: EFindingStatus.VALID });
     expect(result?.checkedAt).toBeInstanceOf(Date);
   });
@@ -122,7 +122,7 @@ describe('TestFindingUseCase', () => {
       recordTestResult: jest.fn(),
       listFindings: jest.fn().mockResolvedValue({ items: [{ secretValue: 'b'.repeat(40) }], total: 1 }),
     } as unknown as StateRepositoryPort;
-    const validator = { validate: jest.fn().mockResolvedValue(EFindingStatus.VALID) } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn().mockResolvedValue({ status: EFindingStatus.VALID, reason: null }) } as unknown as KeyValidatorPort;
     const useCase = new TestFindingUseCase(authorizations, state, validator);
 
     await useCase.execute(1, 10);
@@ -130,6 +130,6 @@ describe('TestFindingUseCase', () => {
     expect(state.listFindings).toHaveBeenCalledWith(
       expect.objectContaining({ repoIds: [42], secretTypes: [ESecretType.AWS_SECRET_ACCESS_KEY] }),
     );
-    expect(validator.validate).toHaveBeenCalledWith(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAFAKE', 'b'.repeat(40));
+    expect(validator.validateDetailed).toHaveBeenCalledWith(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAFAKE', 'b'.repeat(40));
   });
 });

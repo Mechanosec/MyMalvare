@@ -38,13 +38,13 @@ describe('TestRepoFindingsUseCase', () => {
         { id: 1, userId: 1, owner: 'acme', name: 'widgets', note: null, status: ERepoAuthorizationStatus.PENDING, adminNote: null, createdAt: new Date(), decidedAt: null, decidedByUserId: null },
       ]),
     } as unknown as RepoAuthorizationRepositoryPort;
-    const validator = { validate: jest.fn() } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn() } as unknown as KeyValidatorPort;
     const useCase = new TestRepoFindingsUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);
 
     expect(result).toBeNull();
-    expect(validator.validate).not.toHaveBeenCalled();
+    expect(validator.validateDetailed).not.toHaveBeenCalled();
   });
 
   it('validates each finding and persists the resulting status when the repo is approved', async () => {
@@ -61,13 +61,13 @@ describe('TestRepoFindingsUseCase', () => {
         { id: 1, userId: 1, owner: 'acme', name: 'widgets', note: null, status: ERepoAuthorizationStatus.APPROVED, adminNote: null, createdAt: new Date(), decidedAt: new Date(), decidedByUserId: 2 },
       ]),
     } as unknown as RepoAuthorizationRepositoryPort;
-    const validator = { validate: jest.fn().mockResolvedValue(EFindingStatus.VALID) } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn().mockResolvedValue({ status: EFindingStatus.VALID, reason: null }) } as unknown as KeyValidatorPort;
     const useCase = new TestRepoFindingsUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);
 
-    expect(validator.validate).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token', undefined);
-    expect(state.recordTestResult).toHaveBeenCalledWith(1, EFindingStatus.VALID);
+    expect(validator.validateDetailed).toHaveBeenCalledWith(ESecretType.TELEGRAM_BOT_TOKEN, 'fake-token', undefined);
+    expect(state.recordTestResult).toHaveBeenCalledWith(1, EFindingStatus.VALID, null);
     expect(result).toEqual([{ ...finding, status: EFindingStatus.VALID }]);
   });
 
@@ -90,13 +90,13 @@ describe('TestRepoFindingsUseCase', () => {
         { id: 1, userId: 1, owner: 'acme', name: 'widgets', note: null, status: ERepoAuthorizationStatus.APPROVED, adminNote: null, createdAt: new Date(), decidedAt: new Date(), decidedByUserId: 2 },
       ]),
     } as unknown as RepoAuthorizationRepositoryPort;
-    const validator = { validate: jest.fn().mockResolvedValue(EFindingStatus.VALID) } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn().mockResolvedValue({ status: EFindingStatus.VALID, reason: null }) } as unknown as KeyValidatorPort;
     const useCase = new TestRepoFindingsUseCase(authorizations, state, validator);
 
     await useCase.execute(1, 10);
 
     expect(state.listFindings).toHaveBeenCalledTimes(2);
-    expect(validator.validate).toHaveBeenCalledWith(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAFAKE', 'b'.repeat(40));
+    expect(validator.validateDetailed).toHaveBeenCalledWith(ESecretType.AWS_ACCESS_KEY_ID, 'AKIAFAKE', 'b'.repeat(40));
   });
 
   it('returns an empty array without checking authorization when the repo has no findings', async () => {
@@ -105,7 +105,7 @@ describe('TestRepoFindingsUseCase', () => {
       updateFindingStatus: jest.fn(),
     } as unknown as StateRepositoryPort;
     const authorizations = { listByUser: jest.fn() } as unknown as RepoAuthorizationRepositoryPort;
-    const validator = { validate: jest.fn() } as unknown as KeyValidatorPort;
+    const validator = { validateDetailed: jest.fn() } as unknown as KeyValidatorPort;
     const useCase = new TestRepoFindingsUseCase(authorizations, state, validator);
 
     const result = await useCase.execute(1, 10);

@@ -14,6 +14,7 @@ export interface IFindingRecord {
   readonly context: string | null;
   readonly foundAt: Date;
   readonly status: EFindingStatus;
+  readonly testReason?: string | null;
   readonly checkedAt: Date | null;
   readonly leakCommits: readonly string[];
 }
@@ -57,6 +58,8 @@ export interface IStatusCount {
 export interface IFindingInput {
   readonly filePath: string;
   readonly commitSha: string;
+  /** All commits where this secret was seen when worker events were compacted. */
+  readonly commitShas?: readonly string[];
   readonly secretType: ESecretType;
   readonly secretValue: string;
   readonly lineNumber: number;

@@ -73,6 +73,7 @@ export class ScanRepositoryUseCase {
           collectedFindings.push({
             filePath: event.filePath,
             commitSha: event.commitSha,
+            commitShas: event.commitShas,
             secretType: event.finding.secretType,
             secretValue: event.finding.secretValue,
             lineNumber: event.finding.lineNumber,

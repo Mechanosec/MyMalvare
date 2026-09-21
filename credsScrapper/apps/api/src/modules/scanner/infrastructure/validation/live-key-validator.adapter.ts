@@ -1,15 +1,25 @@
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import * as jwt from 'jsonwebtoken';
-import { KeyValidatorPort } from '../../application/ports/key-validator.port';
+import {
+  KeyValidatorPort,
+  IValidationResult,
+} from '../../application/ports/key-validator.port';
 import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 
 const TIMEOUT_MS = 5000;
 
-type TChecker = (secretValue: string, pairedValue?: string) => Promise<EFindingStatus>;
+type TChecker = (
+  secretValue: string,
+  pairedValue?: string,
+) => Promise<EFindingStatus>;
 
-async function checkBearer(url: string, value: string, extraHeaders: Record<string, string> = {}): Promise<EFindingStatus> {
+async function checkBearer(
+  url: string,
+  value: string,
+  extraHeaders: Record<string, string> = {},
+): Promise<EFindingStatus> {
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${value}`, ...extraHeaders },
     signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -34,10 +44,12 @@ const checkGithubToken: TChecker = async (value) => {
 // Stripe accepts the secret key as Bearer auth (in place of HTTP Basic) -
 // https://stripe.com/docs/api/authentication. /v1/balance is a plain
 // read, same account regardless of live/test/restricted key.
-const checkStripeSecretKey: TChecker = (value) => checkBearer('https://api.stripe.com/v1/balance', value);
+const checkStripeSecretKey: TChecker = (value) =>
+  checkBearer('https://api.stripe.com/v1/balance', value);
 
 // DigitalOcean's /v2/account works the same for a PAT and an OAuth token.
-const checkDigitalOceanToken: TChecker = (value) => checkBearer('https://api.digitalocean.com/v2/account', value);
+const checkDigitalOceanToken: TChecker = (value) =>
+  checkBearer('https://api.digitalocean.com/v2/account', value);
 
 // AWS has no bearer-token auth - every request is SigV4-signed with both
 // halves of the credential pair. sts:GetCallerIdentity is AWS's own
@@ -46,7 +58,10 @@ const checkDigitalOceanToken: TChecker = (value) => checkBearer('https://api.dig
 // all" (every principal can call it), and touches nothing in the
 // account - purely a read of "who does this signature belong to".
 // https://docs.aws.amazon.com/STS/latest/APIReference/API_GetCallerIdentity.html
-async function checkAwsCredentials(accessKeyId: string, secretAccessKey: string): Promise<EFindingStatus> {
+async function checkAwsCredentials(
+  accessKeyId: string,
+  secretAccessKey: string,
+): Promise<EFindingStatus> {
   const region = 'us-east-1';
   const service = 'sts';
   const host = 'sts.amazonaws.com';
@@ -57,8 +72,10 @@ async function checkAwsCredentials(accessKeyId: string, secretAccessKey: string)
   const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
   const dateStamp = amzDate.slice(0, 8);
 
-  const hash = (data: string) => crypto.createHash('sha256').update(data).digest('hex');
-  const hmac = (key: Buffer | string, data: string) => crypto.createHmac('sha256', key).update(data).digest();
+  const hash = (data: string) =>
+    crypto.createHash('sha256').update(data).digest('hex');
+  const hmac = (key: Buffer | string, data: string) =>
+    crypto.createHmac('sha256', key).update(data).digest();
 
   const canonicalHeaders = `host:${host}\nx-amz-date:${amzDate}\n`;
   const signedHeaders = 'host;x-amz-date';
@@ -73,7 +90,12 @@ async function checkAwsCredentials(accessKeyId: string, secretAccessKey: string)
 
   const algorithm = 'AWS4-HMAC-SHA256';
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const stringToSign = [algorithm, amzDate, credentialScope, hash(canonicalRequest)].join('\n');
+  const stringToSign = [
+    algorithm,
+    amzDate,
+    credentialScope,
+    hash(canonicalRequest),
+  ].join('\n');
 
   const kDate = hmac(`AWS4${secretAccessKey}`, dateStamp);
   const kRegion = hmac(kDate, region);
@@ -83,11 +105,14 @@ async function checkAwsCredentials(accessKeyId: string, secretAccessKey: string)
 
   const authorizationHeader = `${algorithm} Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
 
-  const res = await fetch(`https://${host}${canonicalUri}?${canonicalQuerystring}`, {
-    method,
-    headers: { 'x-amz-date': amzDate, Authorization: authorizationHeader },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  const res = await fetch(
+    `https://${host}${canonicalUri}?${canonicalQuerystring}`,
+    {
+      method,
+      headers: { 'x-amz-date': amzDate, Authorization: authorizationHeader },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    },
+  );
   // AWS returns 403 for both "bad access key id" (InvalidClientTokenId)
   // and "bad secret key" (SignatureDoesNotMatch) - either way the pair
   // is dead. A malformed request from our own signing bug would show up
@@ -112,14 +137,19 @@ async function checkAwsCredentials(accessKeyId: string, secretAccessKey: string)
 // it's hardcoded rather than trusted from the parsed key.
 const GCP_TOKEN_URI = 'https://oauth2.googleapis.com/token';
 
-async function checkGcpServiceAccountKey(secretValue: string): Promise<EFindingStatus> {
+async function checkGcpServiceAccountKey(
+  secretValue: string,
+): Promise<EFindingStatus> {
   let key: { private_key?: unknown; client_email?: unknown };
   try {
     key = JSON.parse(secretValue);
   } catch {
     return EFindingStatus.UNKNOWN;
   }
-  if (typeof key.private_key !== 'string' || typeof key.client_email !== 'string') {
+  if (
+    typeof key.private_key !== 'string' ||
+    typeof key.client_email !== 'string'
+  ) {
     return EFindingStatus.UNKNOWN;
   }
   const now = Math.floor(Date.now() / 1000);
@@ -170,7 +200,8 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
     return checkAwsCredentials(value, pairedValue);
   },
 
-  [ESecretType.GCP_SERVICE_ACCOUNT_KEY]: (value) => checkGcpServiceAccountKey(value),
+  [ESecretType.GCP_SERVICE_ACCOUNT_KEY]: (value) =>
+    checkGcpServiceAccountKey(value),
 
   [ESecretType.TELEGRAM_BOT_TOKEN]: async (value) => {
     const res = await fetch(`https://api.telegram.org/bot${value}/getMe`, {
@@ -179,7 +210,10 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
     if (res.status === 401) return EFindingStatus.INVALID;
     if (!res.ok) return EFindingStatus.UNKNOWN;
     const body: unknown = await res.json();
-    const ok = typeof body === 'object' && body !== null && (body as { ok?: unknown }).ok === true;
+    const ok =
+      typeof body === 'object' &&
+      body !== null &&
+      (body as { ok?: unknown }).ok === true;
     return ok ? EFindingStatus.VALID : EFindingStatus.UNKNOWN;
   },
 
@@ -206,7 +240,8 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
     return EFindingStatus.UNKNOWN;
   },
 
-  [ESecretType.OPENAI_API_KEY]: (value) => checkBearer('https://api.openai.com/v1/models', value),
+  [ESecretType.OPENAI_API_KEY]: (value) =>
+    checkBearer('https://api.openai.com/v1/models', value),
 
   [ESecretType.ANTHROPIC_API_KEY]: async (value) => {
     const res = await fetch('https://api.anthropic.com/v1/models', {
@@ -231,7 +266,10 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
     });
     if (!res.ok) return EFindingStatus.UNKNOWN;
     const body: unknown = await res.json();
-    const ok = typeof body === 'object' && body !== null && (body as { ok?: unknown }).ok === true;
+    const ok =
+      typeof body === 'object' &&
+      body !== null &&
+      (body as { ok?: unknown }).ok === true;
     return ok ? EFindingStatus.VALID : EFindingStatus.INVALID;
   },
 
@@ -265,19 +303,25 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
     if (!isDiscordWebhook) {
       return EFindingStatus.UNKNOWN;
     }
-    const res = await fetch(url.toString(), { redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const res = await fetch(url.toString(), {
+      redirect: 'manual',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
     if (res.status === 401 || res.status === 404) return EFindingStatus.INVALID;
     if (res.ok) return EFindingStatus.VALID;
     return EFindingStatus.UNKNOWN;
   },
 
-  [ESecretType.SENDGRID_API_KEY]: (value) => checkBearer('https://api.sendgrid.com/v3/scopes', value),
+  [ESecretType.SENDGRID_API_KEY]: (value) =>
+    checkBearer('https://api.sendgrid.com/v3/scopes', value),
 
   // Mailgun authenticates with HTTP Basic, username "api" and the key as
   // the password - there's no Bearer scheme.
   [ESecretType.MAILGUN_API_KEY]: async (value) => {
     const res = await fetch('https://api.mailgun.net/v3/domains', {
-      headers: { Authorization: `Basic ${Buffer.from(`api:${value}`).toString('base64')}` },
+      headers: {
+        Authorization: `Basic ${Buffer.from(`api:${value}`).toString('base64')}`,
+      },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (res.status === 401) return EFindingStatus.INVALID;
@@ -291,7 +335,9 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
     const dc = value.split('-').pop();
     if (!dc || dc === value) return EFindingStatus.UNKNOWN;
     const res = await fetch(`https://${dc}.api.mailchimp.com/3.0/ping`, {
-      headers: { Authorization: `Basic ${Buffer.from(`anystring:${value}`).toString('base64')}` },
+      headers: {
+        Authorization: `Basic ${Buffer.from(`anystring:${value}`).toString('base64')}`,
+      },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (res.status === 401) return EFindingStatus.INVALID;
@@ -301,7 +347,10 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
 
   [ESecretType.SQUARE_ACCESS_TOKEN]: async (value) => {
     const res = await fetch('https://connect.squareup.com/v2/locations', {
-      headers: { Authorization: `Bearer ${value}`, 'Square-Version': '2024-01-18' },
+      headers: {
+        Authorization: `Bearer ${value}`,
+        'Square-Version': '2024-01-18',
+      },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (res.status === 401) return EFindingStatus.INVALID;
@@ -312,12 +361,16 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
   [ESecretType.DIGITALOCEAN_PAT]: checkDigitalOceanToken,
   [ESecretType.DIGITALOCEAN_OAUTH_TOKEN]: checkDigitalOceanToken,
 
-  [ESecretType.AIRTABLE_API_KEY]: (value) => checkBearer('https://api.airtable.com/v0/meta/whoami', value),
+  [ESecretType.AIRTABLE_API_KEY]: (value) =>
+    checkBearer('https://api.airtable.com/v0/meta/whoami', value),
 
   [ESecretType.NOTION_API_TOKEN]: (value) =>
-    checkBearer('https://api.notion.com/v1/users/me', value, { 'Notion-Version': '2022-06-28' }),
+    checkBearer('https://api.notion.com/v1/users/me', value, {
+      'Notion-Version': '2022-06-28',
+    }),
 
-  [ESecretType.TERRAFORM_CLOUD_TOKEN]: (value) => checkBearer('https://app.terraform.io/api/v2/account/details', value),
+  [ESecretType.TERRAFORM_CLOUD_TOKEN]: (value) =>
+    checkBearer('https://app.terraform.io/api/v2/account/details', value),
 
   // Linear has no REST "whoami" - a minimal read-only GraphQL query
   // (never a mutation) plays the same role. Auth header is the raw key,
@@ -334,7 +387,8 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
     return EFindingStatus.UNKNOWN;
   },
 
-  [ESecretType.SENTRY_AUTH_TOKEN]: (value) => checkBearer('https://sentry.io/api/0/organizations/', value),
+  [ESecretType.SENTRY_AUTH_TOKEN]: (value) =>
+    checkBearer('https://sentry.io/api/0/organizations/', value),
 
   [ESecretType.FIGMA_PERSONAL_ACCESS_TOKEN]: async (value) => {
     const res = await fetch('https://api.figma.com/v1/me', {
@@ -369,21 +423,26 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
   // Dropbox's endpoints are RPC-style POSTs even for reads - this one
   // only ever reads the token owner's basic account info.
   [ESecretType.DROPBOX_SHORT_LIVED_TOKEN]: async (value) => {
-    const res = await fetch('https://api.dropboxapi.com/2/users/get_current_account', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${value}` },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    const res = await fetch(
+      'https://api.dropboxapi.com/2/users/get_current_account',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${value}` },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      },
+    );
     if (res.status === 401) return EFindingStatus.INVALID;
     if (res.ok) return EFindingStatus.VALID;
     return EFindingStatus.UNKNOWN;
   },
 
-  [ESecretType.FACEBOOK_ACCESS_TOKEN]: (value) => checkBearer('https://graph.facebook.com/me', value),
+  [ESecretType.FACEBOOK_ACCESS_TOKEN]: (value) =>
+    checkBearer('https://graph.facebook.com/me', value),
 
   // App-only bearer token: fetches one public, fixed tweet rather than
   // anything tied to a specific user's account.
-  [ESecretType.TWITTER_BEARER_TOKEN]: (value) => checkBearer('https://api.twitter.com/2/tweets?ids=20', value),
+  [ESecretType.TWITTER_BEARER_TOKEN]: (value) =>
+    checkBearer('https://api.twitter.com/2/tweets?ids=20', value),
 
   // Fine-grained PATs authenticate the same way classic ghp_ tokens do.
   [ESecretType.GITHUB_FINE_GRAINED_PAT]: checkGithubToken,
@@ -391,14 +450,16 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
   [ESecretType.ASANA_PERSONAL_ACCESS_TOKEN]: (value) =>
     checkBearer('https://app.asana.com/api/1.0/users/me', value),
 
-  [ESecretType.BITBUCKET_ACCESS_TOKEN]: (value) => checkBearer('https://api.bitbucket.org/2.0/user', value),
+  [ESecretType.BITBUCKET_ACCESS_TOKEN]: (value) =>
+    checkBearer('https://api.bitbucket.org/2.0/user', value),
 
   // Management API - lists the organizations the token's owner belongs
   // to, no project-level access needed.
   [ESecretType.SUPABASE_PERSONAL_ACCESS_TOKEN]: (value) =>
     checkBearer('https://api.supabase.com/v1/organizations', value),
 
-  [ESecretType.RENDER_API_KEY]: (value) => checkBearer('https://api.render.com/v1/owners', value),
+  [ESecretType.RENDER_API_KEY]: (value) =>
+    checkBearer('https://api.render.com/v1/owners', value),
 
   [ESecretType.CONTENTFUL_PERSONAL_ACCESS_TOKEN]: (value) =>
     checkBearer('https://api.contentful.com/users/me', value),
@@ -408,7 +469,10 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
   [ESecretType.FLY_IO_API_TOKEN]: async (value) => {
     const res = await fetch('https://api.fly.io/graphql', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${value}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${value}`,
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ query: '{ viewer { email } }' }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -421,10 +485,13 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
   // https://apidocs.launchdarkly.com/#section/Authentication.
   // caller-identity is a purpose-built read-only "who is this token" check.
   [ESecretType.LAUNCHDARKLY_API_ACCESS_TOKEN]: async (value) => {
-    const res = await fetch('https://app.launchdarkly.com/api/v2/caller-identity', {
-      headers: { Authorization: value },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    const res = await fetch(
+      'https://app.launchdarkly.com/api/v2/caller-identity',
+      {
+        headers: { Authorization: value },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      },
+    );
     if (res.status === 401) return EFindingStatus.INVALID;
     if (res.ok) return EFindingStatus.VALID;
     return EFindingStatus.UNKNOWN;
@@ -433,7 +500,8 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
   // /v3/me is scoped to personal tokens (dp.pt.) - a valid service/config
   // token (dp.st./dp.ct.) can still 403 here despite being genuinely
   // active, so this check is best-effort like several others above.
-  [ESecretType.DOPPLER_TOKEN]: (value) => checkBearer('https://api.doppler.com/v3/me', value),
+  [ESecretType.DOPPLER_TOKEN]: (value) =>
+    checkBearer('https://api.doppler.com/v3/me', value),
 
   // ClickUp's auth header is the raw token too, no "Bearer" prefix -
   // https://developer.clickup.com/docs/authentication.
@@ -450,13 +518,85 @@ const CHECKERS: Partial<Record<ESecretType, TChecker>> = {
 
 @Injectable()
 export class LiveKeyValidatorAdapter extends KeyValidatorPort {
-  async validate(secretType: ESecretType, secretValue: string, pairedValue?: string): Promise<EFindingStatus> {
+  async validate(
+    secretType: ESecretType,
+    secretValue: string,
+    pairedValue?: string,
+  ): Promise<EFindingStatus> {
+    return (await this.validateDetailed(secretType, secretValue, pairedValue))
+      .status;
+  }
+
+  async validateDetailed(
+    secretType: ESecretType,
+    secretValue: string,
+    pairedValue?: string,
+  ): Promise<IValidationResult> {
+    const unknown = (reason: string): IValidationResult => ({
+      status: EFindingStatus.UNKNOWN,
+      reason,
+    });
     const check = CHECKERS[secretType];
-    if (!check) return EFindingStatus.UNKNOWN;
+    if (!check)
+      return unknown(
+        'Skipped: this credential type has no supported validator.',
+      );
+    if (secretType === ESecretType.AWS_ACCESS_KEY_ID) {
+      if (secretValue.startsWith('ASIA'))
+        return unknown(
+          'Skipped: temporary AWS credentials require a session token; this validator does not support it.',
+        );
+      if (!pairedValue)
+        return unknown('Skipped: matching AWS Secret Access Key is missing.');
+    }
+    if (secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY) {
+      let key;
+      try {
+        key = JSON.parse(secretValue);
+      } catch {
+        return unknown('Skipped: GCP credentials are not valid JSON.');
+      }
+      if (
+        !key ||
+        typeof key.private_key !== 'string' ||
+        typeof key.client_email !== 'string' ||
+        !key.client_email.trim()
+      ) {
+        return unknown(
+          'Skipped: GCP credentials need private_key and client_email.',
+        );
+      }
+      try {
+        const parsed = crypto.createPrivateKey(key.private_key);
+        if (
+          parsed.asymmetricKeyType !== 'rsa' ||
+          (parsed.asymmetricKeyDetails?.modulusLength ?? 0) < 2048
+        ) {
+          return unknown(
+            'Skipped: GCP private key must be an RSA key of at least 2048 bits.',
+          );
+        }
+      } catch {
+        return unknown('Skipped: GCP private key is not a readable PEM key.');
+      }
+    }
     try {
-      return await check(secretValue, pairedValue);
-    } catch {
-      return EFindingStatus.UNKNOWN; // network error/timeout - never guess INVALID
+      const status = await check(secretValue, pairedValue);
+      return {
+        status,
+        reason:
+          status === EFindingStatus.UNKNOWN
+            ? 'Inconclusive: provider response did not establish credential validity.'
+            : null,
+      };
+    } catch (error) {
+      const name =
+        error && typeof error === 'object' && 'name' in error ? error.name : '';
+      return unknown(
+        name === 'TimeoutError' || name === 'AbortError'
+          ? 'Inconclusive: provider request timed out.'
+          : 'Inconclusive: provider request failed or its response could not be read.',
+      );
     }
   }
 }

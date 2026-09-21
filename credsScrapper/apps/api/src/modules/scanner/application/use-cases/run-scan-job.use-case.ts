@@ -15,6 +15,8 @@ export type IScanJobEvent =
       readonly type: 'finding';
       readonly filePath: string;
       readonly commitSha: string;
+      /** All commits represented by a worker-compacted finding. */
+      readonly commitShas?: readonly string[];
       readonly finding: IFinding;
     };
 

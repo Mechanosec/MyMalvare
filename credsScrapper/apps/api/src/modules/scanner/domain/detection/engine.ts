@@ -80,14 +80,24 @@ function isPlaceholder(
 // was assigned to on the same line (e.g. "SUPABASE_KEY = '<token>'" ->
 // "SUPABASE_KEY"). Not always present, and never a guarantee of which
 // service it belongs to - just a hint for a human reviewing the finding.
-const CONTEXT_KEY_RE = /([A-Za-z_][A-Za-z0-9_]*)\s*[:=]\s*["']?$/;
-
 function extractContext(text: string, start: number): string | null {
-  const searchEnd = start - 1;
-  const lineStart = searchEnd < 0 ? -1 : text.lastIndexOf('\n', searchEnd);
-  const prefix = text.slice(lineStart + 1, start);
-  const match = CONTEXT_KEY_RE.exec(prefix);
-  return match ? match[1] : null;
+  // Read only the assignment immediately before the token. Searching the
+  // entire line with an unanchored identifier regex retries long identifiers
+  // at every character, taking quadratic time on bundled/minified source.
+  let end = start;
+  if (text[end - 1] === '"' || text[end - 1] === "'") end--;
+  const skipWhitespace = () => {
+    while (end > 0 && text[end - 1] !== '\n' && /\s/.test(text[end - 1])) end--;
+  };
+  skipWhitespace();
+  if (text[end - 1] !== ':' && text[end - 1] !== '=') return null;
+  end--;
+  skipWhitespace();
+  let begin = end;
+  while (begin > 0 && /[A-Za-z0-9_]/.test(text[begin - 1])) begin--;
+  // The previous regex also accepted an identifier suffix after digits.
+  while (begin < end && /[0-9]/.test(text[begin])) begin++;
+  return begin < end ? text.slice(begin, end) : null;
 }
 
 // data: URIs (SVG/CSS/HTML embedding a raster image or font as base64) are
@@ -234,7 +244,14 @@ export function scanText(rawText: string): IFinding[] {
   const findings: IFinding[] = [];
   const matchedSpans: Array<[number, number]> = [];
 
-  for (const { secretType, pattern } of PATTERNS) {
+  for (const { secretType, pattern, requiredMarker } of PATTERNS) {
+    if (requiredMarker instanceof RegExp) requiredMarker.lastIndex = 0;
+    if (
+      (typeof requiredMarker === 'string' && !text.includes(requiredMarker)) ||
+      (requiredMarker instanceof RegExp && !requiredMarker.test(text))
+    ) {
+      continue;
+    }
     for (const match of text.matchAll(pattern)) {
       const start = match.index ?? 0;
       let value = match[0];

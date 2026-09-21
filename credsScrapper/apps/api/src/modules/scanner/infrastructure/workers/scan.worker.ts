@@ -25,24 +25,75 @@ export default async function runScanTask(
   data: IScanWorkerTaskData,
 ): Promise<TScanJobResult> {
   const useCase = new RunScanJobUseCase(new GitCliAdapter());
-  const events: IScanJobEvent[] = [];
-  const flush = async () => {
+
+  const send = async (events: readonly IScanJobEvent[]) => {
     if (events.length === 0) return;
     const acknowledged = once(data.port, 'message');
-    data.port.postMessage({ type: 'events', events: events.splice(0) });
+    data.port.postMessage({ type: 'events', events });
     await acknowledged;
   };
+
+  type TFindingEvent = Extract<IScanJobEvent, { type: 'finding' }>;
+  interface ICompactedFinding {
+    event: TFindingEvent;
+    readonly commitShas: Set<string>;
+  }
+  const findings = new Map<string, Map<string, ICompactedFinding>>();
+  const collectFinding = (event: TFindingEvent) => {
+    let findingsByValue = findings.get(event.finding.secretType);
+    if (!findingsByValue) {
+      findingsByValue = new Map();
+      findings.set(event.finding.secretType, findingsByValue);
+    }
+    const existing = findingsByValue.get(event.finding.secretValue);
+    if (!existing) {
+      findingsByValue.set(event.finding.secretValue, {
+        event,
+        commitShas: new Set([event.commitSha]),
+      });
+      return;
+    }
+
+    existing.commitShas.add(event.commitSha);
+    if (
+      existing.event.filePath.startsWith('<commit-diff>') &&
+      !event.filePath.startsWith('<commit-diff>')
+    ) {
+      existing.event = event;
+    }
+  };
+
+  const flushFindings = async () => {
+    let batch: IScanJobEvent[] = [];
+    for (const findingsByValue of findings.values()) {
+      for (const compacted of findingsByValue.values()) {
+        batch.push({
+          ...compacted.event,
+          commitShas: [...compacted.commitShas],
+        });
+        if (batch.length === 256) {
+          await send(batch);
+          batch = [];
+        }
+      }
+    }
+    await send(batch);
+  };
+
   const result = await useCase.execute(
     data.repoRef,
     data.cloneSource,
     data.workdir,
     (event) => {
-      events.push(event);
-      if (events.length >= 256 || event.type === 'progress') return flush();
+      if (event.type === 'finding') {
+        collectFinding(event);
+        return;
+      }
+      return send([event]);
     },
     data.resume,
   );
-  await flush();
+  await flushFindings();
   // FIFO on the same port proves all events have arrived. A setImmediate on
   // Piscina's independent result channel cannot provide that guarantee.
   data.port.postMessage({ type: 'complete' });

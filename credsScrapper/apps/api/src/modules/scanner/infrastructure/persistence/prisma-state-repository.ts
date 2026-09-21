@@ -272,6 +272,8 @@ export class PrismaStateRepository extends StateRepositoryPort {
     const byKey = new Map<string, IMergeState>();
     const keyOf = (secretType: string, secretValue: string) =>
       `${secretType}|${secretValue}`;
+    const commitsOf = (finding: IFindingInput) =>
+      new Set([...(finding.commitShas ?? []), finding.commitSha]);
 
     // One query for every finding this repo already has, instead of one
     // findFirst per incoming finding - a repo scan can produce hundreds of
@@ -318,15 +320,18 @@ export class PrismaStateRepository extends StateRepositoryPort {
           commitSha: finding.commitSha,
           lineNumber: finding.lineNumber,
           context: finding.context,
-          leakCommits: new Set([finding.commitSha]),
+          leakCommits: commitsOf(finding),
           changed: true,
           promoted: true,
         });
         continue;
       }
 
-      const hadCommit = existing.leakCommits.has(finding.commitSha);
-      existing.leakCommits.add(finding.commitSha);
+      let addedCommit = false;
+      for (const commitSha of commitsOf(finding)) {
+        if (!existing.leakCommits.has(commitSha)) addedCommit = true;
+        existing.leakCommits.add(commitSha);
+      }
 
       const isIncomingPathBased = !isDiffSourcedFile(finding.filePath);
       const isExistingDiffBased = isDiffSourcedFile(existing.filePath);
@@ -337,7 +342,7 @@ export class PrismaStateRepository extends StateRepositoryPort {
         existing.context = finding.context;
         existing.changed = true;
         existing.promoted = true;
-      } else if (!hadCommit) {
+      } else if (addedCommit) {
         existing.changed = true;
       }
     }
@@ -402,10 +407,14 @@ export class PrismaStateRepository extends StateRepositoryPort {
     await this.prisma.finding.update({ where: { id }, data: { status } });
   }
 
-  async recordTestResult(id: number, status: EFindingStatus): Promise<void> {
+  async recordTestResult(
+    id: number,
+    status: EFindingStatus,
+    testReason?: string | null,
+  ): Promise<void> {
     await this.prisma.finding.update({
       where: { id },
-      data: { status, checkedAt: new Date() },
+      data: { status, checkedAt: new Date(), testReason: testReason ?? null },
     });
   }
 
