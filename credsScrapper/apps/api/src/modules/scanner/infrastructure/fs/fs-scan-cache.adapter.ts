@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { ScanCachePort } from '../../application/ports/scan-cache.port';
+import { EScanPhase } from '../../domain/constant/scan-phase.constant';
 
 /** Linux flock releases the lock on process/pipe death; no stale PID stealing. */
 async function lock(file: string): Promise<() => Promise<void>> {
@@ -78,8 +79,16 @@ export class FsScanCacheAdapter extends ScanCachePort {
     }
   }
 
-  async acquire(workdir: string, source: string) {
-    const root = path.join(path.dirname(path.resolve(workdir)), '.scan-cache');
+  async acquire(
+    workdir: string,
+    source: string,
+    phase: EScanPhase = EScanPhase.HISTORY,
+  ) {
+    const root = path.join(
+      path.dirname(path.resolve(workdir)),
+      '.scan-cache',
+      phase,
+    );
     await fs.mkdir(root, { recursive: true, mode: 0o700 });
     await this.prune(root);
     const key = createHash('sha256')

@@ -20,8 +20,8 @@ export function SecretValue({ value }: ISecretValueProps) {
   const [revealed, setRevealed] = useState(false);
 
   return (
-    <span className="inline-flex max-w-56 items-start gap-2">
-      <span className="min-w-0 break-all font-mono text-text">{revealed ? value : mask(value)}</span>
+    <span className={`inline-flex items-start gap-2 ${revealed ? 'max-w-56' : 'whitespace-nowrap'}`}>
+      <span className={`min-w-0 font-mono text-text ${revealed ? 'break-all' : 'whitespace-nowrap'}`}>{revealed ? value : mask(value)}</span>
       <button
         type="button"
         onClick={() => setRevealed((prev) => !prev)}

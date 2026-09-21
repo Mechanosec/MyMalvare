@@ -1,5 +1,7 @@
 'use client';
 
+import { RepositorySelect } from './repository-select';
+
 import { useEffect, useState } from 'react';
 import {
   adminTestFinding,
@@ -15,6 +17,8 @@ import {
   FINDINGS_PAGE_SIZE,
   testMyFinding,
   testMyRepoFindings,
+  scanMyRepo,
+  startScanRepo,
 } from '../lib/api-client';
 import { EFindingStatus } from '../lib/constant/finding-status.constant';
 import { ESecretType, TESTABLE_SECRET_TYPES } from '../lib/constant/secret-type.constant';
@@ -24,9 +28,19 @@ import { MultiSelect } from './multi-select';
 import { Pagination } from './pagination';
 import { SecretTypeBadge } from './secret-type-badge';
 import { SecretValue } from './secret-value';
+import { ProgressPanel } from './progress-panel';
 
 function formatCheckedAt(checkedAt: string | null): string {
   return checkedAt ? `last attempt ${new Date(checkedAt).toLocaleString()}` : 'not attempted';
+}
+
+function needsRescan(finding: IFinding): boolean {
+  return finding.status === EFindingStatus.UNKNOWN && [
+    'Skipped: matching AWS Secret Access Key is missing.',
+    'Skipped: GCP credentials are not valid JSON.',
+    'Skipped: GCP credentials need private_key and client_email.',
+    'Skipped: GCP private key is not a readable PEM key.',
+  ].includes(finding.testReason ?? '');
 }
 
 // e.g. "acme/widgets (4: 1 valid, 3 unknown)" - only non-zero buckets are
@@ -66,6 +80,33 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
   const [testingId, setTestingId] = useState<number | null>(null);
   const [testingAll, setTestingAll] = useState(false);
   const [testingSelected, setTestingSelected] = useState(false);
+  const [rescanningRepoId, setRescanningRepoId] = useState<number | null>(null);
+  const [rescanJobId, setRescanJobId] = useState<string | null>(null);
+
+  async function rescan(finding: IFinding) {
+    setRescanningRepoId(finding.repoId);
+    try {
+      const result = await (isAdmin ? startScanRepo : scanMyRepo)(finding.owner, finding.name, finding.secretType);
+      setRescanJobId(result.jobId);
+      setLog((prev) => [...prev, `Rescan queued for ${finding.owner}/${finding.name} (${finding.secretType}): job ${result.jobId}. After successful completion, previous test results for this service will be reset. Findings will refresh automatically so you can test again. No key tests were started.`]);
+    } catch (error) {
+      const status = error instanceof Error
+        ? /^POST (?:\/repo-authorizations\/mine\/scan-repo|\/scan\/repo) failed: (\d{3})$/.exec(error.message)?.[1]
+        : undefined;
+      const reason = status === '403'
+        ? isAdmin
+          ? 'Administrator access is required. Sign in again with an administrator account.'
+          : 'Your account has no approved authorization for this repository. Rescan requires repository-owner permission.'
+        : status === '401'
+          ? 'Your session has expired. Sign in again.'
+          : status === '404'
+            ? 'The repository could not be found.'
+            : 'The API request failed. Check server availability and retry.';
+      setLog((prev) => [...prev, `Could not queue rescan for ${finding.owner}/${finding.name}. ${reason}`]);
+    } finally {
+      setRescanningRepoId(null);
+    }
+  }
 
   useEffect(() => {
     // Only repos with at least one live-testable finding are worth
@@ -151,6 +192,27 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
     }
   }
 
+  async function refreshAfterRescan() {
+    await loadPage(0);
+    try {
+      const options = await (isAdmin
+        ? fetchFindingsRepoOptions(undefined, [...TESTABLE_SECRET_TYPES])
+        : fetchMyTestableRepos([...TESTABLE_SECRET_TYPES]));
+      setRepoOptions(options);
+      if (repoId !== null) {
+        const scopedTypes = secretTypes.length ? secretTypes : [...TESTABLE_SECRET_TYPES];
+        const [types, counts] = await Promise.all([
+          isAdmin ? fetchFindingsSecretTypeCounts(repoId) : fetchMySecretTypeCounts(repoId),
+          isAdmin ? fetchFindingsStatusCounts(repoId, scopedTypes) : fetchMyStatusCounts(repoId, scopedTypes),
+        ]);
+        setSecretTypeCounts(types);
+        setStatusCounts(counts);
+      }
+    } catch {
+      setLog((prev) => [...prev, 'Rescan completed, but counters could not be refreshed. Reload to retry.']);
+    }
+  }
+
   async function testOne(finding: IFinding) {
     setTestingId(finding.id);
     try {
@@ -225,24 +287,11 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
-        <div>
-          <label htmlFor="testing-repo" className="mb-1 block text-xs text-text-dim">
-            Repository
-          </label>
-          <select
-            id="testing-repo"
-            value={repoId ?? ''}
-            onChange={(e) => setRepoId(e.target.value ? Number(e.target.value) : null)}
-            className="w-64 border border-line bg-surface-2 px-2 py-1.5 text-sm text-text outline-none focus:border-accent"
-          >
-            <option value="">Select a repository…</option>
-            {repoOptions.map((repo) => (
-              <option key={repo.repoId} value={repo.repoId}>
-                {formatRepoOptionLabel(repo)}
-              </option>
-            ))}
-          </select>
-        </div>
+        <RepositorySelect
+          options={repoOptions.map((repo) => ({ value: repo.repoId, name: `${repo.owner}/${repo.name}`, label: formatRepoOptionLabel(repo) }))}
+          value={repoId}
+          onChange={setRepoId}
+        />
 
         <MultiSelect
           label="Secret type"
@@ -340,18 +389,33 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
                     </td>
                     <td className="px-3 py-2">
                       <FindingStatusBadge status={finding.status} />
-                      {finding.testReason && <div className="mt-1 text-xs text-text-dim">{finding.testReason}</div>}
+                      {finding.testReason && <div className="mt-1 max-w-md break-words text-xs text-text-dim">{finding.testReason}</div>}
                       <div className="mt-0.5 text-xs text-text-dim">{formatCheckedAt(finding.checkedAt)}</div>
                     </td>
                     <td className="px-3 py-2">
+                      <div className="flex items-center gap-2 whitespace-nowrap">
                       <button
                         type="button"
-                        onClick={() => testOne(finding)}
-                        disabled={testingId === finding.id}
+                        onClick={() => needsRescan(finding) ? rescan(finding) : testOne(finding)}
+                        disabled={testingId === finding.id || rescanningRepoId === finding.repoId}
                         className="bg-accent px-3 py-1 text-xs font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
                       >
-                        {testingId === finding.id ? 'Testing…' : 'Test'}
+                        {needsRescan(finding)
+                          ? rescanningRepoId === finding.repoId ? 'Queuing…' : 'Rescan'
+                          : testingId === finding.id ? 'Testing…' : 'Test'}
                       </button>
+                      {!needsRescan(finding) && (
+                        <button
+                          type="button"
+                          onClick={() => rescan(finding)}
+                          disabled={testingId === finding.id || rescanningRepoId === finding.repoId}
+                          title="Rescan this repository for this service and reset its previous test results"
+                          className="border border-line px-3 py-1 text-xs font-medium hover:bg-surface-2 disabled:opacity-40"
+                        >
+                          {rescanningRepoId === finding.repoId ? 'Queuing…' : 'Rescan'}
+                        </button>
+                      )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -363,6 +427,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
         </>
       )}
 
+      {rescanJobId && <ProgressPanel key={rescanJobId} jobId={rescanJobId} onDone={refreshAfterRescan} />}
       {log.length > 0 && (
         <div className="max-h-56 overflow-y-auto border border-line bg-ink px-4 py-2 font-mono text-xs leading-relaxed">
           {log.map((line, index) => (

@@ -1,7 +1,28 @@
 import { GitOperationsPort } from '../../../../../src/modules/scanner/application/ports/git-operations.port';
 import { RunScanJobUseCase } from '../../../../../src/modules/scanner/application/use-cases/run-scan-job.use-case';
+import { EScanPhase } from '../../../../../src/modules/scanner/domain/constant/scan-phase.constant';
 
 class FakeGit extends GitOperationsPort {
+  preparedHead = 0;
+  preparedHistory = 0;
+  historyTarget?: string;
+  async prepareHead(
+    _source: string,
+    _dest: string,
+    _signal: AbortSignal,
+  ): Promise<string> {
+    this.preparedHead += 1;
+    if (this.cloneShouldFail) throw new Error('clone failed');
+    return this.headSha;
+  }
+  async prepareHistory(
+    _source: string,
+    _dest: string,
+    targetSha: string,
+  ): Promise<void> {
+    this.preparedHistory += 1;
+    this.historyTarget = targetSha;
+  }
   async syncBare() {
     await this.cloneBare();
   }
@@ -44,6 +65,111 @@ class FakeGit extends GitOperationsPort {
 
 describe('RunScanJobUseCase', () => {
   const ref = { repoId: 1, owner: 'octocat', name: 'hello-world' };
+  const phaseOptions = (phase: EScanPhase) => ({
+    phase,
+    targetSha: phase === EScanPhase.HISTORY ? 'b'.repeat(40) : undefined,
+    scannerVersion: 'v2',
+    budget: { maxDurationMs: 60_000, maxCacheBytes: Number.MAX_SAFE_INTEGER },
+    signal: new AbortController().signal,
+  });
+
+  it('scans only current files during the HEAD phase', async () => {
+    const git = new FakeGit();
+    git.files = { 'config.py': "AWS_KEY = 'AKIAABCDEFGH12345678'\n" };
+    git.diffs = [
+      {
+        commitSha: 'old',
+        diffText: "+TOKEN = 'ghp_abcdefghijklmnopqrstuvwxyz1234567890'",
+      },
+    ];
+    const history = jest.spyOn(git, 'iterCommitDiffs');
+    const events: unknown[] = [];
+
+    const result = await new RunScanJobUseCase(git).execute(
+      ref,
+      'source',
+      'workdir',
+      (event) => events.push(event),
+      phaseOptions(EScanPhase.HEAD),
+    );
+
+    expect(result).toMatchObject({ status: 'done', headSha: git.headSha });
+    expect(git.preparedHead).toBe(1);
+    expect(git.preparedHistory).toBe(0);
+    expect(history).not.toHaveBeenCalled();
+  });
+
+  it('scans only commit diffs during the history phase', async () => {
+    const git = new FakeGit();
+    git.files = { 'config.py': "AWS_KEY = 'AKIAABCDEFGH12345678'\n" };
+    git.diffs = [
+      {
+        commitSha: 'c'.repeat(40),
+        diffText: "+AWS_KEY = 'AKIAABCDEFGH12345678'\n",
+      },
+    ];
+    const listHead = jest.spyOn(git, 'listFilesAtHead');
+
+    const result = await new RunScanJobUseCase(git).execute(
+      ref,
+      'source',
+      'workdir',
+      () => {},
+      phaseOptions(EScanPhase.HISTORY),
+    );
+
+    expect(result).toMatchObject({
+      status: 'done',
+      targetSha: 'b'.repeat(40),
+    });
+    expect(git.preparedHistory).toBe(1);
+    expect(git.preparedHead).toBe(0);
+    expect(listHead).not.toHaveBeenCalled();
+  });
+
+  it('returns cancelled without claiming success when aborted', async () => {
+    const git = new FakeGit();
+    const controller = new AbortController();
+    controller.abort();
+    const result = await new RunScanJobUseCase(git).execute(
+      ref,
+      'source',
+      'workdir',
+      () => {},
+      {
+        ...phaseOptions(EScanPhase.HEAD),
+        signal: controller.signal,
+      },
+    );
+    expect(result.status).toBe('cancelled');
+  });
+
+  it('returns incomplete when acquisition exceeds its wall-time budget', async () => {
+    const git = new FakeGit();
+    git.prepareHead = async (
+      _source: string,
+      _dest: string,
+      signal: AbortSignal,
+    ) =>
+      new Promise<string>((_resolve, reject) => {
+        signal.addEventListener(
+          'abort',
+          () => reject(new Error('Git operation cancelled')),
+          { once: true },
+        );
+      });
+    const result = await new RunScanJobUseCase(git).execute(
+      ref,
+      'source',
+      'workdir',
+      () => {},
+      {
+        ...phaseOptions(EScanPhase.HEAD),
+        budget: { maxDurationMs: 5, maxCacheBytes: Number.MAX_SAFE_INTEGER },
+      },
+    );
+    expect(result.status).toBe('incomplete');
+  });
 
   it('emits a finding event for a secret in the working tree and resolves done', async () => {
     const git = new FakeGit();

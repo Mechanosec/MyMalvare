@@ -44,6 +44,22 @@ model ScannedRepo {
   @@map("scanned_repos")
 }
 
+model ScanPhase {
+  repoId         Int       @map("repo_id")
+  phase          String
+  status         String
+  targetSha      String?   @map("target_sha")
+  completedSha   String?   @map("completed_sha")
+  scannerVersion String?   @map("scanner_version")
+  startedAt      DateTime? @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  reason         String?
+  retryCount     Int       @default(0) @map("retry_count")
+
+  @@id([repoId, phase])
+  @@map("scan_phases")
+}
+
 model Finding {
   id          Int      @id @default(autoincrement())
   repoId      Int      @map("repo_id")

@@ -8,13 +8,15 @@ import {
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { GitCliAdapter } from '../git/git-cli-adapter';
 import { IScanResumeOptions } from '../../application/types/scan-checkpoint.type';
+import { IScanExecutionOptions } from '../../application/types/scan-budget.type';
 
 export interface IScanWorkerTaskData {
   readonly repoRef: IRepoRef;
   readonly cloneSource: string;
   readonly workdir: string;
   readonly port: MessagePort;
-  readonly resume?: IScanResumeOptions;
+  readonly cancelPort?: MessagePort;
+  readonly options?: IScanResumeOptions | Omit<IScanExecutionOptions, 'signal'>;
 }
 
 // Piscina's task entry point - runs inside a worker thread, so it can't
@@ -25,6 +27,8 @@ export default async function runScanTask(
   data: IScanWorkerTaskData,
 ): Promise<TScanJobResult> {
   const useCase = new RunScanJobUseCase(new GitCliAdapter());
+  const cancellation = new AbortController();
+  data.cancelPort?.on('message', () => cancellation.abort());
 
   const send = async (events: readonly IScanJobEvent[]) => {
     if (events.length === 0) return;
@@ -91,11 +95,14 @@ export default async function runScanTask(
       }
       return send([event]);
     },
-    data.resume,
+    data.options && 'phase' in data.options
+      ? { ...data.options, signal: cancellation.signal }
+      : data.options,
   );
   await flushFindings();
   // FIFO on the same port proves all events have arrived. A setImmediate on
   // Piscina's independent result channel cannot provide that guarantee.
   data.port.postMessage({ type: 'complete' });
+  data.cancelPort?.close();
   return result;
 }

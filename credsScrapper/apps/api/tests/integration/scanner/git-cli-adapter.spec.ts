@@ -11,6 +11,11 @@ async function run(cmd: string[], cwd: string): Promise<void> {
   await execFileAsync(cmd[0], cmd.slice(1), { cwd });
 }
 
+async function gitOutput(repo: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['-C', repo, ...args]);
+  return stdout.trim();
+}
+
 describe('GitCliAdapter (real git, no mocks)', () => {
   let tmpDir: string;
   const adapter = new GitCliAdapter();
@@ -21,6 +26,40 @@ describe('GitCliAdapter (real git, no mocks)', () => {
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('prepares a one-commit shallow HEAD cache and a separate full history cache', async () => {
+    const sourceDir = path.join(tmpDir, 'phased-source');
+    await fs.mkdir(sourceDir);
+    await run(['git', 'init', '-q'], sourceDir);
+    await run(['git', 'config', 'user.email', 'test@example.com'], sourceDir);
+    await run(['git', 'config', 'user.name', 'Test'], sourceDir);
+    for (let revision = 1; revision <= 3; revision += 1) {
+      await fs.writeFile(path.join(sourceDir, 'revision.txt'), `${revision}\n`);
+      await run(['git', 'add', '.'], sourceDir);
+      await run(['git', 'commit', '-qm', `revision ${revision}`], sourceDir);
+    }
+    const latestSha = await gitOutput(sourceDir, ['rev-parse', 'HEAD']);
+    const signal = new AbortController().signal;
+
+    const headDir = path.join(tmpDir, 'head-cache');
+    expect(await adapter.prepareHead(sourceDir, headDir, signal)).toBe(
+      latestSha,
+    );
+    expect(
+      await gitOutput(headDir, ['rev-parse', '--is-shallow-repository']),
+    ).toBe('true');
+    const headDiffs = [];
+    for await (const diff of adapter.iterCommitDiffs(headDir))
+      headDiffs.push(diff);
+    expect(headDiffs).toHaveLength(1);
+
+    const historyDir = path.join(tmpDir, 'history-cache');
+    await adapter.prepareHistory(sourceDir, historyDir, latestSha, signal);
+    expect(await gitOutput(historyDir, ['rev-list', '--count', 'HEAD'])).toBe(
+      '3',
+    );
+    expect(await adapter.getHeadCommit(historyDir)).toBe(latestSha);
   });
 
   it('clones, reads HEAD tree, and scans full commit history including a removed secret', async () => {

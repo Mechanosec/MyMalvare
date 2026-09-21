@@ -1,56 +1,78 @@
-'use client';
+"use client";
 
-import { useMemo, useState } from 'react';
-import { EScanStatus } from '../lib/constant/scan-status.constant';
-import { IScannedRepo } from '../lib/types/scanned-repo.type';
-import { SortableHeader } from './sortable-header';
-import { StatusBadge } from './status-badge';
+import { useMemo, useState } from "react";
+import { EScanStatus } from "../lib/constant/scan-status.constant";
+import { IScannedRepo } from "../lib/types/scanned-repo.type";
+import { SortableHeader } from "./sortable-header";
+import { StatusBadge } from "./status-badge";
 
 interface IScannedReposTableProps {
   readonly repos: IScannedRepo[];
 }
 
-type TSortKey = 'repo' | 'status' | 'findings' | 'scannedAt';
+type TSortKey = "repo" | "status" | "findings" | "scannedAt";
 
 function sortValue(repo: IScannedRepo, key: TSortKey): string | number {
   switch (key) {
-    case 'repo':
+    case "repo":
       return `${repo.owner}/${repo.name}`.toLowerCase();
-    case 'status':
+    case "status":
       return repo.status;
-    case 'findings':
+    case "findings":
       return repo.findingsCount;
-    case 'scannedAt':
-      return repo.scannedAt ?? '';
+    case "scannedAt":
+      return repo.scannedAt ?? "";
   }
 }
 
 function formatTime(value: string | null): string {
-  if (!value) return '—';
+  if (!value) return "—";
   return new Date(value).toLocaleString();
 }
 
+function PhaseLine({
+  label,
+  phase,
+}: {
+  label: string;
+  phase: IScannedRepo["headPhase"];
+}) {
+  if (!phase)
+    return <p className="text-xs text-text-dim">{label}: not scheduled</p>;
+  const sha = phase.completedSha ?? phase.targetSha;
+  return (
+    <p className="text-xs text-text-dim">
+      <span className="text-text">{label}:</span> {phase.status}
+      {sha ? ` @ ${sha.slice(0, 8)}` : ""}
+      {phase.reason ? ` — ${phase.reason}` : ""}
+    </p>
+  );
+}
+
 export function ScannedReposTable({ repos }: IScannedReposTableProps) {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<EScanStatus | ''>('');
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<EScanStatus | "">("");
   const [sortKey, setSortKey] = useState<TSortKey | null>(null);
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   function toggleSort(key: TSortKey) {
     if (key === sortKey) {
-      setSortDir((dir) => (dir === 'asc' ? 'desc' : 'asc'));
+      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
-      setSortDir('asc');
+      setSortDir("asc");
     }
   }
 
   const visible = useMemo(() => {
     let filtered = repos;
-    if (statusFilter) filtered = filtered.filter((r) => r.status === statusFilter);
+    if (statusFilter)
+      filtered = filtered.filter((r) => r.status === statusFilter);
     if (search) {
       const q = search.toLowerCase();
-      filtered = filtered.filter((r) => `${r.owner}/${r.name}`.toLowerCase().includes(q));
+      filtered = filtered.filter((r) =>
+        `${r.owner}/${r.name}`.toLowerCase().includes(q),
+      );
     }
     if (!sortKey) return filtered;
     const sorted = [...filtered].sort((a, b) => {
@@ -60,7 +82,7 @@ export function ScannedReposTable({ repos }: IScannedReposTableProps) {
       if (va > vb) return 1;
       return 0;
     });
-    return sortDir === 'asc' ? sorted : sorted.reverse();
+    return sortDir === "asc" ? sorted : sorted.reverse();
   }, [repos, search, statusFilter, sortKey, sortDir]);
 
   if (repos.length === 0) {
@@ -78,13 +100,15 @@ export function ScannedReposTable({ repos }: IScannedReposTableProps) {
           Status
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as EScanStatus | '')}
+            onChange={(e) =>
+              setStatusFilter(e.target.value as EScanStatus | "")
+            }
             className="border border-line bg-surface-2 px-2 py-1.5 text-sm text-text outline-none focus:border-accent"
           >
             <option value="">All</option>
             {Object.values(EScanStatus).map((value) => (
               <option key={value} value={value}>
-                {value.replace('_', ' ')}
+                {value.replace("_", " ")}
               </option>
             ))}
           </select>
@@ -110,32 +134,80 @@ export function ScannedReposTable({ repos }: IScannedReposTableProps) {
         </p>
       ) : (
         <div className="overflow-x-auto border border-line">
-          <table className="w-full border-collapse text-sm">
+          <table className="w-full min-w-[900px] table-fixed border-collapse text-sm">
+            <colgroup>
+              <col className="w-[38%]" />
+              <col className="w-[30%]" />
+              <col className="w-[10%]" />
+              <col className="w-[11%]" />
+              <col className="w-[11%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-line bg-surface-2 text-left text-xs text-text-dim">
-                <SortableHeader label="Repository" sortKey="repo" activeKey={sortKey} direction={sortDir} onSort={toggleSort} />
-                <SortableHeader label="Status" sortKey="status" activeKey={sortKey} direction={sortDir} onSort={toggleSort} />
-                <SortableHeader label="Findings" sortKey="findings" activeKey={sortKey} direction={sortDir} onSort={toggleSort} />
+                <SortableHeader
+                  label="Repository"
+                  sortKey="repo"
+                  activeKey={sortKey}
+                  direction={sortDir}
+                  onSort={toggleSort}
+                />
+                <SortableHeader
+                  label="Status"
+                  sortKey="status"
+                  activeKey={sortKey}
+                  direction={sortDir}
+                  onSort={toggleSort}
+                />
+                <SortableHeader
+                  label="Findings"
+                  sortKey="findings"
+                  activeKey={sortKey}
+                  direction={sortDir}
+                  onSort={toggleSort}
+                />
                 <th className="px-3 py-2 font-medium">Last commit</th>
-                <SortableHeader label="Scanned at" sortKey="scannedAt" activeKey={sortKey} direction={sortDir} onSort={toggleSort} />
+                <SortableHeader
+                  label="Scanned at"
+                  sortKey="scannedAt"
+                  activeKey={sortKey}
+                  direction={sortDir}
+                  onSort={toggleSort}
+                />
               </tr>
             </thead>
             <tbody>
               {visible.map((repo) => (
-                <tr key={repo.repoId} className="border-b border-line bg-surface last:border-0">
-                  <td className="whitespace-nowrap px-3 py-2 font-mono text-text">
+                <tr
+                  key={repo.repoId}
+                  className="border-b border-line bg-surface last:border-0"
+                >
+                  <td className="max-w-0 truncate px-3 py-2 font-mono text-text" title={`${repo.owner}/${repo.name}`}>
                     {repo.owner}/{repo.name}
                   </td>
                   <td className="px-3 py-2">
-                    <StatusBadge status={repo.status} />
+                    {repo.headPhase || repo.historyPhase ? (
+                      <div className="space-y-1 break-words">
+                        <PhaseLine
+                          label="Current files checked"
+                          phase={repo.headPhase}
+                        />
+                        <PhaseLine label="History" phase={repo.historyPhase} />
+                      </div>
+                    ) : (
+                      <StatusBadge status={repo.status} />
+                    )}
                   </td>
-                  <td className={`px-3 py-2 font-mono ${repo.findingsCount > 0 ? 'text-critical' : 'text-text-dim'}`}>
+                  <td
+                    className={`px-3 py-2 font-mono ${repo.findingsCount > 0 ? "text-critical" : "text-text-dim"}`}
+                  >
                     {repo.findingsCount}
                   </td>
                   <td className="px-3 py-2 font-mono text-text-dim">
-                    {repo.lastCommitSha ? repo.lastCommitSha.slice(0, 10) : '—'}
+                    {repo.lastCommitSha ? repo.lastCommitSha.slice(0, 10) : "—"}
                   </td>
-                  <td className="px-3 py-2 text-text-dim">{formatTime(repo.scannedAt)}</td>
+                  <td className="px-3 py-2 text-text-dim">
+                    {formatTime(repo.scannedAt)}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -6,6 +6,7 @@ import {
 } from '../../../src/modules/scanner/infrastructure/jobs/bullmq-connection';
 import { BullmqJobQueueAdapter } from '../../../src/modules/scanner/infrastructure/jobs/bullmq-job-queue.adapter';
 import { EJobStatus } from '../../../src/modules/scanner/domain/constant/job-status.constant';
+import { ESecretType } from '../../../src/modules/scanner/domain/constant/secret-type.constant';
 
 class RecordingScanRepository {
   calls: unknown[] = [];
@@ -71,6 +72,7 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
   let runScanLoop: RecordingRunScanLoop;
   let scanRepository: RecordingScanRepository;
   let progress: RecordingProgress;
+  const rescan = { execute: jest.fn().mockResolvedValue({ status: 'done', headSha: 'a'.repeat(40) }) };
 
   beforeAll(async () => {
     queue = new Queue(SCANNER_QUEUE_NAME, { connection: redisConnection });
@@ -85,6 +87,9 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
       scanRepository as never,
       progress as never,
       queueAdapter,
+      undefined,
+      undefined,
+      rescan as never,
     );
     await worker.start();
   });
@@ -147,6 +152,21 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
     expect(progress.events.some((e: any) => e.status === EJobStatus.DONE)).toBe(
       true,
     );
+  });
+
+  it('delivers the selected service through the real queue and records completion', async () => {
+    const jobId = await queueAdapter.enqueue('rescan-service', {
+      repoRef: { repoId: 123, owner: 'test', name: 'fixture' },
+      cloneSource: '/synthetic/fixture', workdir: '/synthetic/work',
+      secretType: ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+    });
+    await waitForStatus(jobId, EJobStatus.DONE);
+    expect(rescan.execute).toHaveBeenCalledWith(expect.objectContaining({
+      repoRef: { repoId: 123, owner: 'test', name: 'fixture' },
+      secretType: ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+    }));
+    expect(scanRepository.calls).toHaveLength(0);
+    expect((await queueAdapter.getJob(jobId))?.processed).toBe(1);
   });
 
   it('emits a FAILED progress event when scan-repo processing rejects', async () => {

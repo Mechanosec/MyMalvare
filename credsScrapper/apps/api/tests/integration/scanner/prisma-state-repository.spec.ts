@@ -1,7 +1,15 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { generateKeyPairSync } from 'node:crypto';
+import { scanText } from '../../../src/modules/scanner/domain/detection/engine';
+import { ESecretType } from '../../../src/modules/scanner/domain/constant/secret-type.constant';
+import { LiveKeyValidatorAdapter } from '../../../src/modules/scanner/infrastructure/validation/live-key-validator.adapter';
 import { EFindingStatus } from '../../../src/modules/scanner/domain/constant/finding-status.constant';
+import {
+  EScanPhase,
+  EScanPhaseStatus,
+} from '../../../src/modules/scanner/domain/constant/scan-phase.constant';
 import { PrismaStateRepository } from '../../../src/modules/scanner/infrastructure/persistence/prisma-state-repository';
 import { PrismaService } from '../../../src/modules/scanner/infrastructure/persistence/prisma.service';
 
@@ -30,6 +38,15 @@ async function makeRepository(dbFile: string): Promise<{
     )
   `);
   await prisma.$executeRawUnsafe(`
+    CREATE TABLE scan_phases (
+      repo_id INTEGER NOT NULL, phase TEXT NOT NULL, status TEXT NOT NULL,
+      target_sha TEXT, completed_sha TEXT, scanner_version TEXT,
+      started_at DATETIME, completed_at DATETIME, reason TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (repo_id, phase)
+    )
+  `);
+  await prisma.$executeRawUnsafe(`
     CREATE TABLE findings (
       id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id INTEGER NOT NULL, owner TEXT NOT NULL,
       name TEXT NOT NULL, file_path TEXT NOT NULL, commit_sha TEXT NOT NULL,
@@ -50,6 +67,268 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('resets test results only for the chosen repository and service', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'reset.db'),
+    );
+    try {
+      for (const [repoId, secretType] of [
+        [1, ESecretType.GITHUB_PAT],
+        [1, ESecretType.SLACK_TOKEN],
+        [2, ESecretType.GITHUB_PAT],
+      ] as const) {
+        await repo.addFinding(
+          repoId,
+          'fixture',
+          'repo',
+          'fixture.txt',
+          'abc',
+          secretType,
+          'synthetic-only',
+          1,
+          null,
+        );
+      }
+      const before = await repo.listFindings({ limit: 10, offset: 0 });
+      for (const finding of before.items) {
+        await repo.recordTestResult(
+          finding.id,
+          EFindingStatus.VALID,
+          'synthetic previous result',
+        );
+      }
+      await repo.resetTestResults(1, [ESecretType.GITHUB_PAT]);
+      const after = await repo.listFindings({ limit: 10, offset: 0 });
+      expect(after.items).toHaveLength(3);
+      for (const finding of after.items) {
+        if (
+          finding.repoId === 1 &&
+          finding.secretType === ESecretType.GITHUB_PAT
+        ) {
+          expect(finding.status).toBe(EFindingStatus.UNKNOWN);
+          expect(finding.checkedAt).toBeNull();
+          expect(finding.testReason).toBeNull();
+        } else {
+          expect(finding.status).toBe(EFindingStatus.VALID);
+          expect(finding.checkedAt).not.toBeNull();
+          expect(finding.testReason).toBe('synthetic previous result');
+        }
+      }
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('preserves a synthetic GCP JSON from detection through SQLite to validator input', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'contract.db'),
+    );
+    const { privateKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    const key = {
+      type: 'service_account',
+      description: 'literal } and escaped " quote',
+      private_key: privateKey,
+      client_email: 'fixture@example.invalid',
+    };
+    const request = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue({ ok: true, status: 200 } as Response);
+    try {
+      for (const [index, text] of [
+        JSON.stringify(key, null, 2),
+        JSON.stringify(key, null, 2)
+          .split('\n')
+          .map((line) => `+${line}`)
+          .join('\n'),
+      ].entries()) {
+        const detected = scanText(text, [ESecretType.GCP_SERVICE_ACCOUNT_KEY]);
+        expect(detected).toHaveLength(1);
+        await repo.addFindings(
+          1,
+          'test',
+          'fixture',
+          detected.map((finding) => ({
+            ...finding,
+            filePath: 'fixture.json',
+            commitSha: String(index).repeat(40),
+          })),
+        );
+      }
+      const { items } = await repo.listFindings({
+        repoIds: [1],
+        secretTypes: [ESecretType.GCP_SERVICE_ACCOUNT_KEY],
+      });
+      expect(items).toHaveLength(1);
+      expect(JSON.parse(items[0].secretValue)).toEqual(key);
+      expect(items[0].leakCommits).toHaveLength(2);
+      const result = await new LiveKeyValidatorAdapter().validateDetailed(
+        ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+        items[0].secretValue,
+      );
+      expect(result.status).toBe(EFindingStatus.VALID);
+      expect(request).toHaveBeenCalledTimes(1);
+    } finally {
+      request.mockRestore();
+      await prisma.$disconnect();
+    }
+  });
+
+  it('keeps HEAD and history coverage independent', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'phases.db'),
+    );
+    const headSha = 'a'.repeat(40);
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture');
+      await repo.schedulePhase(1, EScanPhase.HEAD, headSha);
+      await repo.claimPhase(1, EScanPhase.HEAD, headSha);
+      await repo.markPhaseDone(1, EScanPhase.HEAD, {
+        targetSha: headSha,
+        completedSha: headSha,
+        scannerVersion: 'v2',
+      });
+
+      expect(await repo.getPhase(1, EScanPhase.HISTORY)).toBeNull();
+      expect(await repo.getPhase(1, EScanPhase.HEAD)).toMatchObject({
+        status: EScanPhaseStatus.DONE,
+        targetSha: headSha,
+        completedSha: headSha,
+      });
+
+      await repo.schedulePhase(1, EScanPhase.HISTORY, headSha);
+      await repo.claimPhase(1, EScanPhase.HISTORY, headSha);
+      await repo.markPhaseIncomplete(1, EScanPhase.HISTORY, {
+        targetSha: headSha,
+        reason: 'History cache exceeded 2147483648 bytes',
+      });
+      expect(await repo.getPhase(1, EScanPhase.HISTORY)).toMatchObject({
+        status: EScanPhaseStatus.INCOMPLETE,
+        completedSha: null,
+        reason: 'History cache exceeded 2147483648 bytes',
+      });
+      expect(await repo.getPhase(1, EScanPhase.HEAD)).toMatchObject({
+        status: EScanPhaseStatus.DONE,
+        completedSha: headSha,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('claims a pending phase only once under concurrent callers', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'phase-claim.db'),
+    );
+    const targetSha = 'b'.repeat(40);
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture');
+      await repo.schedulePhase(1, EScanPhase.HISTORY, targetSha);
+      const claims = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          repo.claimPhase(1, EScanPhase.HISTORY, targetSha),
+        ),
+      );
+      expect(claims.filter(Boolean)).toHaveLength(1);
+      expect(await repo.listPendingPhases(EScanPhase.HISTORY)).toEqual([]);
+      expect(await repo.getPhase(1, EScanPhase.HISTORY)).toMatchObject({
+        status: EScanPhaseStatus.RUNNING,
+        targetSha,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('does not let an older running history result overwrite a newer pending target', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'phase-target-race.db'),
+    );
+    const oldSha = '1'.repeat(40);
+    const newSha = '2'.repeat(40);
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture');
+      await repo.schedulePhase(1, EScanPhase.HISTORY, oldSha);
+      await repo.claimPhase(1, EScanPhase.HISTORY, oldSha);
+      await repo.schedulePhase(1, EScanPhase.HISTORY, newSha);
+      await repo.markPhaseDone(1, EScanPhase.HISTORY, {
+        targetSha: oldSha,
+        completedSha: oldSha,
+        scannerVersion: 'v2',
+      });
+      expect(await repo.getPhase(1, EScanPhase.HISTORY)).toMatchObject({
+        status: EScanPhaseStatus.PENDING,
+        targetSha: newSha,
+        completedSha: null,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('migrates only complete versioned legacy scans into both phases', async () => {
+    const dbFile = path.join(tmpDir, 'legacy-migration.db');
+    const prisma = new PrismaService({
+      datasources: { db: { url: `file:${dbFile}` } },
+    });
+    try {
+      await prisma.$executeRawUnsafe(`
+        CREATE TABLE scanned_repos (
+          repo_id INTEGER PRIMARY KEY, owner TEXT NOT NULL, name TEXT NOT NULL,
+          last_commit_sha TEXT, scanner_version TEXT, status TEXT NOT NULL,
+          started_at DATETIME, scanned_at DATETIME, fail_reason TEXT,
+          retry_count INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+      await prisma.$executeRawUnsafe(`
+        INSERT INTO scanned_repos
+          (repo_id, owner, name, last_commit_sha, scanner_version, status)
+        VALUES
+          (1, 'acme', 'complete', '${'c'.repeat(40)}', 'v2', 'done'),
+          (2, 'acme', 'failed', '${'d'.repeat(40)}', 'v2', 'failed'),
+          (3, 'acme', 'unversioned', '${'e'.repeat(40)}', NULL, 'done')
+      `);
+      const migration = await fs.readFile(
+        path.join(
+          process.cwd(),
+          'prisma/migrations/20260921210000_scan_phases/migration.sql',
+        ),
+        'utf8',
+      );
+      for (const statement of migration.split(';').map((sql) => sql.trim())) {
+        if (statement) await prisma.$executeRawUnsafe(statement);
+      }
+
+      const rows = await prisma.$queryRawUnsafe<
+        Array<{
+          repo_id: number;
+          phase: string;
+          status: string;
+          completed_sha: string | null;
+        }>
+      >('SELECT repo_id, phase, status, completed_sha FROM scan_phases');
+      expect(rows).toEqual([
+        {
+          repo_id: 1,
+          phase: EScanPhase.HEAD,
+          status: EScanPhaseStatus.DONE,
+          completed_sha: 'c'.repeat(40),
+        },
+        {
+          repo_id: 1,
+          phase: EScanPhase.HISTORY,
+          status: EScanPhaseStatus.DONE,
+          completed_sha: 'c'.repeat(40),
+        },
+      ]);
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   it('persists a skipped reason and clears it after a conclusive result', async () => {

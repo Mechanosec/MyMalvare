@@ -8,6 +8,7 @@ import { IJobProgressEvent } from '../lib/types/job-progress-event.type';
 
 interface IProgressPanelProps {
   readonly jobId: string | null;
+  readonly onDone?: () => void;
   /** Admin discover/scan jobs only - see jobs.controller.ts's :id/stop route. */
   readonly showStopButton?: boolean;
 }
@@ -33,10 +34,19 @@ function formatLine(event: IJobProgressEvent): string {
 
 // The parent renders this with `key={jobId}` so a new job remounts it
 // with fresh state, instead of resetting state from inside the effect.
-export function ProgressPanel({ jobId, showStopButton }: IProgressPanelProps) {
+export function ProgressPanel({ jobId, showStopButton, onDone }: IProgressPanelProps) {
   const [events, setEvents] = useState<IJobProgressEvent[]>([]);
   const [stopping, setStopping] = useState(false);
+  const notifiedJob = useRef<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
+
+  const latestStatus = events[events.length - 1]?.status;
+  useEffect(() => {
+    if (jobId && latestStatus === EJobStatus.DONE && notifiedJob.current !== jobId && onDone) {
+      notifiedJob.current = jobId;
+      onDone();
+    }
+  }, [jobId, latestStatus, onDone]);
 
   async function handleStop() {
     if (!jobId) return;

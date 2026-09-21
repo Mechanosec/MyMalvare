@@ -1,4 +1,14 @@
-import { BadRequestException, Body, Controller, Get, NotFoundException, Post, Query, UseGuards } from '@nestjs/common';
+import { ESecretType } from '../domain/constant/secret-type.constant';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { AdminGuard } from '../../identity/infrastructure/guards/admin.guard';
 import { GetScannedReposUseCase } from '../application/use-cases/get-scanned-repos.use-case';
 import { GetScanStatusUseCase } from '../application/use-cases/get-scan-status.use-case';
@@ -33,7 +43,7 @@ export class ScanController {
   async start(@Body() dto: StartScanDto): Promise<{ jobId: string }> {
     const jobId = await this.jobQueue.enqueue(EJobType.SCAN, {
       workdirRoot: SCAN_WORKDIR,
-      workers: dto.workers ?? 1,
+      workers: dto.workers ?? 2,
       maxRepos: dto.maxRepos,
       staleTimeoutSeconds: dto.staleTimeoutSeconds ?? 3600,
     });
@@ -54,13 +64,27 @@ export class ScanController {
   // on demand instead of waiting for it to come up in the GH Archive feed.
   @Post('repo')
   @UseGuards(AdminGuard)
-  async scanRepo(@Body() dto: ScanRepoDto): Promise<{ repoId: number; jobId: string }> {
+  async scanRepo(
+    @Body() dto: ScanRepoDto,
+  ): Promise<{ repoId: number; jobId: string }> {
     if (!dto.owner || !dto.name) {
       throw new BadRequestException('owner and name are required');
     }
-    const result = await this.adminScanRepo.execute(dto.owner, dto.name);
+    if (
+      dto.secretType !== undefined &&
+      !Object.values(ESecretType).includes(dto.secretType)
+    ) {
+      throw new BadRequestException('Unsupported rescan secret type');
+    }
+    const result = await this.adminScanRepo.execute(
+      dto.owner,
+      dto.name,
+      dto.secretType,
+    );
     if (result === 'not-found') {
-      throw new NotFoundException(`GitHub repo ${dto.owner}/${dto.name} not found`);
+      throw new NotFoundException(
+        `GitHub repo ${dto.owner}/${dto.name} not found`,
+      );
     }
     return result;
   }

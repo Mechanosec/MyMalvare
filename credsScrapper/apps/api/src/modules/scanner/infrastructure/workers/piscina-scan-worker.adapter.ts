@@ -11,6 +11,8 @@ import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { TScanMessage } from './types/scan-message.type';
 import { SCAN_WORKER_POOL_SIZE } from './pool-size';
 import { IScanResumeOptions } from '../../application/types/scan-checkpoint.type';
+import { IScanExecutionOptions } from '../../application/types/scan-budget.type';
+import { EScanPhase } from '../../domain/constant/scan-phase.constant';
 
 @Injectable()
 export class PiscinaScanWorkerAdapter
@@ -24,28 +26,39 @@ export class PiscinaScanWorkerAdapter
   // than pattern-matching the path string itself, so this substitution
   // can never misfire in a real deployment whose checkout path happens
   // to contain "/src/" earlier than the intended segment.
-  private readonly pool = new Piscina({
-    filename: path.resolve(
-      process.env.JEST_WORKER_ID !== undefined
-        ? __dirname.replace(
-            `${path.sep}src${path.sep}`,
-            `${path.sep}dist${path.sep}`,
-          )
-        : __dirname,
-      'scan.worker.js',
-    ),
-    maxThreads: SCAN_WORKER_POOL_SIZE,
-  });
+  private readonly pool: Piscina;
+
+  constructor(options?: { maxThreads?: number }) {
+    super();
+    this.pool = new Piscina({
+      filename: path.resolve(
+        process.env.JEST_WORKER_ID !== undefined
+          ? __dirname.replace(
+              `${path.sep}src${path.sep}`,
+              `${path.sep}dist${path.sep}`,
+            )
+          : __dirname,
+        'scan.worker.js',
+      ),
+      maxThreads: options?.maxThreads ?? SCAN_WORKER_POOL_SIZE,
+    });
+  }
 
   async run(
     repoRef: IRepoRef,
     cloneSource: string,
     workdir: string,
     onEvent: (event: IScanJobEvent) => void,
-    resume?: IScanResumeOptions,
+    options?: IScanResumeOptions | IScanExecutionOptions,
   ): Promise<TScanJobResult> {
     const { port1, port2 } = new MessageChannel();
+    const cancellation = new MessageChannel();
     const abort = new AbortController();
+    const cancelWorker = () => cancellation.port1.postMessage('abort');
+    if (options && 'phase' in options) {
+      options.signal.addEventListener('abort', cancelWorker, { once: true });
+      if (options.signal.aborted) cancelWorker();
+    }
     const delivered = new Promise<void>((resolve, reject) => {
       port1.on('message', (message: TScanMessage) => {
         try {
@@ -67,14 +80,27 @@ export class PiscinaScanWorkerAdapter
     try {
       const [result] = await Promise.all([
         this.pool.run(
-          { repoRef, cloneSource, workdir, port: port2, resume },
-          { transferList: [port2], signal: abort.signal },
+          {
+            repoRef,
+            cloneSource,
+            workdir,
+            port: port2,
+            cancelPort: cancellation.port2,
+            options:
+              options && 'phase' in options
+                ? { ...options, signal: undefined }
+                : options,
+          },
+          { transferList: [port2, cancellation.port2], signal: abort.signal },
         ) as Promise<TScanJobResult>,
         delivered,
       ]);
       return result;
     } finally {
+      if (options && 'phase' in options)
+        options.signal.removeEventListener('abort', cancelWorker);
       port1.close();
+      cancellation.port1.close();
     }
   }
 

@@ -2,6 +2,10 @@ import { StateRepositoryPort } from '../../../../src/modules/scanner/application
 import { ECandidateStatus } from '../../../../src/modules/scanner/domain/constant/candidate-status.constant';
 import { EFindingStatus } from '../../../../src/modules/scanner/domain/constant/finding-status.constant';
 import { EScanStatus } from '../../../../src/modules/scanner/domain/constant/scan-status.constant';
+import {
+  EScanPhase,
+  EScanPhaseStatus,
+} from '../../../../src/modules/scanner/domain/constant/scan-phase.constant';
 import { ESecretType } from '../../../../src/modules/scanner/domain/constant/secret-type.constant';
 import {
   IFindingInput,
@@ -15,6 +19,11 @@ import {
 import { IQueueStatus } from '../../../../src/modules/scanner/domain/types/queue-status.type';
 import { IRepoRef } from '../../../../src/modules/scanner/domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../../../src/modules/scanner/domain/types/scanned-repo-record.type';
+import {
+  ICompletedScanPhase,
+  IInterruptedScanPhase,
+  IScanPhaseRecord,
+} from '../../../../src/modules/scanner/domain/types/scan-phase-record.type';
 import { parseLeakCommits } from '../../../../src/modules/scanner/infrastructure/persistence/prisma-state.mapper';
 
 interface CandidateRow extends IRepoRef {
@@ -37,6 +46,7 @@ export class FakeStateRepository extends StateRepositoryPort {
   }
   readonly candidates = new Map<number, CandidateRow>();
   readonly scanned = new Map<number, ScannedRow>();
+  readonly phases = new Map<string, IScanPhaseRecord>();
   readonly findings: Array<{
     repoId: number;
     owner: string;
@@ -51,6 +61,137 @@ export class FakeStateRepository extends StateRepositoryPort {
     checkedAt: Date | null;
     leakCommits: string;
   }> = [];
+
+  private phaseKey(repoId: number, phase: EScanPhase): string {
+    return `${repoId}:${phase}`;
+  }
+
+  async schedulePhase(
+    repoId: number,
+    phase: EScanPhase,
+    targetSha: string,
+  ): Promise<void> {
+    const previous = this.phases.get(this.phaseKey(repoId, phase));
+    this.phases.set(this.phaseKey(repoId, phase), {
+      repoId,
+      phase,
+      status: EScanPhaseStatus.PENDING,
+      targetSha,
+      completedSha: previous?.completedSha ?? null,
+      scannerVersion: previous?.scannerVersion ?? null,
+      startedAt: null,
+      completedAt: null,
+      reason: null,
+      retryCount: previous?.retryCount ?? 0,
+    });
+  }
+
+  async claimPhase(
+    repoId: number,
+    phase: EScanPhase,
+    targetSha: string,
+  ): Promise<boolean> {
+    const key = this.phaseKey(repoId, phase);
+    const record = this.phases.get(key);
+    if (
+      !record ||
+      record.status !== EScanPhaseStatus.PENDING ||
+      record.targetSha !== targetSha
+    )
+      return false;
+    this.phases.set(key, {
+      ...record,
+      status: EScanPhaseStatus.RUNNING,
+      startedAt: new Date(),
+    });
+    return true;
+  }
+
+  async getPhase(repoId: number, phase: EScanPhase) {
+    return this.phases.get(this.phaseKey(repoId, phase)) ?? null;
+  }
+
+  async listPendingPhases(phase: EScanPhase) {
+    return [...this.phases.values()].filter(
+      (record) =>
+        record.phase === phase && record.status === EScanPhaseStatus.PENDING,
+    );
+  }
+
+  async markPhaseDone(
+    repoId: number,
+    phase: EScanPhase,
+    result: ICompletedScanPhase,
+  ): Promise<void> {
+    this.phases.set(this.phaseKey(repoId, phase), {
+      repoId,
+      phase,
+      status: EScanPhaseStatus.DONE,
+      targetSha: result.targetSha,
+      completedSha: result.completedSha,
+      scannerVersion: result.scannerVersion,
+      startedAt: null,
+      completedAt: new Date(),
+      reason: null,
+      retryCount: 0,
+    });
+    if (phase === EScanPhase.HEAD) await this.markDone(repoId);
+  }
+
+  async markPhaseIncomplete(
+    repoId: number,
+    phase: EScanPhase,
+    result: IInterruptedScanPhase,
+  ): Promise<void> {
+    this.markPhaseInterrupted(
+      repoId,
+      phase,
+      result,
+      EScanPhaseStatus.INCOMPLETE,
+    );
+  }
+
+  async markPhaseFailed(
+    repoId: number,
+    phase: EScanPhase,
+    result: IInterruptedScanPhase,
+  ): Promise<void> {
+    this.markPhaseInterrupted(repoId, phase, result, EScanPhaseStatus.FAILED);
+  }
+
+  async markPhaseCancelled(
+    repoId: number,
+    phase: EScanPhase,
+    result: IInterruptedScanPhase,
+  ): Promise<void> {
+    this.markPhaseInterrupted(
+      repoId,
+      phase,
+      result,
+      EScanPhaseStatus.CANCELLED,
+    );
+  }
+
+  private markPhaseInterrupted(
+    repoId: number,
+    phase: EScanPhase,
+    result: IInterruptedScanPhase,
+    status: EScanPhaseStatus,
+  ): void {
+    const previous = this.phases.get(this.phaseKey(repoId, phase));
+    this.phases.set(this.phaseKey(repoId, phase), {
+      repoId,
+      phase,
+      status,
+      targetSha: result.targetSha,
+      completedSha: previous?.completedSha ?? null,
+      scannerVersion: previous?.scannerVersion ?? null,
+      startedAt: previous?.startedAt ?? null,
+      completedAt: new Date(),
+      reason: result.reason,
+      retryCount: previous?.retryCount ?? 0,
+    });
+  }
 
   async addCandidate(
     repoId: number,
@@ -205,6 +346,18 @@ export class FakeStateRepository extends StateRepositoryPort {
         finding.lineNumber,
         finding.context,
       );
+    }
+  }
+
+  async resetTestResults(
+    repoId: number,
+    secretTypes: readonly ESecretType[],
+  ): Promise<void> {
+    for (const row of this.findings) {
+      if (row.repoId === repoId && secretTypes.includes(row.secretType)) {
+        row.status = EFindingStatus.UNKNOWN;
+        row.checkedAt = null;
+      }
     }
   }
 
@@ -378,6 +531,10 @@ export class FakeStateRepository extends StateRepositoryPort {
       retryCount: row.retryCount ?? 0,
       findingsCount: this.findings.filter((f) => f.repoId === row.repoId)
         .length,
+      headPhase:
+        this.phases.get(this.phaseKey(row.repoId, EScanPhase.HEAD)) ?? null,
+      historyPhase:
+        this.phases.get(this.phaseKey(row.repoId, EScanPhase.HISTORY)) ?? null,
     }));
   }
 }

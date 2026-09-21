@@ -196,8 +196,8 @@ export function startScan(body: IStartScanBody): Promise<{ jobId: string }> {
   return post<{ jobId: string }>('/scan', body);
 }
 
-export function startScanRepo(owner: string, name: string): Promise<{ repoId: number; jobId: string }> {
-  return post<{ repoId: number; jobId: string }>('/scan/repo', { owner, name });
+export function startScanRepo(owner: string, name: string, secretType?: ESecretType): Promise<{ repoId: number; jobId: string }> {
+  return post<{ repoId: number; jobId: string }>('/scan/repo', { owner, name, ...(secretType ? { secretType } : {}) });
 }
 
 export function fetchJob(jobId: string): Promise<IJobState> {
@@ -232,6 +232,6 @@ export function decideRepoAuthorization(
   return patch<IRepoAuthorization>(`/repo-authorizations/${id}`, { status, adminNote });
 }
 
-export function scanMyRepo(owner: string, name: string): Promise<{ repoId: number; jobId: string }> {
-  return post<{ repoId: number; jobId: string }>('/repo-authorizations/mine/scan-repo', { owner, name });
+export function scanMyRepo(owner: string, name: string, secretType?: ESecretType): Promise<{ repoId: number; jobId: string }> {
+  return post<{ repoId: number; jobId: string }>('/repo-authorizations/mine/scan-repo', { owner, name, ...(secretType ? { secretType } : {}) });
 }

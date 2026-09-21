@@ -95,6 +95,24 @@ describe('ProgressPanel', () => {
     expect(screen.getByText(/scan: octocat\/repo1 - done, 0 findings total/)).toBeInTheDocument();
   });
 
+  it('notifies completion once even if the socket repeats the final event', async () => {
+    const done = vi.fn();
+    render(<ProgressPanel jobId="job-1" onDone={done} />);
+    await act(async () => {});
+    const event = { jobId: 'job-1', status: EJobStatus.DONE, message: 'finished' };
+    act(() => { handlers.get('job:job-1')?.(event); });
+    act(() => { handlers.get('job:job-1')?.(event); });
+    expect(done).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not notify successful completion when a job fails', async () => {
+    const done = vi.fn();
+    render(<ProgressPanel jobId="job-1" onDone={done} />);
+    await act(async () => {});
+    act(() => { handlers.get('job:job-1')?.({ jobId: 'job-1', status: EJobStatus.FAILED, message: 'failed' }); });
+    expect(done).not.toHaveBeenCalled();
+  });
+
   it('does not show a Stop button unless showStopButton is passed', () => {
     render(<ProgressPanel jobId="job-1" />);
 

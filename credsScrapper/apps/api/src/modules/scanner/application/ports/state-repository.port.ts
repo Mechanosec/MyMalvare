@@ -12,6 +12,12 @@ import {
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type';
+import { EScanPhase } from '../../domain/constant/scan-phase.constant';
+import {
+  ICompletedScanPhase,
+  IInterruptedScanPhase,
+  IScanPhaseRecord,
+} from '../../domain/types/scan-phase-record.type';
 import { IScanCheckpoint } from '../types/scan-checkpoint.type';
 
 // Abstract class rather than an interface: the class itself doubles as
@@ -41,6 +47,49 @@ export abstract class StateRepositoryPort {
   ): Promise<void>;
 
   abstract getScanCheckpoint(repoId: number): Promise<IScanCheckpoint | null>;
+
+  abstract schedulePhase(
+    repoId: number,
+    phase: EScanPhase,
+    targetSha: string,
+  ): Promise<void>;
+
+  abstract claimPhase(
+    repoId: number,
+    phase: EScanPhase,
+    targetSha: string,
+  ): Promise<boolean>;
+
+  abstract getPhase(
+    repoId: number,
+    phase: EScanPhase,
+  ): Promise<IScanPhaseRecord | null>;
+
+  abstract listPendingPhases(phase: EScanPhase): Promise<IScanPhaseRecord[]>;
+
+  abstract markPhaseDone(
+    repoId: number,
+    phase: EScanPhase,
+    result: ICompletedScanPhase,
+  ): Promise<void>;
+
+  abstract markPhaseIncomplete(
+    repoId: number,
+    phase: EScanPhase,
+    result: IInterruptedScanPhase,
+  ): Promise<void>;
+
+  abstract markPhaseFailed(
+    repoId: number,
+    phase: EScanPhase,
+    result: IInterruptedScanPhase,
+  ): Promise<void>;
+
+  abstract markPhaseCancelled(
+    repoId: number,
+    phase: EScanPhase,
+    result: IInterruptedScanPhase,
+  ): Promise<void>;
 
   abstract markFailed(repoId: number, reason: string): Promise<void>;
 
@@ -89,6 +138,12 @@ export abstract class StateRepositoryPort {
     owner: string,
     name: string,
     findings: readonly IFindingInput[],
+  ): Promise<void>;
+
+  /** Clear prior live-test results only for the successfully rescanned repo/service. */
+  abstract resetTestResults(
+    repoId: number,
+    secretTypes: readonly ESecretType[],
   ): Promise<void>;
 
   abstract updateFindingStatus(

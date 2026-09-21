@@ -1,3 +1,4 @@
+import { ESecretType } from '../../domain/constant/secret-type.constant';
 import { StateRepositoryPort } from '../ports/state-repository.port';
 import { GithubRepoLookupPort } from '../ports/github-repo-lookup.port';
 import { JobQueuePort } from '../ports/job-queue.port';
@@ -16,7 +17,19 @@ export class AdminScanRepoUseCase {
     private readonly workdirJoiner: WorkdirJoinerPort,
   ) {}
 
-  async execute(owner: string, name: string): Promise<{ repoId: number; jobId: string } | 'not-found'> {
-    return enqueueRepoScan(this.state, this.githubLookup, this.jobQueue, this.workdirJoiner, owner, name);
+  async execute(
+    owner: string,
+    name: string,
+    secretType?: ESecretType,
+  ): Promise<{ repoId: number; jobId: string } | 'not-found'> {
+    return enqueueRepoScan(
+      this.state,
+      this.githubLookup,
+      this.jobQueue,
+      this.workdirJoiner,
+      owner,
+      name,
+      secretType,
+    );
   }
 }

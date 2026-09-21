@@ -12,7 +12,9 @@ describe('SCAN_WORKER_POOL_SIZE', () => {
     delete process.env.SCAN_WORKER_POOL_SIZE;
     require('node:os').cpus = () => new Array(16).fill({});
     jest.resetModules();
-    const { SCAN_WORKER_POOL_SIZE } = require('../../../../../src/modules/scanner/infrastructure/workers/pool-size');
+    const {
+      SCAN_WORKER_POOL_SIZE,
+    } = require('../../../../../src/modules/scanner/infrastructure/workers/pool-size');
     expect(SCAN_WORKER_POOL_SIZE).toBe(4);
   });
 
@@ -20,14 +22,29 @@ describe('SCAN_WORKER_POOL_SIZE', () => {
     delete process.env.SCAN_WORKER_POOL_SIZE;
     require('node:os').cpus = () => new Array(2).fill({});
     jest.resetModules();
-    const { SCAN_WORKER_POOL_SIZE } = require('../../../../../src/modules/scanner/infrastructure/workers/pool-size');
+    const {
+      SCAN_WORKER_POOL_SIZE,
+    } = require('../../../../../src/modules/scanner/infrastructure/workers/pool-size');
     expect(SCAN_WORKER_POOL_SIZE).toBe(2);
   });
 
   it('honors SCAN_WORKER_POOL_SIZE when set', () => {
     process.env.SCAN_WORKER_POOL_SIZE = '7';
     jest.resetModules();
-    const { SCAN_WORKER_POOL_SIZE } = require('../../../../../src/modules/scanner/infrastructure/workers/pool-size');
+    const {
+      SCAN_WORKER_POOL_SIZE,
+    } = require('../../../../../src/modules/scanner/infrastructure/workers/pool-size');
     expect(SCAN_WORKER_POOL_SIZE).toBe(7);
   });
+
+  it.each(['0', '-1', '1.5', 'not-a-number'])(
+    'rejects invalid worker pool size %s at startup',
+    (value) => {
+      process.env.SCAN_WORKER_POOL_SIZE = value;
+      jest.resetModules();
+      expect(() =>
+        require('../../../../../src/modules/scanner/infrastructure/workers/pool-size'),
+      ).toThrow('SCAN_WORKER_POOL_SIZE must be a positive integer');
+    },
+  );
 });

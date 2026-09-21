@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { GitCliAdapter } from '../../../src/modules/scanner/infrastructure/git/git-cli-adapter';
 import { FsScanCacheAdapter } from '../../../src/modules/scanner/infrastructure/fs/fs-scan-cache.adapter';
+import { EScanPhase } from '../../../src/modules/scanner/domain/constant/scan-phase.constant';
 import {
   IScanJobEvent,
   RunScanJobUseCase,
@@ -157,6 +158,20 @@ describe('Incremental scans (real Git and cache)', () => {
     const changed = await a.acquire(workdir, source + '-other');
     expect(changed.scannerVersion).not.toBe(first.scannerVersion);
     await changed.release();
+  });
+
+  it('allows HEAD and history leases for one repo at the same time in separate caches', async () => {
+    const adapter = new FsScanCacheAdapter();
+    const workdir = path.join(root, 'repo-phases');
+    const head = await adapter.acquire(workdir, source, EScanPhase.HEAD);
+    const history = await adapter.acquire(workdir, source, EScanPhase.HISTORY);
+    try {
+      expect(head.repoPath).not.toBe(history.repoPath);
+      expect(head.repoPath).toContain(`${path.sep}head${path.sep}`);
+      expect(history.repoPath).toContain(`${path.sep}history${path.sep}`);
+    } finally {
+      await Promise.all([head.release(), history.release()]);
+    }
   });
 
   it('evicts idle caches after seven days but never an actively locked cache', async () => {

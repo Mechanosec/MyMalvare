@@ -4,6 +4,8 @@ import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { PiscinaScanWorkerAdapter } from '../../../src/modules/scanner/infrastructure/workers/piscina-scan-worker.adapter';
+import { RescanRepositoryServiceUseCase } from '../../../src/modules/scanner/application/use-cases/rescan-repository-service.use-case';
+import { ESecretType } from '../../../src/modules/scanner/domain/constant/secret-type.constant';
 
 const execFileAsync = promisify(execFile);
 
@@ -43,6 +45,68 @@ describe('PiscinaScanWorkerAdapter (real worker threads)', () => {
     await adapter.close();
     await fs.rm(sourceRepo, { recursive: true, force: true });
     await fs.rm(workdir, { recursive: true, force: true });
+  });
+
+  it('rescans only the selected service at unchanged SHA through real Git and worker threads', async () => {
+    const source = await makeLocalRepoWithSecret();
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'service-rescan-'));
+    const key = {
+      type: 'service_account',
+      description: 'literal } brace',
+      private_key: 'synthetic-only',
+      client_email: 'fixture@example.invalid',
+    };
+    const state = { addFindings: jest.fn(), resetTestResults: jest.fn() };
+    const cache = {
+      acquire: async (_workdir: string, _source: string, phase = 'head') => ({
+        repoPath: path.join(dir, phase),
+        scannerVersion: 'fixture-v2',
+        release: async () => {},
+      }),
+    };
+    try {
+      await fs.writeFile(
+        path.join(source, 'fixture.json'),
+        JSON.stringify(key, null, 2),
+      );
+      await execFileAsync('git', ['-C', source, 'add', '.']);
+      await execFileAsync('git', [
+        '-C',
+        source,
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '-qm',
+        'synthetic JSON',
+      ]);
+      const useCase = new RescanRepositoryServiceUseCase(
+        adapter,
+        adapter,
+        cache,
+        state as never,
+      );
+      const options = {
+        repoRef: { repoId: 456, owner: 'local', name: 'fixture' },
+        cloneSource: source,
+        workdir: dir,
+        secretType: ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+      };
+      const first = await useCase.execute(options);
+      const second = await useCase.execute(options);
+      expect(first.status).toBe('done');
+      expect(second).toEqual(first);
+      expect(state.addFindings).toHaveBeenCalledTimes(4);
+      for (const call of state.addFindings.mock.calls) {
+        expect(call[3].length).toBeGreaterThan(0);
+        for (const finding of call[3]) {
+          expect(finding.secretType).toBe(ESecretType.GCP_SERVICE_ACCOUNT_KEY);
+          expect(JSON.parse(finding.secretValue)).toEqual(key);
+        }
+      }
+    } finally {
+      await fs.rm(source, { recursive: true, force: true });
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('passes the incremental checkpoint through the real worker boundary', async () => {

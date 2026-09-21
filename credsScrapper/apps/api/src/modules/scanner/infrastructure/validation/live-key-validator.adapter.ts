@@ -592,6 +592,45 @@ export class LiveKeyValidatorAdapter extends KeyValidatorPort {
     } catch (error) {
       const name =
         error && typeof error === 'object' && 'name' in error ? error.name : '';
+      const cause =
+        error && typeof error === 'object' && 'cause' in error
+          ? error.cause
+          : undefined;
+      const coded = cause && typeof cause === 'object' ? cause : error;
+      const code =
+        coded && typeof coded === 'object' && 'code' in coded
+          ? coded.code
+          : undefined;
+      switch (code) {
+        case 'ENOTFOUND':
+        case 'EAI_AGAIN':
+          return unknown(
+            'Inconclusive: provider hostname could not be resolved.',
+          );
+        case 'ECONNRESET':
+        case 'ECONNREFUSED':
+        case 'ENETUNREACH':
+        case 'EHOSTUNREACH':
+        case 'UND_ERR_SOCKET':
+          return unknown('Inconclusive: connection to provider failed.');
+        case 'CERT_HAS_EXPIRED':
+        case 'DEPTH_ZERO_SELF_SIGNED_CERT':
+        case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
+        case 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY':
+        case 'ERR_TLS_CERT_ALTNAME_INVALID':
+          return unknown(
+            'Inconclusive: provider TLS certificate could not be verified.',
+          );
+        case 'ETIMEDOUT':
+        case 'UND_ERR_CONNECT_TIMEOUT':
+        case 'UND_ERR_HEADERS_TIMEOUT':
+        case 'UND_ERR_BODY_TIMEOUT':
+          return unknown('Inconclusive: provider request timed out.');
+        case 'ERR_INVALID_CHAR':
+          return unknown(
+            'Skipped: credential cannot be used in an HTTP header.',
+          );
+      }
       return unknown(
         name === 'TimeoutError' || name === 'AbortError'
           ? 'Inconclusive: provider request timed out.'

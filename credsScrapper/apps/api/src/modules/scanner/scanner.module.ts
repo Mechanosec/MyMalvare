@@ -17,6 +17,13 @@ import { WorkdirCleanerPort } from './application/ports/workdir-cleaner.port';
 import { WorkdirJoinerPort } from './application/ports/workdir-joiner.port';
 import { ScanWorkerPort } from './application/ports/scan-worker.port';
 import { PiscinaScanWorkerAdapter } from './infrastructure/workers/piscina-scan-worker.adapter';
+import { HeadScanWorkerPort } from './application/ports/head-scan-worker.port';
+import { HistoryScanWorkerPort } from './application/ports/history-scan-worker.port';
+import { EScanPhase } from './domain/constant/scan-phase.constant';
+import {
+  HEAD_SCAN_WORKER_POOL_SIZE,
+  HISTORY_SCAN_WORKER_POOL_SIZE,
+} from './infrastructure/workers/pool-size';
 import { DiscoverReposUseCase } from './application/use-cases/discover-repos.use-case';
 import { GetFindingsRepoOptionsUseCase } from './application/use-cases/get-findings-repo-options.use-case';
 import { GetFindingsSecretTypeCountsUseCase } from './application/use-cases/get-findings-secret-type-counts.use-case';
@@ -27,6 +34,8 @@ import { GetScannedReposUseCase } from './application/use-cases/get-scanned-repo
 import { GetScanStatusUseCase } from './application/use-cases/get-scan-status.use-case';
 import { RunScanLoopUseCase } from './application/use-cases/run-scan-loop.use-case';
 import { ScanRepositoryUseCase } from './application/use-cases/scan-repository.use-case';
+import { ScanRepositoryPhaseUseCase } from './application/use-cases/scan-repository-phase.use-case';
+import { ReconcileScanPhasesUseCase } from './application/use-cases/reconcile-scan-phases.use-case';
 import { SetFindingStatusUseCase } from './application/use-cases/set-finding-status.use-case';
 import { GhArchiveHttpAdapter } from './infrastructure/discovery/gharchive-http-adapter';
 import { GithubApiRepoLookupAdapter } from './infrastructure/discovery/github-api-repo-lookup.adapter';
@@ -35,6 +44,7 @@ import { FsWorkdirJoinerAdapter } from './infrastructure/fs/fs-workdir-joiner.ad
 import { JobQueuePort } from './application/ports/job-queue.port';
 import { BullmqJobQueueAdapter } from './infrastructure/jobs/bullmq-job-queue.adapter';
 import { BullmqJobWorker } from './infrastructure/jobs/bullmq-job-worker';
+import { RescanRepositoryServiceUseCase } from './application/use-cases/rescan-repository-service.use-case';
 import { NestLoggerAdapter } from './infrastructure/logging/nest-logger.adapter';
 import { LiveKeyValidatorAdapter } from './infrastructure/validation/live-key-validator.adapter';
 import { PrismaService } from './infrastructure/persistence/prisma.service';
@@ -61,7 +71,24 @@ import { ScanController } from './presentation/scan.controller';
     PrismaService,
     { provide: ScanCachePort, useClass: FsScanCacheAdapter },
     { provide: StateRepositoryPort, useClass: PrismaStateRepository },
-    { provide: ScanWorkerPort, useClass: PiscinaScanWorkerAdapter },
+    {
+      provide: ScanWorkerPort,
+      useFactory: () => new PiscinaScanWorkerAdapter(),
+    },
+    {
+      provide: HeadScanWorkerPort,
+      useFactory: () =>
+        new PiscinaScanWorkerAdapter({
+          maxThreads: HEAD_SCAN_WORKER_POOL_SIZE,
+        }),
+    },
+    {
+      provide: HistoryScanWorkerPort,
+      useFactory: () =>
+        new PiscinaScanWorkerAdapter({
+          maxThreads: HISTORY_SCAN_WORKER_POOL_SIZE,
+        }),
+    },
     { provide: DiscoveryFeedPort, useClass: GhArchiveHttpAdapter },
     { provide: LoggerPort, useClass: NestLoggerAdapter },
     { provide: ProgressPort, useClass: ProgressGateway },
@@ -69,6 +96,17 @@ import { ScanController } from './presentation/scan.controller';
     { provide: WorkdirJoinerPort, useClass: FsWorkdirJoinerAdapter },
     { provide: JobQueuePort, useClass: BullmqJobQueueAdapter },
     BullmqJobWorker,
+    provideUseCase(
+      RescanRepositoryServiceUseCase,
+      [
+        HeadScanWorkerPort,
+        HistoryScanWorkerPort,
+        ScanCachePort,
+        StateRepositoryPort,
+      ],
+      (head, history, cache, state) =>
+        new RescanRepositoryServiceUseCase(head, history, cache, state),
+    ),
     provideUseCase(
       DiscoverReposUseCase,
       [DiscoveryFeedPort, StateRepositoryPort, LoggerPort],
@@ -87,15 +125,50 @@ import { ScanController } from './presentation/scan.controller';
         new ScanRepositoryUseCase(scanWorker, state, logger, cleaner, cache),
     ),
     provideUseCase(
+      ScanRepositoryPhaseUseCase,
+      [
+        HeadScanWorkerPort,
+        HistoryScanWorkerPort,
+        StateRepositoryPort,
+        LoggerPort,
+        WorkdirCleanerPort,
+        ScanCachePort,
+      ],
+      (headWorker, historyWorker, state, logger, cleaner, cache) =>
+        new ScanRepositoryPhaseUseCase(
+          headWorker,
+          historyWorker,
+          state,
+          logger,
+          cleaner,
+          cache,
+        ),
+    ),
+    provideUseCase(
+      ReconcileScanPhasesUseCase,
+      [StateRepositoryPort, JobQueuePort, WorkdirJoinerPort],
+      (state, jobs, joiner) =>
+        new ReconcileScanPhasesUseCase(state, jobs, joiner),
+    ),
+    provideUseCase(
       RunScanLoopUseCase,
       [
         StateRepositoryPort,
         ScanRepositoryUseCase,
         LoggerPort,
         WorkdirJoinerPort,
+        ScanRepositoryPhaseUseCase,
+        JobQueuePort,
       ],
-      (state, scanRepository, logger, joiner) =>
-        new RunScanLoopUseCase(state, scanRepository, logger, joiner),
+      (state, scanRepository, logger, joiner, phaseScanner, jobs) =>
+        new RunScanLoopUseCase(
+          state,
+          scanRepository,
+          logger,
+          joiner,
+          phaseScanner,
+          jobs,
+        ),
     ),
     provideUseCase(
       GetFindingsUseCase,

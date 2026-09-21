@@ -1,4 +1,17 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  NotFoundException,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { Request } from 'express';
 import { SubmitRepoAuthorizationUseCase } from '../application/use-cases/submit-repo-authorization.use-case';
 import { ListMyRepoAuthorizationsUseCase } from '../application/use-cases/list-my-repo-authorizations.use-case';
@@ -22,7 +35,10 @@ import { EFindingStatus } from '../../scanner/domain/constant/finding-status.con
 
 type TAuthedRequest = Request & { user: IAuthenticatedUser };
 
-function parseCsv<T>(value: string | undefined, map: (raw: string) => T = (raw) => raw as T): T[] | undefined {
+function parseCsv<T>(
+  value: string | undefined,
+  map: (raw: string) => T = (raw) => raw as T,
+): T[] | undefined {
   return value ? value.split(',').filter(Boolean).map(map) : undefined;
 }
 
@@ -52,7 +68,12 @@ export class RepoAuthorizationsController {
     @Body('name') name: string,
     @Body('note') note?: string,
   ) {
-    return this.submitRepoAuthorization.execute(req.user.id, owner, name, note ?? null);
+    return this.submitRepoAuthorization.execute(
+      req.user.id,
+      owner,
+      name,
+      note ?? null,
+    );
   }
 
   @Get('mine')
@@ -88,16 +109,30 @@ export class RepoAuthorizationsController {
 
   @Get('mine/testable-repos')
   @UseGuards(AuthGuard)
-  async testableRepos(@Req() req: TAuthedRequest, @Query('secretTypes') secretTypes?: string) {
-    return this.listMyTestableRepos.execute(req.user.id, parseCsv<ESecretType>(secretTypes));
+  async testableRepos(
+    @Req() req: TAuthedRequest,
+    @Query('secretTypes') secretTypes?: string,
+  ) {
+    return this.listMyTestableRepos.execute(
+      req.user.id,
+      parseCsv<ESecretType>(secretTypes),
+    );
   }
 
   @Get('mine/secret-type-counts')
   @UseGuards(AuthGuard)
-  async mySecretTypeCounts(@Req() req: TAuthedRequest, @Query('repoId') repoId: string) {
-    const result = await this.getMySecretTypeCounts.execute(req.user.id, Number(repoId));
+  async mySecretTypeCounts(
+    @Req() req: TAuthedRequest,
+    @Query('repoId') repoId: string,
+  ) {
+    const result = await this.getMySecretTypeCounts.execute(
+      req.user.id,
+      Number(repoId),
+    );
     if (result === null) {
-      throw new ForbiddenException('You do not have an approved authorization for this repository');
+      throw new ForbiddenException(
+        'You do not have an approved authorization for this repository',
+      );
     }
     return result;
   }
@@ -115,17 +150,37 @@ export class RepoAuthorizationsController {
       parseCsv<ESecretType>(secretTypes),
     );
     if (result === null) {
-      throw new ForbiddenException('You do not have an approved authorization for this repository');
+      throw new ForbiddenException(
+        'You do not have an approved authorization for this repository',
+      );
     }
     return result;
   }
 
   @Post('mine/scan-repo')
   @UseGuards(AuthGuard)
-  async scanRepo(@Req() req: TAuthedRequest, @Body('owner') owner: string, @Body('name') name: string) {
-    const result = await this.scanMyRepo.execute(req.user.id, owner, name);
+  async scanRepo(
+    @Req() req: TAuthedRequest,
+    @Body('owner') owner: string,
+    @Body('name') name: string,
+    @Body('secretType') secretType?: ESecretType,
+  ) {
+    if (
+      secretType !== undefined &&
+      !Object.values(ESecretType).includes(secretType)
+    ) {
+      throw new BadRequestException('Unsupported rescan secret type');
+    }
+    const result = await this.scanMyRepo.execute(
+      req.user.id,
+      owner,
+      name,
+      secretType,
+    );
     if (result === null) {
-      throw new ForbiddenException('You do not have an approved authorization for this repository');
+      throw new ForbiddenException(
+        'You do not have an approved authorization for this repository',
+      );
     }
     if (result === 'not-found') {
       throw new NotFoundException(`GitHub repo ${owner}/${name} not found`);
@@ -143,9 +198,15 @@ export class RepoAuthorizationsController {
     if (!Object.values(EFindingStatus).includes(status as EFindingStatus)) {
       throw new BadRequestException(`Invalid status: ${status}`);
     }
-    const ok = await this.setMyFindingStatus.execute(req.user.id, Number(id), status as EFindingStatus);
+    const ok = await this.setMyFindingStatus.execute(
+      req.user.id,
+      Number(id),
+      status as EFindingStatus,
+    );
     if (!ok) {
-      throw new ForbiddenException('This finding is not in one of your approved repositories');
+      throw new ForbiddenException(
+        'This finding is not in one of your approved repositories',
+      );
     }
     return { ok: true };
   }
@@ -153,9 +214,14 @@ export class RepoAuthorizationsController {
   @Post('mine/test-repo/:repoId')
   @UseGuards(AuthGuard)
   async testRepo(@Req() req: TAuthedRequest, @Param('repoId') repoId: string) {
-    const result = await this.testRepoFindings.execute(req.user.id, Number(repoId));
+    const result = await this.testRepoFindings.execute(
+      req.user.id,
+      Number(repoId),
+    );
     if (result === null) {
-      throw new ForbiddenException('You do not have an approved authorization for this repository');
+      throw new ForbiddenException(
+        'You do not have an approved authorization for this repository',
+      );
     }
     return result;
   }
@@ -165,7 +231,9 @@ export class RepoAuthorizationsController {
   async testOneFinding(@Req() req: TAuthedRequest, @Param('id') id: string) {
     const result = await this.testFinding.execute(req.user.id, Number(id));
     if (result === null) {
-      throw new ForbiddenException('This finding is not in one of your approved repositories');
+      throw new ForbiddenException(
+        'This finding is not in one of your approved repositories',
+      );
     }
     return result;
   }
@@ -173,10 +241,17 @@ export class RepoAuthorizationsController {
   @Get()
   @UseGuards(AdminGuard)
   async all(@Query('status') status?: string) {
-    if (status && !Object.values(ERepoAuthorizationStatus).includes(status as ERepoAuthorizationStatus)) {
+    if (
+      status &&
+      !Object.values(ERepoAuthorizationStatus).includes(
+        status as ERepoAuthorizationStatus,
+      )
+    ) {
       throw new BadRequestException(`Invalid status: ${status}`);
     }
-    return this.listAllRepoAuthorizations.execute(status as ERepoAuthorizationStatus | undefined);
+    return this.listAllRepoAuthorizations.execute(
+      status as ERepoAuthorizationStatus | undefined,
+    );
   }
 
   @Patch(':id')
@@ -187,7 +262,11 @@ export class RepoAuthorizationsController {
     @Body('status') status: string,
     @Body('adminNote') adminNote?: string,
   ) {
-    if (!Object.values(ERepoAuthorizationStatus).includes(status as ERepoAuthorizationStatus)) {
+    if (
+      !Object.values(ERepoAuthorizationStatus).includes(
+        status as ERepoAuthorizationStatus,
+      )
+    ) {
       throw new BadRequestException(`Invalid status: ${status}`);
     }
     const result = await this.decideRepoAuthorization.execute(

@@ -111,6 +111,28 @@ describe('scanText', () => {
     expect(match?.context).toBeNull();
   });
 
+  it('detects an AWS credential pair in a quoted JSON field and a commit diff', () => {
+    const accessId = 'AKIAABCDEFGH12345678';
+    const secret = 'q'.repeat(40);
+    for (const text of [
+      JSON.stringify({
+        aws_access_key_id: accessId,
+        aws_secret_access_key: secret,
+      }),
+      `+  "aws_access_key_id": "${accessId}"\n+  "aws_secret_access_key": "${secret}"`,
+    ]) {
+      const findings = scanText(text, [
+        ESecretType.AWS_ACCESS_KEY_ID,
+        ESecretType.AWS_SECRET_ACCESS_KEY,
+      ]);
+      expect(findings.map((finding) => finding.secretType)).toEqual([
+        ESecretType.AWS_ACCESS_KEY_ID,
+        ESecretType.AWS_SECRET_ACCESS_KEY,
+      ]);
+      expect(findings[1].secretValue).toBe(secret);
+    }
+  });
+
   it('a pattern match has no context', () => {
     const findings = scanText("aws_key = 'AKIAABCDEFGH12345678'\n");
     const match = findings.find(
@@ -245,6 +267,24 @@ describe('scanText', () => {
       (f) => f.secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY,
     );
     expect(gcpFinding?.secretValue).toBe('"type": "service_account"');
+  });
+
+  it.each([
+    'literal } brace',
+    'literal { brace',
+    'escaped " quote and } brace',
+  ])('preserves complete JSON containing %s inside a string', (description) => {
+    const key = {
+      type: 'service_account',
+      description,
+      private_key: 'synthetic-only',
+      client_email: 'fixture@example.invalid',
+    };
+    const finding = scanText(JSON.stringify(key)).find(
+      (f) => f.secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+    );
+    expect(finding).toBeDefined();
+    expect(JSON.parse(finding!.secretValue)).toEqual(key);
   });
 
   it("does not skip a real GCP key as a placeholder just because its project_id says 'test'", () => {

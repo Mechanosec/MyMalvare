@@ -5,6 +5,7 @@ import { StateRepositoryPort } from '../../../../../src/modules/scanner/applicat
 import { GithubRepoLookupPort } from '../../../../../src/modules/scanner/application/ports/github-repo-lookup.port';
 import { WorkdirJoinerPort } from '../../../../../src/modules/scanner/application/ports/workdir-joiner.port';
 import { JobQueuePort } from '../../../../../src/modules/scanner/application/ports/job-queue.port';
+import { ESecretType } from '../../../../../src/modules/scanner/domain/constant/secret-type.constant';
 
 class FakeJobQueue extends JobQueuePort {
   enqueued: Array<{ type: string; payload: unknown }> = [];
@@ -40,29 +41,68 @@ function makeApproval(overrides: Partial<Record<string, unknown>> = {}) {
 describe('ScanMyRepoUseCase', () => {
   it('returns null when the user has no approved authorization for the repo', async () => {
     const authorizations = {
-      listByUser: jest.fn().mockResolvedValue([makeApproval({ status: ERepoAuthorizationStatus.PENDING })]),
+      listByUser: jest
+        .fn()
+        .mockResolvedValue([
+          makeApproval({ status: ERepoAuthorizationStatus.PENDING }),
+        ]),
     } as unknown as RepoAuthorizationRepositoryPort;
-    const state = { startRepoScan: jest.fn() } as unknown as StateRepositoryPort;
-    const githubLookup = { resolveRepoId: jest.fn() } as unknown as GithubRepoLookupPort;
+    const state = {
+      startRepoScan: jest.fn(),
+    } as unknown as StateRepositoryPort;
+    const githubLookup = {
+      resolveRepoId: jest.fn(),
+    } as unknown as GithubRepoLookupPort;
     const jobQueue = new FakeJobQueue();
-    const workdirJoiner = { join: jest.fn(), ensureDir: jest.fn() } as unknown as WorkdirJoinerPort;
-    const useCase = new ScanMyRepoUseCase(authorizations, state, githubLookup, jobQueue, workdirJoiner);
+    const workdirJoiner = {
+      join: jest.fn(),
+      ensureDir: jest.fn(),
+    } as unknown as WorkdirJoinerPort;
+    const useCase = new ScanMyRepoUseCase(
+      authorizations,
+      state,
+      githubLookup,
+      jobQueue,
+      workdirJoiner,
+    );
 
     const result = await useCase.execute(1, 'acme', 'widgets');
 
     expect(result).toBeNull();
     expect(githubLookup.resolveRepoId).not.toHaveBeenCalled();
+    expect(
+      await useCase.execute(
+        1,
+        'acme',
+        'widgets',
+        ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+      ),
+    ).toBeNull();
+    expect(jobQueue.enqueued).toHaveLength(0);
   });
 
   it("returns 'not-found' when GitHub has no such repo", async () => {
     const authorizations = {
       listByUser: jest.fn().mockResolvedValue([makeApproval()]),
     } as unknown as RepoAuthorizationRepositoryPort;
-    const state = { startRepoScan: jest.fn() } as unknown as StateRepositoryPort;
-    const githubLookup = { resolveRepoId: jest.fn().mockResolvedValue(null) } as unknown as GithubRepoLookupPort;
+    const state = {
+      startRepoScan: jest.fn(),
+    } as unknown as StateRepositoryPort;
+    const githubLookup = {
+      resolveRepoId: jest.fn().mockResolvedValue(null),
+    } as unknown as GithubRepoLookupPort;
     const jobQueue = new FakeJobQueue();
-    const workdirJoiner = { join: jest.fn(), ensureDir: jest.fn() } as unknown as WorkdirJoinerPort;
-    const useCase = new ScanMyRepoUseCase(authorizations, state, githubLookup, jobQueue, workdirJoiner);
+    const workdirJoiner = {
+      join: jest.fn(),
+      ensureDir: jest.fn(),
+    } as unknown as WorkdirJoinerPort;
+    const useCase = new ScanMyRepoUseCase(
+      authorizations,
+      state,
+      githubLookup,
+      jobQueue,
+      workdirJoiner,
+    );
 
     const result = await useCase.execute(1, 'acme', 'widgets');
 
@@ -72,16 +112,28 @@ describe('ScanMyRepoUseCase', () => {
 
   it('enqueues a scan-repo job and returns its jobId immediately, without awaiting the scan', async () => {
     const authorizations = {
-      listByUser: jest.fn().mockResolvedValue([makeApproval({ owner: 'Acme', name: 'Widgets' })]),
+      listByUser: jest
+        .fn()
+        .mockResolvedValue([makeApproval({ owner: 'Acme', name: 'Widgets' })]),
     } as unknown as RepoAuthorizationRepositoryPort;
-    const state = { startRepoScan: jest.fn() } as unknown as StateRepositoryPort;
-    const githubLookup = { resolveRepoId: jest.fn().mockResolvedValue(42) } as unknown as GithubRepoLookupPort;
+    const state = {
+      startRepoScan: jest.fn(),
+    } as unknown as StateRepositoryPort;
+    const githubLookup = {
+      resolveRepoId: jest.fn().mockResolvedValue(42),
+    } as unknown as GithubRepoLookupPort;
     const jobQueue = new FakeJobQueue();
     const workdirJoiner = {
       join: jest.fn().mockReturnValue('workdir/repo-42'),
       ensureDir: jest.fn(),
     } as unknown as WorkdirJoinerPort;
-    const useCase = new ScanMyRepoUseCase(authorizations, state, githubLookup, jobQueue, workdirJoiner);
+    const useCase = new ScanMyRepoUseCase(
+      authorizations,
+      state,
+      githubLookup,
+      jobQueue,
+      workdirJoiner,
+    );
 
     const result = await useCase.execute(1, 'acme', 'widgets');
 
@@ -94,5 +146,20 @@ describe('ScanMyRepoUseCase', () => {
       workdir: 'workdir/repo-42',
     });
     expect(result).toEqual({ repoId: 42, jobId: 'fake-job-id' });
+    (state.startRepoScan as jest.Mock).mockClear();
+    await useCase.execute(
+      1,
+      'acme',
+      'widgets',
+      ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+    );
+    expect(jobQueue.enqueued[1]).toMatchObject({
+      type: 'rescan-service',
+      payload: {
+        secretType: ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+        repoRef: { repoId: 42 },
+      },
+    });
+    expect(state.startRepoScan).not.toHaveBeenCalled();
   });
 });

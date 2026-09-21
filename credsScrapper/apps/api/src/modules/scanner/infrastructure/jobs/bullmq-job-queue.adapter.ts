@@ -1,5 +1,6 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { Queue } from 'bullmq';
+import Redis from 'ioredis';
 import { JobQueuePort } from '../../application/ports/job-queue.port';
 import {
   EJobStatus,
@@ -8,6 +9,9 @@ import {
 import { IJobState } from '../../domain/types/job-state.type';
 import { IJobProgressEvent } from '../../domain/types/job-progress-event.type';
 import { redisConnection, SCANNER_QUEUE_NAME } from './bullmq-connection';
+import { HEAD_QUEUE, HISTORY_QUEUE } from './bullmq-connection';
+import { EScanPhase } from '../../domain/constant/scan-phase.constant';
+import { IRepoRef } from '../../domain/types/repo-ref.type';
 
 // BullMQ job names double as the type tag this app already used
 // (EJobType) for 'discover' and the admin bulk 'scan' loop; a
@@ -41,13 +45,19 @@ export class BullmqJobQueueAdapter
   private readonly queue = new Queue(SCANNER_QUEUE_NAME, {
     connection: redisConnection,
   });
+  private readonly headQueue = new Queue(HEAD_QUEUE, {
+    connection: redisConnection,
+  });
+  private readonly historyQueue = new Queue(HISTORY_QUEUE, {
+    connection: redisConnection,
+  });
+  private readonly redis = new Redis(redisConnection.url, {
+    maxRetriesPerRequest: null,
+  });
 
-  // Stop requests are process-local: main.ts boots one Nest process, and
-  // this adapter is the same singleton instance BullmqJobWorker injects
-  // (both live in ScannerModule) - no cross-process coordination needed,
-  // so a plain in-memory Set is simpler and correct here. Would need to
-  // move to a shared store (e.g. a Redis key) only if the worker were
-  // ever split into its own process.
+  // Keep the local Set for the common single-process path and mirror requests
+  // to Redis so control, HEAD, and history workers also observe them when the
+  // deployment is split across processes.
   private readonly stopRequests = new Set<string>();
 
   constructor() {
@@ -65,8 +75,32 @@ export class BullmqJobQueueAdapter
     return job.id;
   }
 
+  async enqueuePhase(
+    phase: EScanPhase,
+    repoRef: IRepoRef,
+    targetSha: string,
+    payload: unknown,
+  ): Promise<string> {
+    const queue =
+      phase === EScanPhase.HEAD ? this.headQueue : this.historyQueue;
+    const id = `${repoRef.repoId}-${targetSha}`;
+    const existing = await queue.getJob(id);
+    if (existing) {
+      const state = await existing.getState();
+      if (state === 'completed' || state === 'failed') await existing.remove();
+    }
+    const job = await queue.add(phase, payload, {
+      jobId: id,
+      removeOnComplete: { age: 3600, count: 1000 },
+      removeOnFail: { age: 86400, count: 1000 },
+    });
+    if (!job.id) throw new Error('BullMQ did not assign a phase job id');
+    return `${phase}:${job.id}`;
+  }
+
   async getJob(jobId: string): Promise<IJobState | null> {
-    const job = await this.queue.getJob(jobId);
+    const { queue, internalId } = this.resolveJob(jobId);
+    const job = await queue.getJob(internalId);
     if (!job) {
       return null;
     }
@@ -90,10 +124,24 @@ export class BullmqJobQueueAdapter
 
   async requestStop(jobId: string): Promise<void> {
     this.stopRequests.add(jobId);
+    await this.redis.set(`scanner:stop:${jobId}`, '1', 'EX', 86400);
   }
 
   async isStopRequested(jobId: string): Promise<boolean> {
-    return this.stopRequests.has(jobId);
+    if (this.stopRequests.has(jobId)) return true;
+    return (await this.redis.get(`scanner:stop:${jobId}`)) === '1';
+  }
+
+  private resolveJob(jobId: string): { queue: Queue; internalId: string } {
+    const separator = jobId.indexOf(':');
+    if (separator < 0) return { queue: this.queue, internalId: jobId };
+    const prefix = jobId.slice(0, separator);
+    const internalId = jobId.slice(separator + 1);
+    if (prefix === EScanPhase.HEAD)
+      return { queue: this.headQueue, internalId };
+    if (prefix === EScanPhase.HISTORY)
+      return { queue: this.historyQueue, internalId };
+    throw new Error(`Unknown job prefix: ${prefix}`);
   }
 
   private mapStatus(bullState: string): EJobStatus {
@@ -111,7 +159,12 @@ export class BullmqJobQueueAdapter
   }
 
   async close(): Promise<void> {
-    await this.queue.close();
+    await Promise.all([
+      this.queue.close(),
+      this.headQueue.close(),
+      this.historyQueue.close(),
+      this.redis.quit(),
+    ]);
   }
 
   async onModuleDestroy(): Promise<void> {

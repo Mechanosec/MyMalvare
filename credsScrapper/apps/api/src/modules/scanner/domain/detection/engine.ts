@@ -205,7 +205,19 @@ function extractGcpServiceAccountJson(
 
   let depth = 0;
   let closeBrace = -1;
+  let inString = false;
+  let escaped = false;
   for (let i = openBrace; i < searchEnd; i += 1) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (text[i] === '\\') escaped = true;
+      else if (text[i] === '"') inString = false;
+      continue;
+    }
+    if (text[i] === '"') {
+      inString = true;
+      continue;
+    }
     if (text[i] === '{') depth += 1;
     else if (text[i] === '}') {
       depth -= 1;
@@ -238,13 +250,17 @@ function extractGcpServiceAccountJson(
   };
 }
 
-export function scanText(rawText: string): IFinding[] {
+export function scanText(
+  rawText: string,
+  secretTypes?: readonly ESecretType[],
+): IFinding[] {
   const text = stripMimeBase64Blocks(stripDataUriBlobs(rawText));
   const lineOffsets = buildLineOffsets(text);
   const findings: IFinding[] = [];
   const matchedSpans: Array<[number, number]> = [];
 
   for (const { secretType, pattern, requiredMarker } of PATTERNS) {
+    if (secretTypes && !secretTypes.includes(secretType)) continue;
     if (requiredMarker instanceof RegExp) requiredMarker.lastIndex = 0;
     if (
       (typeof requiredMarker === 'string' && !text.includes(requiredMarker)) ||
@@ -277,6 +293,9 @@ export function scanText(rawText: string): IFinding[] {
       });
     }
   }
+
+  if (secretTypes && !secretTypes.includes(ESecretType.GENERIC_HIGH_ENTROPY))
+    return findings;
 
   // Candidates arrive in text order. Sweep sorted intervals once instead of
   // searching every previous pattern match for every entropy candidate.

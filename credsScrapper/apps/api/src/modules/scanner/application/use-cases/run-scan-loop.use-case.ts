@@ -3,6 +3,9 @@ import { LoggerPort } from '../ports/logger.port';
 import { StateRepositoryPort } from '../ports/state-repository.port';
 import { WorkdirJoinerPort } from '../ports/workdir-joiner.port';
 import { ScanRepositoryUseCase } from './scan-repository.use-case';
+import { ScanRepositoryPhaseUseCase } from './scan-repository-phase.use-case';
+import { JobQueuePort } from '../ports/job-queue.port';
+import { EScanPhase } from '../../domain/constant/scan-phase.constant';
 
 export interface RunScanLoopOptions {
   readonly workdirRoot: string;
@@ -14,6 +17,8 @@ export interface RunScanLoopOptions {
   readonly onProgress?: (message: string, processed: number) => void;
   /** Checked once per repo, between claiming one and the next - a cooperative stop, not an immediate kill: a repo already being cloned/scanned finishes first. */
   readonly shouldStop?: () => Promise<boolean>;
+  readonly signal?: AbortSignal;
+  readonly parentJobId?: string;
 }
 
 // Ported from credsScrapper/app/scan/orchestrator.py's run_scan_loop.
@@ -31,6 +36,8 @@ export class RunScanLoopUseCase {
     private readonly scanRepository: ScanRepositoryUseCase,
     private readonly logger: LoggerPort,
     private readonly workdirJoiner: WorkdirJoinerPort,
+    private readonly phaseScanner?: ScanRepositoryPhaseUseCase,
+    private readonly jobs?: JobQueuePort,
   ) {}
 
   async execute(options: RunScanLoopOptions): Promise<number> {
@@ -40,9 +47,11 @@ export class RunScanLoopUseCase {
       staleTimeoutSeconds = 3600,
       maxRetries = 3,
       maxRepos,
-      workers = 1,
+      workers = 2,
       onProgress,
       shouldStop,
+      signal,
+      parentJobId,
     } = options;
 
     let processed = 0;
@@ -93,12 +102,36 @@ export class RunScanLoopUseCase {
         // onProgress channel, tagged with the count completed so far -
         // without this, the UI only ever saw "processed N" once per
         // whole repo, which looked idle during a slow clone/scan.
-        const result = await this.scanRepository.execute(
-          ref,
-          sourceUrlFn(ref),
-          workdir,
-          (message) => onProgress?.(message, processed),
-        );
+        const cloneSource = sourceUrlFn(ref);
+        const result = this.phaseScanner
+          ? await this.phaseScanner.execute({
+              repoRef: ref,
+              phase: EScanPhase.HEAD,
+              cloneSource,
+              workdir,
+              signal,
+              onProgress: (message) => onProgress?.(message, processed),
+            })
+          : await this.scanRepository.execute(
+              ref,
+              cloneSource,
+              workdir,
+              (message) => onProgress?.(message, processed),
+            );
+        if (this.phaseScanner && this.jobs && result.status === 'done') {
+          await this.jobs.enqueuePhase(
+            EScanPhase.HISTORY,
+            ref,
+            result.headSha,
+            {
+              repoRef: ref,
+              cloneSource,
+              workdir,
+              targetSha: result.headSha,
+              parentJobId,
+            },
+          );
+        }
         if (result?.status === 'failed') failed += 1;
         processed += 1;
         onProgress?.(`scan: ${processed} repos processed so far`, processed);

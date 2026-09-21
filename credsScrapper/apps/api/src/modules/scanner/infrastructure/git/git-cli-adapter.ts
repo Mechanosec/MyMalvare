@@ -4,9 +4,11 @@ import { promisify } from 'node:util';
 import { StringDecoder } from 'node:string_decoder';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { GitOutputReader } from './git-output-reader';
 import { GitOperationsPort } from '../../application/ports/git-operations.port';
+import { directoryBytes } from '../workers/scan-budget';
 
 // Ported 1:1 from credsScrapper/app/scan/git_ops.py. Shells out to the
 // system `git` binary rather than a JS git library, because the Python
@@ -21,17 +23,38 @@ const MAX_OBJECT_BYTES = 100 * 1024 * 1024;
 const MAX_COMMIT_BYTES = 512 * 1024 * 1024;
 
 // Drain stderr without retaining arbitrary repository content in error messages.
-function gitProcess(args: string[]) {
-  const child = spawn('git', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+function gitProcess(args: string[], signal?: AbortSignal) {
+  const child = spawn('git', args, {
+    detached: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
   child.stderr.resume();
   child.stdin.on('error', () => {}); // EPIPE is reported by the process completion.
+  const abort = () => {
+    if (child.pid && child.exitCode === null) {
+      try {
+        process.kill(-child.pid, 'SIGTERM');
+      } catch {
+        child.kill('SIGTERM');
+      }
+    }
+  };
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
   const completion = new Promise<void>((resolve, reject) => {
     child.once('error', reject);
-    child.once('close', (code) =>
+    child.once('close', (code) => {
+      signal?.removeEventListener('abort', abort);
       code === 0
         ? resolve()
-        : reject(new Error(`Git process failed (exit ${code})`)),
-    );
+        : reject(
+            new Error(
+              signal?.aborted
+                ? 'Git operation cancelled'
+                : `Git process failed (exit ${code})`,
+            ),
+          );
+    });
   });
   // A consumer can be processing a yielded record when the process exits.
   void completion.catch(() => {});
@@ -40,6 +63,138 @@ function gitProcess(args: string[]) {
 
 @Injectable()
 export class GitCliAdapter extends GitOperationsPort {
+  async getStorageBytes(repoPath: string): Promise<number> {
+    return directoryBytes(repoPath);
+  }
+  async prepareHead(
+    source: string,
+    destDir: string,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const cloneSource = await this.localSourceUrl(source);
+    await fs.rm(destDir, { recursive: true, force: true });
+    await this.runAnonymousGit(
+      [
+        '-c',
+        'credential.helper=',
+        'clone',
+        '--bare',
+        '--depth=1',
+        '--single-branch',
+        '--no-tags',
+        '--',
+        cloneSource,
+        destDir,
+      ],
+      signal,
+    );
+    return this.getHeadCommit(destDir);
+  }
+
+  async prepareHistory(
+    source: string,
+    destDir: string,
+    targetSha: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!/^[0-9a-f]{40}$/.test(targetSha))
+      throw new Error('Invalid history target');
+
+    const sourceHash = createHash('sha256').update(source).digest('hex');
+    const marker = path.join(destDir, 'scanner-source');
+    let cacheMatches = false;
+    try {
+      cacheMatches = (await fs.readFile(marker, 'utf8')) === sourceHash;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (!cacheMatches) {
+      await fs.rm(destDir, { recursive: true, force: true });
+      await this.runAnonymousGit(
+        [
+          '-c',
+          'credential.helper=',
+          'clone',
+          '--bare',
+          '--no-tags',
+          '--',
+          source,
+          destDir,
+        ],
+        signal,
+      );
+      await fs.writeFile(marker, sourceHash, { mode: 0o600 });
+    }
+
+    await this.runAnonymousGit(
+      [
+        '-C',
+        destDir,
+        '-c',
+        'credential.helper=',
+        'fetch',
+        '--no-tags',
+        '--force',
+        '--',
+        source,
+        targetSha,
+      ],
+      signal,
+    );
+    await this.runAnonymousGit(
+      ['-C', destDir, 'update-ref', '--no-deref', 'HEAD', 'FETCH_HEAD'],
+      signal,
+    );
+  }
+
+  private async localSourceUrl(source: string): Promise<string> {
+    if (source.includes('://')) return source;
+    try {
+      await fs.access(source);
+      return pathToFileURL(path.resolve(source)).href;
+    } catch {
+      return source;
+    }
+  }
+
+  private async runAnonymousGit(
+    args: string[],
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      const child = spawn('git', args, {
+        detached: true,
+        stdio: ['ignore', 'ignore', 'ignore'],
+        env: {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: '0',
+          GIT_ASKPASS: '',
+          SSH_ASKPASS: '',
+        },
+      });
+      await new Promise<void>((resolve, reject) => {
+        const abort = () => {
+          if (!child.pid || child.exitCode !== null) return;
+          try {
+            process.kill(-child.pid, 'SIGTERM');
+          } catch {
+            child.kill('SIGTERM');
+          }
+        };
+        signal.addEventListener('abort', abort, { once: true });
+        if (signal.aborted) abort();
+        child.once('error', reject);
+        child.once('close', (code) => {
+          signal.removeEventListener('abort', abort);
+          code === 0 ? resolve() : reject(new Error('git_failed'));
+        });
+      });
+    } catch {
+      if (signal.aborted) throw new Error('Git operation cancelled');
+      throw new Error('repository_unavailable');
+    }
+  }
+
   async syncBare(source: string, destDir: string): Promise<void> {
     const sourceHash = createHash('sha256').update(source).digest('hex');
     const marker = path.join(destDir, 'scanner-source');
@@ -284,20 +439,24 @@ export class GitCliAdapter extends GitOperationsPort {
   async *iterCommitDiffs(
     repoPath: string,
     sinceCommit?: string,
+    signal?: AbortSignal,
   ): AsyncIterable<{ commitSha: string; diffText: string }> {
     if (sinceCommit && !/^[0-9a-f]{40}$/.test(sinceCommit))
       throw new Error('Invalid scan checkpoint');
-    const { child, completion } = gitProcess([
-      '-C',
-      repoPath,
-      'log',
-      '--no-color',
-      '--no-ext-diff',
-      '-p',
-      '--full-history',
-      '--reverse',
-      ...(sinceCommit ? [`${sinceCommit}..HEAD`] : []),
-    ]);
+    const { child, completion } = gitProcess(
+      [
+        '-C',
+        repoPath,
+        'log',
+        '--no-color',
+        '--no-ext-diff',
+        '-p',
+        '--full-history',
+        '--reverse',
+        ...(sinceCommit ? [`${sinceCommit}..HEAD`] : []),
+      ],
+      signal,
+    );
     child.stdin.end();
     // Decode at byte boundaries and preserve CRLF inside file diffs. readline
     // normalizes it, which can change multiline detector input.

@@ -168,5 +168,7 @@ export function toScannedRepoRecord(
     failReason: row.failReason,
     retryCount: row.retryCount,
     findingsCount,
+    headPhase: null,
+    historyPhase: null,
   };
 }

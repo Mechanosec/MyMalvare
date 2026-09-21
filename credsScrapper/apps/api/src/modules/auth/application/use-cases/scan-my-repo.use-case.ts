@@ -5,6 +5,7 @@ import { GithubRepoLookupPort } from '../../../scanner/application/ports/github-
 import { JobQueuePort } from '../../../scanner/application/ports/job-queue.port';
 import { WorkdirJoinerPort } from '../../../scanner/application/ports/workdir-joiner.port';
 import { enqueueRepoScan } from '../../../scanner/application/use-cases/enqueue-repo-scan';
+import { ESecretType } from '../../../scanner/domain/constant/secret-type.constant';
 
 export class ScanMyRepoUseCase {
   constructor(
@@ -28,6 +29,7 @@ export class ScanMyRepoUseCase {
     userId: number,
     owner: string,
     name: string,
+    secretType?: ESecretType,
   ): Promise<{ repoId: number; jobId: string } | 'not-found' | null> {
     const approved = await this.authorizations.listByUser(userId);
     const isApproved = approved.some(
@@ -40,6 +42,14 @@ export class ScanMyRepoUseCase {
       return null;
     }
 
-    return enqueueRepoScan(this.state, this.githubLookup, this.jobQueue, this.workdirJoiner, owner, name);
+    return enqueueRepoScan(
+      this.state,
+      this.githubLookup,
+      this.jobQueue,
+      this.workdirJoiner,
+      owner,
+      name,
+      secretType,
+    );
   }
 }

@@ -4,6 +4,10 @@ import { StateRepositoryPort } from '../../application/ports/state-repository.po
 import { ECandidateStatus } from '../../domain/constant/candidate-status.constant';
 import { EFindingStatus } from '../../domain/constant/finding-status.constant';
 import { EScanStatus } from '../../domain/constant/scan-status.constant';
+import {
+  EScanPhase,
+  EScanPhaseStatus,
+} from '../../domain/constant/scan-phase.constant';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
 import { isDiffSourcedFile } from '../../domain/detection/split-commit-diff';
 import {
@@ -18,6 +22,11 @@ import {
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type';
+import {
+  ICompletedScanPhase,
+  IInterruptedScanPhase,
+  IScanPhaseRecord,
+} from '../../domain/types/scan-phase-record.type';
 import { PrismaService } from './prisma.service';
 import {
   buildSearchConditions,
@@ -120,6 +129,213 @@ export class PrismaStateRepository extends StateRepositoryPort {
       : null;
   }
 
+  async schedulePhase(
+    repoId: number,
+    phase: EScanPhase,
+    targetSha: string,
+  ): Promise<void> {
+    await this.prisma.scanPhase.upsert({
+      where: { repoId_phase: { repoId, phase } },
+      create: {
+        repoId,
+        phase,
+        status: EScanPhaseStatus.PENDING,
+        targetSha,
+      },
+      update: {
+        status: EScanPhaseStatus.PENDING,
+        targetSha,
+        startedAt: null,
+        completedAt: null,
+        reason: null,
+      },
+    });
+  }
+
+  async claimPhase(
+    repoId: number,
+    phase: EScanPhase,
+    targetSha: string,
+  ): Promise<boolean> {
+    const result = await this.prisma.scanPhase.updateMany({
+      where: {
+        repoId,
+        phase,
+        targetSha,
+        status: EScanPhaseStatus.PENDING,
+      },
+      data: {
+        status: EScanPhaseStatus.RUNNING,
+        startedAt: new Date(),
+        completedAt: null,
+        reason: null,
+      },
+    });
+    return result.count === 1;
+  }
+
+  async getPhase(
+    repoId: number,
+    phase: EScanPhase,
+  ): Promise<IScanPhaseRecord | null> {
+    const row = await this.prisma.scanPhase.findUnique({
+      where: { repoId_phase: { repoId, phase } },
+    });
+    return row ? this.toScanPhaseRecord(row) : null;
+  }
+
+  async listPendingPhases(phase: EScanPhase): Promise<IScanPhaseRecord[]> {
+    const rows = await this.prisma.scanPhase.findMany({
+      where: { phase, status: EScanPhaseStatus.PENDING },
+      orderBy: { repoId: 'asc' },
+    });
+    return rows.map((row) => this.toScanPhaseRecord(row));
+  }
+
+  async markPhaseDone(
+    repoId: number,
+    phase: EScanPhase,
+    result: ICompletedScanPhase,
+  ): Promise<void> {
+    const completedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.scanPhase.updateMany({
+        where: {
+          repoId,
+          phase,
+          status: EScanPhaseStatus.RUNNING,
+          OR: [
+            { targetSha: result.targetSha },
+            ...(phase === EScanPhase.HEAD ? [{ targetSha: 'latest' }] : []),
+          ],
+        },
+        data: {
+          status: EScanPhaseStatus.DONE,
+          targetSha: result.targetSha,
+          completedSha: result.completedSha,
+          scannerVersion: result.scannerVersion,
+          completedAt,
+          reason: null,
+        },
+      });
+      if (updated.count === 1 && phase === EScanPhase.HEAD) {
+        await tx.scannedRepo.update({
+          where: { repoId },
+          data: {
+            status: EScanStatus.DONE,
+            lastCommitSha: result.completedSha,
+            scannerVersion: result.scannerVersion,
+            scannedAt: completedAt,
+            failReason: null,
+          },
+        });
+      }
+    });
+  }
+
+  async markPhaseIncomplete(
+    repoId: number,
+    phase: EScanPhase,
+    result: IInterruptedScanPhase,
+  ): Promise<void> {
+    await this.markInterruptedPhase(
+      repoId,
+      phase,
+      EScanPhaseStatus.INCOMPLETE,
+      result,
+      false,
+    );
+  }
+
+  async markPhaseFailed(
+    repoId: number,
+    phase: EScanPhase,
+    result: IInterruptedScanPhase,
+  ): Promise<void> {
+    await this.markInterruptedPhase(
+      repoId,
+      phase,
+      EScanPhaseStatus.FAILED,
+      result,
+      true,
+    );
+  }
+
+  async markPhaseCancelled(
+    repoId: number,
+    phase: EScanPhase,
+    result: IInterruptedScanPhase,
+  ): Promise<void> {
+    await this.markInterruptedPhase(
+      repoId,
+      phase,
+      EScanPhaseStatus.CANCELLED,
+      result,
+      false,
+    );
+  }
+
+  private async markInterruptedPhase(
+    repoId: number,
+    phase: EScanPhase,
+    status:
+      | EScanPhaseStatus.INCOMPLETE
+      | EScanPhaseStatus.FAILED
+      | EScanPhaseStatus.CANCELLED,
+    result: IInterruptedScanPhase,
+    incrementRetry: boolean,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.scanPhase.updateMany({
+        where: {
+          repoId,
+          phase,
+          status: EScanPhaseStatus.RUNNING,
+          OR: [
+            { targetSha: result.targetSha },
+            ...(phase === EScanPhase.HEAD ? [{ targetSha: 'latest' }] : []),
+          ],
+        },
+        data: {
+          status,
+          targetSha: result.targetSha,
+          completedAt: new Date(),
+          reason: result.reason,
+          ...(incrementRetry ? { retryCount: { increment: 1 } } : {}),
+        },
+      });
+      if (updated.count === 1 && phase === EScanPhase.HEAD) {
+        await tx.scannedRepo.update({
+          where: { repoId },
+          data: {
+            status: EScanStatus.FAILED,
+            failReason: result.reason,
+            ...(incrementRetry ? { retryCount: { increment: 1 } } : {}),
+          },
+        });
+      }
+    });
+  }
+
+  private toScanPhaseRecord(row: {
+    repoId: number;
+    phase: string;
+    status: string;
+    targetSha: string | null;
+    completedSha: string | null;
+    scannerVersion: string | null;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    reason: string | null;
+    retryCount: number;
+  }): IScanPhaseRecord {
+    return {
+      ...row,
+      phase: row.phase as EScanPhase,
+      status: row.status as EScanPhaseStatus,
+    };
+  }
+
   async markDone(
     repoId: number,
     lastCommitSha: string,
@@ -186,7 +402,11 @@ export class PrismaStateRepository extends StateRepositoryPort {
 
   async requeueFailed(maxRetries: number): Promise<number> {
     const result = await this.prisma.scannedRepo.updateMany({
-      where: { status: EScanStatus.FAILED, retryCount: { lt: maxRetries } },
+      where: {
+        status: EScanStatus.FAILED,
+        retryCount: { lt: maxRetries },
+        NOT: { failReason: 'repository_unavailable' },
+      },
       data: { status: EScanStatus.PENDING },
     });
     return result.count;
@@ -403,6 +623,20 @@ export class PrismaStateRepository extends StateRepositoryPort {
     }
   }
 
+  async resetTestResults(
+    repoId: number,
+    secretTypes: readonly ESecretType[],
+  ): Promise<void> {
+    await this.prisma.finding.updateMany({
+      where: { repoId, secretType: { in: [...secretTypes] } },
+      data: {
+        status: EFindingStatus.UNKNOWN,
+        checkedAt: null,
+        testReason: null,
+      },
+    });
+  }
+
   async updateFindingStatus(id: number, status: EFindingStatus): Promise<void> {
     await this.prisma.finding.update({ where: { id }, data: { status } });
   }
@@ -547,16 +781,30 @@ export class PrismaStateRepository extends StateRepositoryPort {
     // No Prisma relation between scanned_repos and findings (repoId is a
     // plain column, not a foreign key) - one groupBy for all rows in this
     // page avoids an N+1 count-per-row.
-    const counts = await this.prisma.finding.groupBy({
-      by: ['repoId'],
-      where: { repoId: { in: rows.map((row) => row.repoId) } },
-      _count: { repoId: true },
-    });
+    const [counts, phases] = await Promise.all([
+      this.prisma.finding.groupBy({
+        by: ['repoId'],
+        where: { repoId: { in: rows.map((row) => row.repoId) } },
+        _count: { repoId: true },
+      }),
+      this.prisma.scanPhase.findMany({
+        where: { repoId: { in: rows.map((row) => row.repoId) } },
+      }),
+    ]);
     const countByRepoId = new Map(
       counts.map((row) => [row.repoId, row._count.repoId]),
     );
-    return rows.map((row) =>
-      toScannedRepoRecord(row, countByRepoId.get(row.repoId) ?? 0),
+    const phaseByKey = new Map(
+      phases.map((phase) => [
+        `${phase.repoId}:${phase.phase}`,
+        this.toScanPhaseRecord(phase),
+      ]),
     );
+    return rows.map((row) => ({
+      ...toScannedRepoRecord(row, countByRepoId.get(row.repoId) ?? 0),
+      headPhase: phaseByKey.get(`${row.repoId}:${EScanPhase.HEAD}`) ?? null,
+      historyPhase:
+        phaseByKey.get(`${row.repoId}:${EScanPhase.HISTORY}`) ?? null,
+    }));
   }
 }
