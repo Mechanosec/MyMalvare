@@ -32,6 +32,9 @@ interface ScannedRow extends IRepoRef {
 
 /** In-memory fake used by unit tests instead of a real database. */
 export class FakeStateRepository extends StateRepositoryPort {
+  async getScanCheckpoint() {
+    return null;
+  }
   readonly candidates = new Map<number, CandidateRow>();
   readonly scanned = new Map<number, ScannedRow>();
   readonly findings: Array<{
@@ -49,11 +52,20 @@ export class FakeStateRepository extends StateRepositoryPort {
     leakCommits: string;
   }> = [];
 
-  async addCandidate(repoId: number, owner: string, name: string): Promise<boolean> {
+  async addCandidate(
+    repoId: number,
+    owner: string,
+    name: string,
+  ): Promise<boolean> {
     if (await this.isKnown(repoId)) {
       return false;
     }
-    this.candidates.set(repoId, { repoId, owner, name, status: ECandidateStatus.PENDING });
+    this.candidates.set(repoId, {
+      repoId,
+      owner,
+      name,
+      status: ECandidateStatus.PENDING,
+    });
     return true;
   }
 
@@ -72,7 +84,11 @@ export class FakeStateRepository extends StateRepositoryPort {
           status: EScanStatus.IN_PROGRESS,
           startedAt: new Date(),
         });
-        return { repoId: candidate.repoId, owner: candidate.owner, name: candidate.name };
+        return {
+          repoId: candidate.repoId,
+          owner: candidate.owner,
+          name: candidate.name,
+        };
       }
     }
     for (const row of this.scanned.values()) {
@@ -101,7 +117,13 @@ export class FakeStateRepository extends StateRepositoryPort {
     }
   }
 
-  async startRepoScan(repoId: number, owner: string, name: string): Promise<void> {
+  async startRepoScan(
+    repoId: number,
+    owner: string,
+    name: string,
+  ): Promise<void> {
+    const candidate = this.candidates.get(repoId);
+    if (candidate) candidate.status = ECandidateStatus.CLAIMED;
     const existing = this.scanned.get(repoId);
     this.scanned.set(repoId, {
       ...existing,
@@ -127,7 +149,10 @@ export class FakeStateRepository extends StateRepositoryPort {
   async requeueFailed(maxRetries: number): Promise<number> {
     let count = 0;
     for (const row of this.scanned.values()) {
-      if (row.status === EScanStatus.FAILED && (row.retryCount ?? 0) < maxRetries) {
+      if (
+        row.status === EScanStatus.FAILED &&
+        (row.retryCount ?? 0) < maxRetries
+      ) {
         row.status = EScanStatus.PENDING;
         count += 1;
       }
@@ -217,9 +242,18 @@ export class FakeStateRepository extends StateRepositoryPort {
     const search = filter.search?.toLowerCase();
     const matching = this.findings
       .map((f, id) => ({ f, id }))
-      .filter(({ f }) => !filter.secretTypes?.length || filter.secretTypes.includes(f.secretType))
-      .filter(({ f }) => !filter.repoIds?.length || filter.repoIds.includes(f.repoId))
-      .filter(({ f }) => !filter.statuses?.length || filter.statuses.includes(f.status))
+      .filter(
+        ({ f }) =>
+          !filter.secretTypes?.length ||
+          filter.secretTypes.includes(f.secretType),
+      )
+      .filter(
+        ({ f }) => !filter.repoIds?.length || filter.repoIds.includes(f.repoId),
+      )
+      .filter(
+        ({ f }) =>
+          !filter.statuses?.length || filter.statuses.includes(f.status),
+      )
       .filter(
         ({ f }) =>
           !search ||
@@ -233,13 +267,21 @@ export class FakeStateRepository extends StateRepositoryPort {
       });
     const offset = filter.offset ?? 0;
     const limit = filter.limit ?? 100;
-    return { items: matching.slice(offset, offset + limit), total: matching.length };
+    return {
+      items: matching.slice(offset, offset + limit),
+      total: matching.length,
+    };
   }
 
   async getFindingById(id: number): Promise<IFindingRecord | null> {
     const row = this.findings[id];
     if (!row) return null;
-    return { id, foundAt: new Date(), ...row, leakCommits: parseLeakCommits(row.leakCommits) };
+    return {
+      id,
+      foundAt: new Date(),
+      ...row,
+      leakCommits: parseLeakCommits(row.leakCommits),
+    };
   }
 
   private bumpRepoOption(
@@ -258,9 +300,12 @@ export class FakeStateRepository extends StateRepositoryPort {
     counts.set(f.repoId, {
       ...existing,
       count: existing.count + 1,
-      validCount: existing.validCount + (f.status === EFindingStatus.VALID ? 1 : 0),
-      invalidCount: existing.invalidCount + (f.status === EFindingStatus.INVALID ? 1 : 0),
-      unknownCount: existing.unknownCount + (f.status === EFindingStatus.UNKNOWN ? 1 : 0),
+      validCount:
+        existing.validCount + (f.status === EFindingStatus.VALID ? 1 : 0),
+      invalidCount:
+        existing.invalidCount + (f.status === EFindingStatus.INVALID ? 1 : 0),
+      unknownCount:
+        existing.unknownCount + (f.status === EFindingStatus.UNKNOWN ? 1 : 0),
     });
   }
 
@@ -280,23 +325,31 @@ export class FakeStateRepository extends StateRepositoryPort {
     pairs: ReadonlyArray<{ owner: string; name: string }>,
     secretTypes?: readonly ESecretType[],
   ): Promise<IFindingsRepoOption[]> {
-    const wanted = new Set(pairs.map((p) => `${p.owner.toLowerCase()}/${p.name.toLowerCase()}`));
+    const wanted = new Set(
+      pairs.map((p) => `${p.owner.toLowerCase()}/${p.name.toLowerCase()}`),
+    );
     const counts = new Map<number, IFindingsRepoOption>();
     for (const f of this.findings) {
-      if (!wanted.has(`${f.owner.toLowerCase()}/${f.name.toLowerCase()}`)) continue;
+      if (!wanted.has(`${f.owner.toLowerCase()}/${f.name.toLowerCase()}`))
+        continue;
       if (secretTypes?.length && !secretTypes.includes(f.secretType)) continue;
       this.bumpRepoOption(counts, f);
     }
     return [...counts.values()];
   }
 
-  async listFindingsSecretTypeCounts(repoId?: number): Promise<ISecretTypeCount[]> {
+  async listFindingsSecretTypeCounts(
+    repoId?: number,
+  ): Promise<ISecretTypeCount[]> {
     const counts = new Map<ESecretType, number>();
     for (const f of this.findings) {
       if (repoId !== undefined && f.repoId !== repoId) continue;
       counts.set(f.secretType, (counts.get(f.secretType) ?? 0) + 1);
     }
-    return [...counts.entries()].map(([secretType, count]) => ({ secretType, count }));
+    return [...counts.entries()].map(([secretType, count]) => ({
+      secretType,
+      count,
+    }));
   }
 
   async listFindingsStatusCounts(
@@ -323,7 +376,8 @@ export class FakeStateRepository extends StateRepositoryPort {
       scannedAt: row.scannedAt ?? null,
       failReason: row.failReason ?? null,
       retryCount: row.retryCount ?? 0,
-      findingsCount: this.findings.filter((f) => f.repoId === row.repoId).length,
+      findingsCount: this.findings.filter((f) => f.repoId === row.repoId)
+        .length,
     }));
   }
 }

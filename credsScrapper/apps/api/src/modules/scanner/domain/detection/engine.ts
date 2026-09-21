@@ -39,7 +39,14 @@ function lineNumberAt(lineOffsets: readonly number[], offset: number): number {
 // own docs use AKIAIOSFODNN7EXAMPLE as the canonical example key). Only
 // "test" is scoped to non-Stripe-test-key types, since sk_test_... is a
 // real, sensitive secret type whose own prefix contains the word.
-const PLACEHOLDER_MARKERS = ['example', 'placeholder', 'sample', 'changeme', 'dummy', 'fake'];
+const PLACEHOLDER_MARKERS = [
+  'example',
+  'placeholder',
+  'sample',
+  'changeme',
+  'dummy',
+  'fake',
+];
 
 // GCP_SERVICE_ACCOUNT_KEY's secretValue is the whole credentials JSON
 // (see extractGcpServiceAccountJson above), not a single token - a real
@@ -50,7 +57,11 @@ const PLACEHOLDER_MARKERS = ['example', 'placeholder', 'sample', 'changeme', 'du
 // test/fixture-directory skip is this type's actual placeholder defense.
 const PLACEHOLDER_SKIP_EXEMPT = new Set([ESecretType.GCP_SERVICE_ACCOUNT_KEY]);
 
-function isPlaceholder(secretType: ESecretType, value: string, context: string | null): boolean {
+function isPlaceholder(
+  secretType: ESecretType,
+  value: string,
+  context: string | null,
+): boolean {
   if (PLACEHOLDER_SKIP_EXEMPT.has(secretType)) {
     return false;
   }
@@ -58,7 +69,10 @@ function isPlaceholder(secretType: ESecretType, value: string, context: string |
   if (PLACEHOLDER_MARKERS.some((marker) => haystack.includes(marker))) {
     return true;
   }
-  return secretType !== ESecretType.STRIPE_TEST_SECRET_KEY && haystack.includes('test');
+  return (
+    secretType !== ESecretType.STRIPE_TEST_SECRET_KEY &&
+    haystack.includes('test')
+  );
 }
 
 // For generic_high_entropy matches we have no prefix telling us the
@@ -83,10 +97,13 @@ function extractContext(text: string, start: number): string | null {
 // payload is stripped before scanning (keeping the "data:...;base64," lead-in
 // so a stripped blob is still visible in a diff, and staying on one line so
 // line numbers of anything else in the file are unaffected).
-const DATA_URI_BASE64_RE = /data:[a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g;
+const DATA_URI_BASE64_RE =
+  /data:[a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g;
 
 function stripDataUriBlobs(text: string): string {
-  return text.replace(DATA_URI_BASE64_RE, (match) => match.slice(0, match.indexOf(',') + 1));
+  return text.replace(DATA_URI_BASE64_RE, (match) =>
+    match.slice(0, match.indexOf(',') + 1),
+  );
 }
 
 // Same false-positive source, different shape: a raw MIME/email
@@ -137,7 +154,9 @@ function stripDiffLinePrefixes(candidate: string): string {
     .split('\n')
     .map((line, i) => {
       if (i === 0 || line.length === 0) return line;
-      return line[0] === '+' || line[0] === '-' || line[0] === ' ' ? line.slice(1) : line;
+      return line[0] === '+' || line[0] === '-' || line[0] === ' '
+        ? line.slice(1)
+        : line;
     })
     .join('\n');
 }
@@ -156,7 +175,10 @@ function parseGcpKeyJson(candidate: string): Record<string, unknown> | null {
   return null;
 }
 
-function extractGcpServiceAccountJson(text: string, markerIndex: number): IGcpJsonSpan | null {
+function extractGcpServiceAccountJson(
+  text: string,
+  markerIndex: number,
+): IGcpJsonSpan | null {
   const searchStart = Math.max(0, markerIndex - GCP_JSON_SEARCH_WINDOW);
   const searchEnd = Math.min(text.length, markerIndex + GCP_JSON_SEARCH_WINDOW);
 
@@ -190,7 +212,8 @@ function extractGcpServiceAccountJson(text: string, markerIndex: number): IGcpJs
   const candidate = text.slice(openBrace, closeBrace + 1);
   const parsed = parseGcpKeyJson(candidate);
   const hasRequiredFields =
-    typeof parsed?.private_key === 'string' && typeof parsed?.client_email === 'string';
+    typeof parsed?.private_key === 'string' &&
+    typeof parsed?.client_email === 'string';
   if (!hasRequiredFields) {
     return null;
   }
@@ -198,7 +221,11 @@ function extractGcpServiceAccountJson(text: string, markerIndex: number): IGcpJs
   // candidate matched, so a diff-prefixed match's stored secretValue is
   // clean JSON (JSON.parse-able as-is by the live-key-validator adapter),
   // not literal '+'-prefixed lines.
-  return { json: JSON.stringify(parsed), start: openBrace, end: closeBrace + 1 };
+  return {
+    json: JSON.stringify(parsed),
+    start: openBrace,
+    end: closeBrace + 1,
+  };
 }
 
 export function scanText(rawText: string): IFinding[] {
@@ -234,8 +261,19 @@ export function scanText(rawText: string): IFinding[] {
     }
   }
 
+  // Candidates arrive in text order. Sweep sorted intervals once instead of
+  // searching every previous pattern match for every entropy candidate.
+  matchedSpans.sort((a, b) => a[0] - b[0]);
+  let spanIndex = 0;
+  let coveredUntil = -1;
   for (const { token, index: start } of findHighEntropyTokens(text)) {
-    const overlapsPatternMatch = matchedSpans.some(([s, e]) => start >= s && start < e);
+    while (
+      spanIndex < matchedSpans.length &&
+      matchedSpans[spanIndex][0] <= start
+    ) {
+      coveredUntil = Math.max(coveredUntil, matchedSpans[spanIndex++][1]);
+    }
+    const overlapsPatternMatch = start < coveredUntil;
     if (overlapsPatternMatch) {
       continue;
     }

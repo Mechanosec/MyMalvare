@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { StringDecoder } from 'node:string_decoder';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+import { GitOutputReader } from './git-output-reader';
 import { GitOperationsPort } from '../../application/ports/git-operations.port';
 
 // Ported 1:1 from credsScrapper/app/scan/git_ops.py. Shells out to the
@@ -11,10 +16,121 @@ import { GitOperationsPort } from '../../application/ports/git-operations.port';
 // needed for this) - execFile never spawns a shell, so there's no
 // shell-injection surface regardless.
 const execFileAsync = promisify(execFile);
-const COMMIT_HEADER_RE = /^commit ([0-9a-f]{40})(?: .*)?$/gm;
+const COMMIT_HEADER_RE = /^commit ([0-9a-f]{40})(?: .*)?$/;
+const MAX_OBJECT_BYTES = 100 * 1024 * 1024;
+const MAX_COMMIT_BYTES = 512 * 1024 * 1024;
+
+// Drain stderr without retaining arbitrary repository content in error messages.
+function gitProcess(args: string[]) {
+  const child = spawn('git', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  child.stderr.resume();
+  child.stdin.on('error', () => {}); // EPIPE is reported by the process completion.
+  const completion = new Promise<void>((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code) =>
+      code === 0
+        ? resolve()
+        : reject(new Error(`Git process failed (exit ${code})`)),
+    );
+  });
+  // A consumer can be processing a yielded record when the process exits.
+  void completion.catch(() => {});
+  return { child, completion };
+}
 
 @Injectable()
 export class GitCliAdapter extends GitOperationsPort {
+  async syncBare(source: string, destDir: string): Promise<void> {
+    const sourceHash = createHash('sha256').update(source).digest('hex');
+    const marker = path.join(destDir, 'scanner-source');
+    let previous: string | null = null;
+    try {
+      previous = await fs.readFile(marker, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (previous === sourceHash) {
+      try {
+        await execFileAsync('git', [
+          '-C',
+          destDir,
+          'rev-parse',
+          '--verify',
+          'HEAD',
+        ]);
+      } catch {
+        previous = null;
+      }
+    }
+    if (previous !== sourceHash) {
+      // Only this dedicated cache path is disposable; never touch user clones.
+      await fs.rm(destDir, { recursive: true, force: true });
+      await this.cloneBare(source, destDir);
+      await fs.writeFile(marker, sourceHash, { mode: 0o600 });
+      return;
+    }
+    // Fetch the remote's current HEAD explicitly: bare clone does not configure
+    // a normal remote-tracking refspec, and the default branch may have changed.
+    try {
+      await execFileAsync(
+        'git',
+        [
+          '-C',
+          destDir,
+          '-c',
+          'credential.helper=',
+          'fetch',
+          '--no-tags',
+          '--force',
+          '--',
+          source,
+          'HEAD',
+        ],
+        {
+          env: {
+            ...process.env,
+            GIT_TERMINAL_PROMPT: '0',
+            GIT_ASKPASS: '',
+            SSH_ASKPASS: '',
+          },
+        },
+      );
+      // Detach HEAD instead of accidentally changing the old default branch.
+      const { stdout } = await execFileAsync('git', [
+        '-C',
+        destDir,
+        'rev-parse',
+        'FETCH_HEAD',
+      ]);
+      await execFileAsync('git', [
+        '-C',
+        destDir,
+        'update-ref',
+        '--no-deref',
+        'HEAD',
+        stdout.trim(),
+      ]);
+    } catch {
+      throw new Error('Git cache fetch failed');
+    }
+  }
+
+  async isAncestor(repoPath: string, commit: string): Promise<boolean> {
+    if (!/^[0-9a-f]{40}$/.test(commit)) return false;
+    try {
+      await execFileAsync('git', [
+        '-C',
+        repoPath,
+        'merge-base',
+        '--is-ancestor',
+        commit,
+        'HEAD',
+      ]);
+      return true;
+    } catch {
+      return false;
+    } // Missing/pruned/rewritten base requires a full scan.
+  }
   async cloneBare(source: string, destDir: string): Promise<void> {
     // source is derived from GH Archive event data (owner/name we don't
     // control) - "--" stops git's own flag parsing so a value that
@@ -99,29 +215,136 @@ export class GitCliAdapter extends GitOperationsPort {
     return raw.toString('utf8');
   }
 
-  async iterCommitDiffs(
+  async *readFilesAtHead(
     repoPath: string,
-  ): Promise<Array<{ commitSha: string; diffText: string }>> {
-    // ponytail: buffers the whole history diff in memory - the real
-    // ceiling-fix for a repo whose full history still exceeds this is
-    // streaming `git log -p` output (spawn + readline) instead of
-    // buffering it whole, but that's a bigger change than warranted
-    // while 512MB covers everything seen in practice so far.
+    filePaths: readonly string[],
+  ): AsyncIterable<{ filePath: string; text: string | null }> {
+    if (filePaths.length === 0) return;
+    // Request object IDs, not HEAD:path, so even filenames containing newlines
+    // cannot inject a second batch request. Preserve the caller's path order.
     const { stdout } = await execFileAsync(
       'git',
-      ['-C', repoPath, 'log', '-p', '--full-history', '--reverse'],
-      { maxBuffer: 1024 * 1024 * 512 },
+      ['-C', repoPath, 'ls-tree', '-r', '-z', 'HEAD'],
+      {
+        maxBuffer: 64 * 1024 * 1024,
+      },
     );
-    const matches = [...stdout.matchAll(COMMIT_HEADER_RE)];
-    const diffs: Array<{ commitSha: string; diffText: string }> = [];
-    for (let i = 0; i < matches.length; i += 1) {
-      const match = matches[i];
-      const sha = match[1];
-      const start = match.index! + match[0].length;
-      const end =
-        i + 1 < matches.length ? matches[i + 1].index! : stdout.length;
-      diffs.push({ commitSha: sha, diffText: stdout.slice(start, end) });
+    const objects = new Map<string, string>();
+    for (const entry of stdout.split('\0')) {
+      if (!entry) continue;
+      const tab = entry.indexOf('\t');
+      const [, , oid] = entry.slice(0, tab).split(' ');
+      objects.set(entry.slice(tab + 1), oid);
     }
-    return diffs;
+    const { child, completion } = gitProcess([
+      '-C',
+      repoPath,
+      'cat-file',
+      '--batch',
+    ]);
+    const reader = new GitOutputReader(child.stdout);
+    try {
+      for (let index = 0; index < filePaths.length; index += 1) {
+        // A small request window amortizes pipe round trips without filling
+        // both stdin and stdout and deadlocking on a large repository.
+        if (index % 64 === 0) {
+          const ids = filePaths.slice(index, index + 64).map((filePath) => {
+            const oid = objects.get(filePath);
+            if (!oid)
+              throw new Error('Requested file is missing from the HEAD tree');
+            return oid;
+          });
+          child.stdin.write(ids.join('\n') + '\n');
+        }
+        const filePath = filePaths[index];
+        const oid = objects.get(filePath)!;
+        const header = await reader.line();
+        const match = /^([0-9a-f]+) blob ([0-9]+)$/.exec(header);
+        if (!match || match[1] !== oid)
+          throw new Error('Invalid Git batch object');
+        const size = Number(match[2]);
+        if (!Number.isSafeInteger(size) || size > MAX_OBJECT_BYTES) {
+          throw new Error('Git file exceeds the 100 MiB scan limit');
+        }
+        const raw = await reader.bytes(size);
+        const delimiter = await reader.bytes(1);
+        if (delimiter[0] !== 10) throw new Error('Invalid Git batch delimiter');
+        yield { filePath, text: raw.includes(0) ? null : raw.toString('utf8') };
+      }
+      child.stdin.end();
+      await completion;
+    } finally {
+      child.stdin.destroy();
+      child.stdout.destroy();
+      if (child.exitCode === null) child.kill();
+      await completion.catch(() => {});
+    }
+  }
+
+  async *iterCommitDiffs(
+    repoPath: string,
+    sinceCommit?: string,
+  ): AsyncIterable<{ commitSha: string; diffText: string }> {
+    if (sinceCommit && !/^[0-9a-f]{40}$/.test(sinceCommit))
+      throw new Error('Invalid scan checkpoint');
+    const { child, completion } = gitProcess([
+      '-C',
+      repoPath,
+      'log',
+      '--no-color',
+      '--no-ext-diff',
+      '-p',
+      '--full-history',
+      '--reverse',
+      ...(sinceCommit ? [`${sinceCommit}..HEAD`] : []),
+    ]);
+    child.stdin.end();
+    // Decode at byte boundaries and preserve CRLF inside file diffs. readline
+    // normalizes it, which can change multiline detector input.
+    const decoder = new StringDecoder('utf8');
+    let remainder = '';
+    async function* readLines() {
+      for await (const chunk of child.stdout) {
+        remainder += decoder.write(chunk);
+        let start = 0;
+        let end: number;
+        while ((end = remainder.indexOf('\n', start)) >= 0) {
+          yield remainder.slice(start, end + 1);
+          start = end + 1;
+        }
+        remainder = remainder.slice(start);
+        if (Buffer.byteLength(remainder) > MAX_COMMIT_BYTES)
+          throw new Error('Git diff line exceeds scan limit');
+      }
+      remainder += decoder.end();
+      if (remainder) yield remainder;
+    }
+    let commitSha: string | undefined;
+    let parts: string[] = [];
+    let bytes = 0;
+    try {
+      for await (const line of readLines()) {
+        const header = COMMIT_HEADER_RE.exec(
+          line.endsWith('\n') ? line.slice(0, -1) : line,
+        );
+        if (header) {
+          if (commitSha) yield { commitSha, diffText: '\n' + parts.join('') };
+          commitSha = header[1];
+          parts = [];
+          bytes = 0;
+        } else if (commitSha) {
+          bytes += Buffer.byteLength(line);
+          if (bytes > MAX_COMMIT_BYTES)
+            throw new Error('Git commit diff exceeds the 512 MiB scan limit');
+          parts.push(line);
+        }
+      }
+      await completion;
+      if (commitSha) yield { commitSha, diffText: '\n' + parts.join('') };
+    } finally {
+      child.stdout.destroy();
+      if (child.exitCode === null) child.kill();
+      await completion.catch(() => {});
+    }
   }
 }

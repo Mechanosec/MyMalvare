@@ -88,7 +88,11 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
       if (job.name === 'discover') {
         const data = job.data as IDiscoverJobData;
         const date = data.date ? new Date(data.date) : undefined;
-        processed = await this.discoverRepos.execute(date, onProgress, shouldStop);
+        processed = await this.discoverRepos.execute(
+          date,
+          onProgress,
+          shouldStop,
+        );
       } else if (job.name === 'scan') {
         const data = job.data as IScanLoopJobData;
         processed = await this.runScanLoop.execute({
@@ -102,12 +106,14 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
         });
       } else if (job.name === 'scan-repo') {
         const data = job.data as IScanRepoJobData;
-        await this.scanRepository.execute(
+        const result = await this.scanRepository.execute(
           data.repoRef,
           data.cloneSource,
           data.workdir,
           (message) => onProgress(message),
         );
+        if (result.status === 'failed') throw new Error(result.failReason);
+        processed = 1;
       } else {
         throw new Error(`Unknown job name: ${job.name}`);
       }

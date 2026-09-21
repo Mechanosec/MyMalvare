@@ -30,15 +30,24 @@ describe('GitCliAdapter (real git, no mocks)', () => {
     await run(['git', 'config', 'user.email', 'test@example.com'], sourceDir);
     await run(['git', 'config', 'user.name', 'Test'], sourceDir);
 
-    await fs.writeFile(path.join(sourceDir, 'config.py'), "SAFE = 'nothing here'\n");
+    await fs.writeFile(
+      path.join(sourceDir, 'config.py'),
+      "SAFE = 'nothing here'\n",
+    );
     await run(['git', 'add', 'config.py'], sourceDir);
     await run(['git', 'commit', '-m', 'initial commit'], sourceDir);
 
-    await fs.writeFile(path.join(sourceDir, 'config.py'), "AWS_KEY = 'AKIAABCDEFGH12345678'\n");
+    await fs.writeFile(
+      path.join(sourceDir, 'config.py'),
+      "AWS_KEY = 'AKIAABCDEFGH12345678'\n",
+    );
     await run(['git', 'add', 'config.py'], sourceDir);
     await run(['git', 'commit', '-m', 'oops, added a key'], sourceDir);
 
-    await fs.writeFile(path.join(sourceDir, 'config.py'), "SAFE = 'nothing here'\n");
+    await fs.writeFile(
+      path.join(sourceDir, 'config.py'),
+      "SAFE = 'nothing here'\n",
+    );
     await run(['git', 'add', 'config.py'], sourceDir);
     await run(['git', 'commit', '-m', 'remove key'], sourceDir);
 
@@ -55,9 +64,12 @@ describe('GitCliAdapter (real git, no mocks)', () => {
     expect(content).toContain('SAFE');
     expect(content).not.toContain('AKIA');
 
-    const diffs = await adapter.iterCommitDiffs(bareDir);
+    const diffs = [];
+    for await (const diff of adapter.iterCommitDiffs(bareDir)) diffs.push(diff);
     expect(diffs).toHaveLength(3);
-    expect(diffs.map((d) => d.diffText).join('\n')).toContain('AKIAABCDEFGH12345678');
+    expect(diffs.map((d) => d.diffText).join('\n')).toContain(
+      'AKIAABCDEFGH12345678',
+    );
   });
 
   it('handles a non-ASCII filename without crashing', async () => {
@@ -68,7 +80,10 @@ describe('GitCliAdapter (real git, no mocks)', () => {
     await run(['git', 'config', 'user.name', 'Test'], sourceDir);
 
     const filename = '公告：头条.md';
-    await fs.writeFile(path.join(sourceDir, filename), "AWS_KEY = 'AKIAABCDEFGH12345678'\n");
+    await fs.writeFile(
+      path.join(sourceDir, filename),
+      "AWS_KEY = 'AKIAABCDEFGH12345678'\n",
+    );
     await run(['git', 'add', filename], sourceDir);
     await run(['git', 'commit', '-m', 'add unicode filename'], sourceDir);
 
@@ -91,7 +106,9 @@ describe('GitCliAdapter (real git, no mocks)', () => {
 
     await fs.writeFile(
       path.join(sourceDir, 'image.png'),
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00]),
+      Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00,
+      ]),
     );
     await run(['git', 'add', 'image.png'], sourceDir);
     await run(['git', 'commit', '-m', 'add binary file'], sourceDir);
@@ -131,7 +148,10 @@ describe('GitCliAdapter (real git, no mocks)', () => {
     // override wins even when it's already set to something real.
     process.env.GIT_ASKPASS = '/fake/vscode-askpass.sh';
     try {
-      await adapter.cloneBare('https://github.com/example/private-repo.git', path.join(tmpDir, 'unused'));
+      await adapter.cloneBare(
+        'https://github.com/example/private-repo.git',
+        path.join(tmpDir, 'unused'),
+      );
     } finally {
       process.env.PATH = originalPath;
       delete process.env.GIT_ASKPASS;
@@ -142,5 +162,96 @@ describe('GitCliAdapter (real git, no mocks)', () => {
     expect(call.env.GIT_TERMINAL_PROMPT).toBe('0');
     expect(call.env.GIT_ASKPASS).toBe('');
     expect(call.env.SSH_ASKPASS).toBe('');
+  });
+  it('batch-reads exact bytes for unusual names, binary, empty, and large files', async () => {
+    const repo = path.join(tmpDir, 'batch');
+    await fs.mkdir(repo);
+    await run(['git', 'init', '-q'], repo);
+    await run(['git', 'config', 'user.email', 'local@example.invalid'], repo);
+    await run(['git', 'config', 'user.name', 'Local'], repo);
+    const entries = new Map<string, string | Buffer>([
+      ['with space.txt', 'first\r\nsecond\r\n'],
+      ['公告.txt', 'unicode: Привіт\n'],
+      ['line\nbreak.txt', 'not a batch command\n'],
+      ['empty.txt', ''],
+      ['binary.dat', Buffer.from([1, 0, 2, 255])],
+      ['large.txt', 'ordinary text\n'.repeat(20000)],
+    ]);
+    for (const [file, value] of entries)
+      await fs.writeFile(path.join(repo, file), value);
+    await run(['git', 'add', '.'], repo);
+    await run(
+      ['git', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'batch fixture'],
+      repo,
+    );
+    const actual = [];
+    for await (const entry of adapter.readFilesAtHead(repo, [
+      ...entries.keys(),
+    ]))
+      actual.push(entry);
+    for (const entry of actual)
+      expect(entry.text).toEqual(
+        await adapter.readFileAtHead(repo, entry.filePath),
+      );
+    expect(actual.map((entry) => entry.filePath)).toEqual([...entries.keys()]);
+    expect(
+      actual.find((entry) => entry.filePath === 'binary.dat')?.text,
+    ).toBeNull();
+    const selected = [];
+    for await (const entry of adapter.readFilesAtHead(repo, ['empty.txt']))
+      selected.push(entry);
+    expect(selected).toEqual([{ filePath: 'empty.txt', text: '' }]);
+    const missing = async () => {
+      for await (const _ of adapter.readFilesAtHead(repo, ['absent'])) {
+      }
+    };
+    await expect(missing()).rejects.toThrow('missing');
+  });
+
+  it('streams the same commit text as the previous buffered reader, including CRLF', async () => {
+    const repo = path.join(tmpDir, 'history');
+    await fs.mkdir(repo);
+    await run(['git', 'init', '-q'], repo);
+    await run(['git', 'config', 'user.email', 'local@example.invalid'], repo);
+    await run(['git', 'config', 'user.name', 'Local'], repo);
+    await run(['git', 'config', 'core.autocrlf', 'false'], repo);
+    for (let i = 0; i < 3; i++) {
+      await fs.writeFile(
+        path.join(repo, 'config.txt'),
+        `revision=${i}\r\nUnicode: Привіт\r\n`,
+      );
+      await run(['git', 'add', '.'], repo);
+      await run(
+        ['git', '-c', 'commit.gpgsign=false', 'commit', '-qm', `change ${i}`],
+        repo,
+      );
+    }
+    const { stdout } = await execFileAsync('git', [
+      '-C',
+      repo,
+      'log',
+      '-p',
+      '--full-history',
+      '--reverse',
+    ]);
+    const matches = [...stdout.matchAll(/^commit ([0-9a-f]{40})(?: .*)?$/gm)];
+    const expected = matches.map((match, i) => ({
+      commitSha: match[1],
+      diffText: stdout.slice(
+        match.index! + match[0].length,
+        matches[i + 1]?.index ?? stdout.length,
+      ),
+    }));
+    const actual = [];
+    for await (const diff of adapter.iterCommitDiffs(repo)) actual.push(diff);
+    expect(actual).toEqual(expected);
+  });
+
+  it('propagates Git failures rather than reporting an empty successful history', async () => {
+    const read = async () => {
+      for await (const _ of adapter.iterCommitDiffs(tmpDir)) {
+      }
+    };
+    await expect(read()).rejects.toThrow('Git process failed');
   });
 });

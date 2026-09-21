@@ -46,6 +46,7 @@ export class RunScanLoopUseCase {
     } = options;
 
     let processed = 0;
+    let failed = 0;
     let stopped = false;
     const report = (message: string) => {
       this.logger.log(message);
@@ -58,7 +59,9 @@ export class RunScanLoopUseCase {
     }
     const requeuedFailed = await this.state.requeueFailed(maxRetries);
     if (requeuedFailed > 0) {
-      report(`scan: requeued ${requeuedFailed} failed repos for retry (max ${maxRetries} attempts)`);
+      report(
+        `scan: requeued ${requeuedFailed} failed repos for retry (max ${maxRetries} attempts)`,
+      );
     }
     await this.workdirJoiner.ensureDir(workdirRoot);
 
@@ -66,11 +69,13 @@ export class RunScanLoopUseCase {
 
     const workerLoop = async (): Promise<void> => {
       for (;;) {
-        if (maxRepos !== undefined && reserved >= maxRepos) {
-          return;
-        }
         if (shouldStop && (await shouldStop())) {
           stopped = true;
+          return;
+        }
+        // No await between checking and reserving: all worker loops share
+        // this counter, including when the stop check yields to another loop.
+        if (maxRepos !== undefined && reserved >= maxRepos) {
           return;
         }
         reserved += 1;
@@ -79,15 +84,22 @@ export class RunScanLoopUseCase {
           reserved -= 1;
           return;
         }
-        const workdir = this.workdirJoiner.join(workdirRoot, `repo-${ref.repoId}`);
+        const workdir = this.workdirJoiner.join(
+          workdirRoot,
+          `repo-${ref.repoId}`,
+        );
         // scanRepository reports its own per-repo progress (cloning,
         // cloned, working tree done, done/failed) through this same
         // onProgress channel, tagged with the count completed so far -
         // without this, the UI only ever saw "processed N" once per
         // whole repo, which looked idle during a slow clone/scan.
-        await this.scanRepository.execute(ref, sourceUrlFn(ref), workdir, (message) =>
-          onProgress?.(message, processed),
+        const result = await this.scanRepository.execute(
+          ref,
+          sourceUrlFn(ref),
+          workdir,
+          (message) => onProgress?.(message, processed),
         );
+        if (result?.status === 'failed') failed += 1;
         processed += 1;
         onProgress?.(`scan: ${processed} repos processed so far`, processed);
       }
@@ -102,6 +114,9 @@ export class RunScanLoopUseCase {
         ? `scan: stopped by request, ${processed} repos processed this run`
         : `scan: loop finished, ${processed} repos processed this run`,
     );
+    if (failed > 0) {
+      throw new Error(`scan: ${failed} of ${processed} repositories failed`);
+    }
     return processed;
   }
 }

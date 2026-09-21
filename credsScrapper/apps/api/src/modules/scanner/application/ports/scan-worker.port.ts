@@ -1,4 +1,5 @@
 import { IRepoRef } from '../../domain/types/repo-ref.type';
+import { IScanResumeOptions } from '../types/scan-checkpoint.type';
 import {
   IScanJobEvent,
   TScanJobResult,
@@ -14,5 +15,6 @@ export abstract class ScanWorkerPort {
     cloneSource: string,
     workdir: string,
     onEvent: (event: IScanJobEvent) => void,
+    resume?: IScanResumeOptions,
   ): Promise<TScanJobResult>;
 }

@@ -1,14 +1,18 @@
 import { MessageChannel } from 'node:worker_threads';
 
-jest.mock('../../../../../src/modules/scanner/infrastructure/git/git-cli-adapter', () => ({
-  GitCliAdapter: jest.fn().mockImplementation(() => ({
-    cloneBare: jest.fn().mockResolvedValue(undefined),
-    getHeadCommit: jest.fn().mockResolvedValue('a'.repeat(40)),
-    listFilesAtHead: jest.fn().mockResolvedValue([]),
-    readFileAtHead: jest.fn().mockResolvedValue(null),
-    iterCommitDiffs: jest.fn().mockResolvedValue([]),
-  })),
-}));
+jest.mock(
+  '../../../../../src/modules/scanner/infrastructure/git/git-cli-adapter',
+  () => ({
+    GitCliAdapter: jest.fn().mockImplementation(() => ({
+      cloneBare: jest.fn().mockResolvedValue(undefined),
+      getHeadCommit: jest.fn().mockResolvedValue('a'.repeat(40)),
+      listFilesAtHead: jest.fn().mockResolvedValue([]),
+      readFileAtHead: jest.fn().mockResolvedValue(null),
+      iterCommitDiffs: async function* () {},
+      readFilesAtHead: async function* () {},
+    })),
+  }),
+);
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import runScanTask from '../../../../../src/modules/scanner/infrastructure/workers/scan.worker';
@@ -17,7 +21,10 @@ describe('scan.worker default export', () => {
   it('runs the scan and posts progress events on the given port, then resolves the result', async () => {
     const { port1, port2 } = new MessageChannel();
     const received: unknown[] = [];
-    port1.on('message', (m) => received.push(m));
+    port1.on('message', (m) => {
+      received.push(m);
+      if (m.type === 'events') port1.postMessage('ack');
+    });
 
     const result = await runScanTask({
       repoRef: { repoId: 1, owner: 'octocat', name: 'hello-world' },
@@ -39,6 +46,7 @@ describe('scan.worker default export', () => {
     port2.close();
     expect(result).toEqual({ status: 'done', headSha: 'a'.repeat(40) });
     expect(received.length).toBeGreaterThan(0);
-    expect((received[0] as any).type).toBe('progress');
+    expect((received[0] as any).events[0].type).toBe('progress');
+    expect((received[received.length - 1] as any).type).toBe('complete');
   });
 });

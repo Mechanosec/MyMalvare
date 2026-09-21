@@ -3,6 +3,9 @@ name: add-scan-pattern
 description: Use when adding or editing a detected secret type/pattern in credsScrapper (a new API key format, token format, or entropy rule). Touches domain detection code, both constant files, and adds a unit test - use when the user says "add a pattern for X", "detect Y tokens", or "add a secret type".
 ---
 
+Paths beginning with `credsScrapper/` are relative to the Git repository root. Read `credsScrapper/AGENTS.md` for project rules.
+
+
 Adding a new detected secret type in credsScrapper touches four places. Miss one and either detection silently does nothing, or the UI can't label a finding.
 
 1. **Pattern** — `credsScrapper/apps/api/src/modules/scanner/domain/detection/patterns.ts`

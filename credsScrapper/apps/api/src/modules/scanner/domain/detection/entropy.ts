@@ -47,7 +47,10 @@ export function findHighEntropyTokens(text: string): IHighEntropyToken[] {
   const tokens: IHighEntropyToken[] = [];
   for (const match of text.matchAll(GENERIC_TOKEN_RE)) {
     const token = match[0];
-    if (shannonEntropy(token) > ENTROPY_THRESHOLD && countDigits(token) >= MIN_DIGITS) {
+    if (
+      countDigits(token) >= MIN_DIGITS &&
+      shannonEntropy(token) > ENTROPY_THRESHOLD
+    ) {
       // matchAll already gives us the exact position - the caller used to
       // re-find it with text.indexOf(token), which is O(text.length) per
       // token. On a large commit-history diff (real repos can produce a
