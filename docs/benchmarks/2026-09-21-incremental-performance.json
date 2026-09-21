@@ -1,0 +1,135 @@
+{
+  "date": "2026-09-21T12:46:53.524Z",
+  "node": "v22.23.1",
+  "fixture": {
+    "files": 151,
+    "initialCommits": 250,
+    "addedCommits": 1
+  },
+  "method": "Three fresh processes; variant order alternates. Compare optimized full clone+scan with Git cache+fetch+checkpoint. Includes cache locking/version hashing; excludes network, Redis, DB, Piscina and TypeScript startup. Checkpoints simulated after successful scan. Compare accumulated complete finding events, not per-run output counts.",
+  "runs": [
+    [
+      {
+        "phase": "first",
+        "before": {
+          "totalMs": 185.09003600000005,
+          "emittedFindings": 31873
+        },
+        "after": {
+          "totalMs": 185.49804700000004,
+          "emittedFindings": 31873
+        },
+        "identicalAccumulatedFindings": true,
+        "fingerprint": "f952a76102a5e2e19e638c71f8f6929e4f3d5abe14130a719c45b6c174d82ea6"
+      },
+      {
+        "phase": "unchanged",
+        "before": {
+          "totalMs": 180.78857400000015,
+          "emittedFindings": 31873
+        },
+        "after": {
+          "totalMs": 42.73578300000008,
+          "emittedFindings": 0
+        },
+        "identicalAccumulatedFindings": true,
+        "fingerprint": "f952a76102a5e2e19e638c71f8f6929e4f3d5abe14130a719c45b6c174d82ea6"
+      },
+      {
+        "phase": "one-commit",
+        "before": {
+          "totalMs": 171.18734700000005,
+          "emittedFindings": 32001
+        },
+        "after": {
+          "totalMs": 83.9269119999999,
+          "emittedFindings": 192
+        },
+        "identicalAccumulatedFindings": true,
+        "fingerprint": "a1b04a21f93686ce908fd9938e0c15d5891f8f14ba199664bf8c2d418b5d3e6d"
+      }
+    ],
+    [
+      {
+        "phase": "first",
+        "after": {
+          "totalMs": 206.7559080000001,
+          "emittedFindings": 31873
+        },
+        "before": {
+          "totalMs": 181.18976299999986,
+          "emittedFindings": 31873
+        },
+        "identicalAccumulatedFindings": true,
+        "fingerprint": "c6c6b246e2d8ff61277be52818b81fc519da1f6b5bf85317515fae8eccaebcf3"
+      },
+      {
+        "phase": "unchanged",
+        "after": {
+          "totalMs": 46.46150899999975,
+          "emittedFindings": 0
+        },
+        "before": {
+          "totalMs": 181.222714,
+          "emittedFindings": 31873
+        },
+        "identicalAccumulatedFindings": true,
+        "fingerprint": "c6c6b246e2d8ff61277be52818b81fc519da1f6b5bf85317515fae8eccaebcf3"
+      },
+      {
+        "phase": "one-commit",
+        "after": {
+          "totalMs": 84.57666500000005,
+          "emittedFindings": 192
+        },
+        "before": {
+          "totalMs": 180.02882499999987,
+          "emittedFindings": 32001
+        },
+        "identicalAccumulatedFindings": true,
+        "fingerprint": "625e227d99c8ec4576c1adf0442b7bda145bcdfeb8b359675c3b196a819a5780"
+      }
+    ],
+    [
+      {
+        "phase": "first",
+        "before": {
+          "totalMs": 322.96985300000006,
+          "emittedFindings": 31873
+        },
+        "after": {
+          "totalMs": 324.4477820000002,
+          "emittedFindings": 31873
+        },
+        "identicalAccumulatedFindings": true,
+        "fingerprint": "911e7e7b994653d5ec0e7000f3e15792abfdb632c3d408ed623eaec377b26a92"
+      },
+      {
+        "phase": "unchanged",
+        "before": {
+          "totalMs": 239.32561999999962,
+          "emittedFindings": 31873
+        },
+        "after": {
+          "totalMs": 34.64457599999969,
+          "emittedFindings": 0
+        },
+        "identicalAccumulatedFindings": true,
+        "fingerprint": "911e7e7b994653d5ec0e7000f3e15792abfdb632c3d408ed623eaec377b26a92"
+      },
+      {
+        "phase": "one-commit",
+        "before": {
+          "totalMs": 224.62565300000006,
+          "emittedFindings": 32001
+        },
+        "after": {
+          "totalMs": 78.9396399999996,
+          "emittedFindings": 192
+        },
+        "identicalAccumulatedFindings": true,
+        "fingerprint": "5f7f7e6bd5ce8655b467e316c58b797b407f2b7655c317bebad6062d89e49330"
+      }
+    ]
+  ]
+}

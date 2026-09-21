@@ -1,0 +1,230 @@
+{
+  "date": "2026-09-21T12:08:37.772Z",
+  "node": "v22.23.1",
+  "git": "git version 2.55.0",
+  "method": "3 fresh processes per variant, alternating order, same synthetic repos; local clone, Git I/O and detection; excludes network, Redis, DB and Piscina; peak RSS includes ts-node.",
+  "results": [
+    {
+      "name": "many-files",
+      "files": 600,
+      "commits": 1,
+      "denseLines": 0,
+      "actualFiles": 601,
+      "identicalFindings": true,
+      "runs": {
+        "before": [
+          {
+            "totalMs": 2846.728775,
+            "detectionMs": 259.1528430000013,
+            "cloneMs": 14.328569999999957,
+            "headReadMs": 2538.7277570000024,
+            "historyReadMs": 16.09011899999996,
+            "findings": 2,
+            "fingerprint": "3d531bbed39159dca40f666b3c46f70bbc909c62a444af253136e9dda7b02780",
+            "peakRssMiB": 158.3125
+          },
+          {
+            "totalMs": 2969.254925,
+            "detectionMs": 270.28081099999963,
+            "cloneMs": 17.45449599999995,
+            "headReadMs": 2650.705389999995,
+            "historyReadMs": 13.279862999999978,
+            "findings": 2,
+            "fingerprint": "3d531bbed39159dca40f666b3c46f70bbc909c62a444af253136e9dda7b02780",
+            "peakRssMiB": 159.86328125
+          },
+          {
+            "totalMs": 2782.9383820000003,
+            "detectionMs": 219.44065499999522,
+            "cloneMs": 15.234291999999982,
+            "headReadMs": 2514.7786520000036,
+            "historyReadMs": 16.674530000000004,
+            "findings": 2,
+            "fingerprint": "3d531bbed39159dca40f666b3c46f70bbc909c62a444af253136e9dda7b02780",
+            "peakRssMiB": 159.77734375
+          }
+        ],
+        "after": [
+          {
+            "totalMs": 327.87591599999996,
+            "detectionMs": 227.30227199999774,
+            "cloneMs": 14.567397000000028,
+            "headReadMs": 36.342444999998406,
+            "historyReadMs": 41.46376099999998,
+            "findings": 2,
+            "fingerprint": "3d531bbed39159dca40f666b3c46f70bbc909c62a444af253136e9dda7b02780",
+            "peakRssMiB": 166.3125
+          },
+          {
+            "totalMs": 222.79066699999998,
+            "detectionMs": 138.04259499999955,
+            "cloneMs": 13.719864999999913,
+            "headReadMs": 31.04345600000113,
+            "historyReadMs": 33.480046000000016,
+            "findings": 2,
+            "fingerprint": "3d531bbed39159dca40f666b3c46f70bbc909c62a444af253136e9dda7b02780",
+            "peakRssMiB": 166.39453125
+          },
+          {
+            "totalMs": 344.40775999999994,
+            "detectionMs": 243.30903600000192,
+            "cloneMs": 15.209274999999934,
+            "headReadMs": 35.324876000001495,
+            "historyReadMs": 42.15941900000007,
+            "findings": 2,
+            "fingerprint": "3d531bbed39159dca40f666b3c46f70bbc909c62a444af253136e9dda7b02780",
+            "peakRssMiB": 167.6015625
+          }
+        ]
+      }
+    },
+    {
+      "name": "history",
+      "files": 80,
+      "commits": 80,
+      "denseLines": 0,
+      "actualFiles": 81,
+      "identicalFindings": true,
+      "runs": {
+        "before": [
+          {
+            "totalMs": 332.87908600000003,
+            "detectionMs": 30.434101999998347,
+            "cloneMs": 13.198782000000051,
+            "headReadMs": 276.4830449999996,
+            "historyReadMs": 7.901071000000002,
+            "findings": 80,
+            "fingerprint": "9b3008c014e11a107ba4406768a29965a8ac06123d0893b5c8729dfea4b0a97b",
+            "peakRssMiB": 145.78125
+          },
+          {
+            "totalMs": 297.993638,
+            "detectionMs": 29.021717000000024,
+            "cloneMs": 11.908253000000002,
+            "headReadMs": 245.18228000000067,
+            "historyReadMs": 7.425622999999973,
+            "findings": 80,
+            "fingerprint": "9b3008c014e11a107ba4406768a29965a8ac06123d0893b5c8729dfea4b0a97b",
+            "peakRssMiB": 147.28125
+          },
+          {
+            "totalMs": 500.619839,
+            "detectionMs": 44.183214999999905,
+            "cloneMs": 16.978907999999933,
+            "headReadMs": 418.39381799999967,
+            "historyReadMs": 13.705176999999935,
+            "findings": 80,
+            "fingerprint": "9b3008c014e11a107ba4406768a29965a8ac06123d0893b5c8729dfea4b0a97b",
+            "peakRssMiB": 147.0859375
+          }
+        ],
+        "after": [
+          {
+            "totalMs": 79.30391599999996,
+            "detectionMs": 24.893968000000427,
+            "cloneMs": 13.111899000000108,
+            "headReadMs": 21.34679200000005,
+            "historyReadMs": 15.22004500000071,
+            "findings": 80,
+            "fingerprint": "9b3008c014e11a107ba4406768a29965a8ac06123d0893b5c8729dfea4b0a97b",
+            "peakRssMiB": 149.8125
+          },
+          {
+            "totalMs": 74.75567499999994,
+            "detectionMs": 26.714025000000106,
+            "cloneMs": 12.735386000000005,
+            "headReadMs": 19.149979999999346,
+            "historyReadMs": 11.841769000000568,
+            "findings": 80,
+            "fingerprint": "9b3008c014e11a107ba4406768a29965a8ac06123d0893b5c8729dfea4b0a97b",
+            "peakRssMiB": 148.734375
+          },
+          {
+            "totalMs": 70.01278000000002,
+            "detectionMs": 24.814137000000756,
+            "cloneMs": 11.946594000000005,
+            "headReadMs": 16.970077999999717,
+            "historyReadMs": 11.83017000000018,
+            "findings": 80,
+            "fingerprint": "9b3008c014e11a107ba4406768a29965a8ac06123d0893b5c8729dfea4b0a97b",
+            "peakRssMiB": 148.62890625
+          }
+        ]
+      }
+    },
+    {
+      "name": "many-findings",
+      "files": 5,
+      "commits": 2,
+      "denseLines": 6000,
+      "actualFiles": 7,
+      "identicalFindings": true,
+      "runs": {
+        "before": [
+          {
+            "totalMs": 636.611388,
+            "detectionMs": 555.6211829999999,
+            "cloneMs": 10.576876000000027,
+            "headReadMs": 39.31241300000005,
+            "historyReadMs": 5.825646000000006,
+            "findings": 23984,
+            "fingerprint": "be4715654ca37c679d124acdca4465784113a09b0295ba4ddbeb3a3c3620bf96",
+            "peakRssMiB": 164.3671875
+          },
+          {
+            "totalMs": 537.748016,
+            "detectionMs": 462.03132800000014,
+            "cloneMs": 10.629254000000003,
+            "headReadMs": 35.64412399999975,
+            "historyReadMs": 6.616682999999966,
+            "findings": 23984,
+            "fingerprint": "be4715654ca37c679d124acdca4465784113a09b0295ba4ddbeb3a3c3620bf96",
+            "peakRssMiB": 164.33203125
+          },
+          {
+            "totalMs": 780.986709,
+            "detectionMs": 696.060886,
+            "cloneMs": 10.889440000000036,
+            "headReadMs": 33.68034799999958,
+            "historyReadMs": 7.199752000000046,
+            "findings": 23984,
+            "fingerprint": "be4715654ca37c679d124acdca4465784113a09b0295ba4ddbeb3a3c3620bf96",
+            "peakRssMiB": 163.5703125
+          }
+        ],
+        "after": [
+          {
+            "totalMs": 272.908686,
+            "detectionMs": 195.16296900000015,
+            "cloneMs": 10.521343000000002,
+            "headReadMs": 18.493777000000193,
+            "historyReadMs": 10.747184000000004,
+            "findings": 23984,
+            "fingerprint": "be4715654ca37c679d124acdca4465784113a09b0295ba4ddbeb3a3c3620bf96",
+            "peakRssMiB": 166.25
+          },
+          {
+            "totalMs": 197.83383500000002,
+            "detectionMs": 128.4057880000002,
+            "cloneMs": 10.299709000000007,
+            "headReadMs": 20.46117099999981,
+            "historyReadMs": 13.084097999999983,
+            "findings": 23984,
+            "fingerprint": "be4715654ca37c679d124acdca4465784113a09b0295ba4ddbeb3a3c3620bf96",
+            "peakRssMiB": 165.3671875
+          },
+          {
+            "totalMs": 200.17731000000003,
+            "detectionMs": 132.11369700000006,
+            "cloneMs": 9.976916000000017,
+            "headReadMs": 19.002718000000016,
+            "historyReadMs": 12.136698999999965,
+            "findings": 23984,
+            "fingerprint": "be4715654ca37c679d124acdca4465784113a09b0295ba4ddbeb3a3c3620bf96",
+            "peakRssMiB": 166.53125
+          }
+        ]
+      }
+    }
+  ]
+}

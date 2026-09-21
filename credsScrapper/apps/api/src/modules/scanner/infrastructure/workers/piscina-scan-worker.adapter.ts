@@ -8,7 +8,9 @@ import {
   TScanJobResult,
 } from '../../application/use-cases/run-scan-job.use-case';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
+import { TScanMessage } from './types/scan-message.type';
 import { SCAN_WORKER_POOL_SIZE } from './pool-size';
+import { IScanResumeOptions } from '../../application/types/scan-checkpoint.type';
 
 @Injectable()
 export class PiscinaScanWorkerAdapter
@@ -40,19 +42,36 @@ export class PiscinaScanWorkerAdapter
     cloneSource: string,
     workdir: string,
     onEvent: (event: IScanJobEvent) => void,
+    resume?: IScanResumeOptions,
   ): Promise<TScanJobResult> {
     const { port1, port2 } = new MessageChannel();
-    port1.on('message', (event: IScanJobEvent) => onEvent(event));
+    const abort = new AbortController();
+    const delivered = new Promise<void>((resolve, reject) => {
+      port1.on('message', (message: TScanMessage) => {
+        try {
+          if (message.type === 'complete') resolve();
+          else {
+            for (const event of message.events) onEvent(event);
+            port1.postMessage('ack');
+          }
+        } catch (error) {
+          abort.abort();
+          reject(error);
+        }
+      });
+      port1.on('messageerror', (error) => {
+        abort.abort();
+        reject(error);
+      });
+    });
     try {
-      const result = await this.pool.run(
-        { repoRef, cloneSource, workdir, port: port2 },
-        { transferList: [port2] },
-      );
-      // Piscina's own result-delivery channel and this port are
-      // independent MessagePorts with no cross-port ordering guarantee -
-      // flush one macrotask so any in-flight progress/finding messages
-      // land before we return (see ledger entry, Task 4/5).
-      await new Promise((resolve) => setImmediate(resolve));
+      const [result] = await Promise.all([
+        this.pool.run(
+          { repoRef, cloneSource, workdir, port: port2, resume },
+          { transferList: [port2], signal: abort.signal },
+        ) as Promise<TScanJobResult>,
+        delivered,
+      ]);
       return result;
     } finally {
       port1.close();

@@ -1,0 +1,4 @@
+interface:
+  display_name: "/push"
+  short_description: "Гілка від свіжого main, commit, push і PR"
+  default_prompt: "Використай $push: створи гілку від актуального main, закоміть зміни цієї задачі, запуш їх, створи PR і дай короткий звіт."

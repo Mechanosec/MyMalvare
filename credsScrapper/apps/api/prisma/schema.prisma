@@ -34,6 +34,7 @@ model ScannedRepo {
   owner         String
   name          String
   lastCommitSha String?   @map("last_commit_sha")
+  scannerVersion String?  @map("scanner_version")
   status        String // EScanStatus: pending | in_progress | done | failed
   startedAt     DateTime? @map("started_at")
   scannedAt     DateTime? @map("scanned_at")

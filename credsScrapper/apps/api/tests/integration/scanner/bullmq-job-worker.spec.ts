@@ -1,6 +1,9 @@
 import { Queue } from 'bullmq';
 import { BullmqJobWorker } from '../../../src/modules/scanner/infrastructure/jobs/bullmq-job-worker';
-import { redisConnection, SCANNER_QUEUE_NAME } from '../../../src/modules/scanner/infrastructure/jobs/bullmq-connection';
+import {
+  redisConnection,
+  SCANNER_QUEUE_NAME,
+} from '../../../src/modules/scanner/infrastructure/jobs/bullmq-connection';
 import { BullmqJobQueueAdapter } from '../../../src/modules/scanner/infrastructure/jobs/bullmq-job-queue.adapter';
 import { EJobStatus } from '../../../src/modules/scanner/domain/constant/job-status.constant';
 
@@ -12,13 +15,14 @@ class RecordingScanRepository {
     cloneSource: string,
     workdir: string,
     onProgress?: (message: string) => void,
-  ): Promise<void> => {
+  ) => {
     this.calls.push({ repoRef, cloneSource, workdir });
     if (this.shouldReject) {
       throw new Error('scan worker crashed');
     }
     onProgress?.('scan: test/repo - cloning');
     onProgress?.('scan: test/repo - done, 0 findings total');
+    return { status: 'done' as const, headSha: 'a'.repeat(40) };
   };
 }
 
@@ -32,7 +36,9 @@ class RecordingDiscoverRepos {
   ): Promise<number> => {
     this.calls.push(date);
     this.lastShouldStop = shouldStop;
-    onProgress?.('discovery: finished, 0 push events processed, 0 new candidates added');
+    onProgress?.(
+      'discovery: finished, 0 push events processed, 0 new candidates added',
+    );
     return 0;
   };
 }
@@ -96,12 +102,19 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
     await queue.close();
   });
 
-  async function waitForStatus(jobId: string, status: EJobStatus, timeoutMs = 5000): Promise<void> {
+  async function waitForStatus(
+    jobId: string,
+    status: EJobStatus,
+    timeoutMs = 5000,
+  ): Promise<void> {
     const start = Date.now();
     for (;;) {
       const job = await queueAdapter.getJob(jobId);
       if (job?.status === status) return;
-      if (Date.now() - start > timeoutMs) throw new Error(`Timed out waiting for job ${jobId} to reach ${status}`);
+      if (Date.now() - start > timeoutMs)
+        throw new Error(
+          `Timed out waiting for job ${jobId} to reach ${status}`,
+        );
       await new Promise((r) => setTimeout(r, 50));
     }
   }
@@ -116,12 +129,24 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
     await waitForStatus(job.id!, EJobStatus.DONE);
 
     expect(scanRepository.calls).toEqual([
-      { repoRef: { repoId: 1, owner: 'test', name: 'repo' }, cloneSource: 'https://example.com/repo.git', workdir: 'workdir/repo-1' },
+      {
+        repoRef: { repoId: 1, owner: 'test', name: 'repo' },
+        cloneSource: 'https://example.com/repo.git',
+        workdir: 'workdir/repo-1',
+      },
     ]);
     const finalState = await queueAdapter.getJob(job.id!);
-    expect(finalState?.log.map((e) => e.message)).toContain('scan: test/repo - cloning');
-    expect(progress.events.some((e: any) => e.message === 'scan: test/repo - cloning')).toBe(true);
-    expect(progress.events.some((e: any) => e.status === EJobStatus.DONE)).toBe(true);
+    expect(finalState?.log.map((e) => e.message)).toContain(
+      'scan: test/repo - cloning',
+    );
+    expect(
+      progress.events.some(
+        (e: any) => e.message === 'scan: test/repo - cloning',
+      ),
+    ).toBe(true);
+    expect(progress.events.some((e: any) => e.status === EJobStatus.DONE)).toBe(
+      true,
+    );
   });
 
   it('emits a FAILED progress event when scan-repo processing rejects', async () => {

@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { ScanCachePort } from './application/ports/scan-cache.port';
+import { FsScanCacheAdapter } from './infrastructure/fs/fs-scan-cache.adapter';
 import { provideUseCase } from '../../shared/di/provide-use-case';
 import { IdentityModule } from '../identity/identity.module';
 import { AdminGuard } from '../identity/infrastructure/guards/admin.guard';
@@ -57,6 +59,7 @@ import { ScanController } from './presentation/scan.controller';
   ],
   providers: [
     PrismaService,
+    { provide: ScanCachePort, useClass: FsScanCacheAdapter },
     { provide: StateRepositoryPort, useClass: PrismaStateRepository },
     { provide: ScanWorkerPort, useClass: PiscinaScanWorkerAdapter },
     { provide: DiscoveryFeedPort, useClass: GhArchiveHttpAdapter },
@@ -73,9 +76,15 @@ import { ScanController } from './presentation/scan.controller';
     ),
     provideUseCase(
       ScanRepositoryUseCase,
-      [ScanWorkerPort, StateRepositoryPort, LoggerPort, WorkdirCleanerPort],
-      (scanWorker, state, logger, cleaner) =>
-        new ScanRepositoryUseCase(scanWorker, state, logger, cleaner),
+      [
+        ScanWorkerPort,
+        StateRepositoryPort,
+        LoggerPort,
+        WorkdirCleanerPort,
+        ScanCachePort,
+      ],
+      (scanWorker, state, logger, cleaner, cache) =>
+        new ScanRepositoryUseCase(scanWorker, state, logger, cleaner, cache),
     ),
     provideUseCase(
       RunScanLoopUseCase,
@@ -108,7 +117,11 @@ import { ScanController } from './presentation/scan.controller';
       [StateRepositoryPort],
       (state) => new GetFindingsStatusCountsUseCase(state),
     ),
-    provideUseCase(StopJobUseCase, [JobQueuePort], (jobQueue) => new StopJobUseCase(jobQueue)),
+    provideUseCase(
+      StopJobUseCase,
+      [JobQueuePort],
+      (jobQueue) => new StopJobUseCase(jobQueue),
+    ),
     provideUseCase(
       GetScanStatusUseCase,
       [StateRepositoryPort],
@@ -136,7 +149,12 @@ import { ScanController } from './presentation/scan.controller';
     ),
     provideUseCase(
       AdminScanRepoUseCase,
-      [StateRepositoryPort, GithubRepoLookupPort, JobQueuePort, WorkdirJoinerPort],
+      [
+        StateRepositoryPort,
+        GithubRepoLookupPort,
+        JobQueuePort,
+        WorkdirJoinerPort,
+      ],
       (state, githubLookup, jobQueue, workdirJoiner) =>
         new AdminScanRepoUseCase(state, githubLookup, jobQueue, workdirJoiner),
     ),

@@ -12,13 +12,18 @@ import {
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
 import { IScannedRepoRecord } from '../../domain/types/scanned-repo-record.type';
+import { IScanCheckpoint } from '../types/scan-checkpoint.type';
 
 // Abstract class rather than an interface: the class itself doubles as
 // the NestJS DI token (`{ provide: StateRepositoryPort, useClass: ... }`),
 // no companion Symbol/string token needed.
 export abstract class StateRepositoryPort {
   /** Returns true if a new candidate row was inserted, false if repoId is already known. */
-  abstract addCandidate(repoId: number, owner: string, name: string): Promise<boolean>;
+  abstract addCandidate(
+    repoId: number,
+    owner: string,
+    name: string,
+  ): Promise<boolean>;
 
   abstract isKnown(repoId: number): Promise<boolean>;
 
@@ -29,7 +34,13 @@ export abstract class StateRepositoryPort {
    */
   abstract claimNext(): Promise<IRepoRef | null>;
 
-  abstract markDone(repoId: number, lastCommitSha: string): Promise<void>;
+  abstract markDone(
+    repoId: number,
+    lastCommitSha: string,
+    scannerVersion?: string,
+  ): Promise<void>;
+
+  abstract getScanCheckpoint(repoId: number): Promise<IScanCheckpoint | null>;
 
   abstract markFailed(repoId: number, reason: string): Promise<void>;
 
@@ -39,7 +50,11 @@ export abstract class StateRepositoryPort {
    * in_progress. Used for a user-triggered scan of their own approved
    * repo, which must never grab an unrelated queued repo via claimNext().
    */
-  abstract startRepoScan(repoId: number, owner: string, name: string): Promise<void>;
+  abstract startRepoScan(
+    repoId: number,
+    owner: string,
+    name: string,
+  ): Promise<void>;
 
   /** Resets in_progress rows older than timeoutSeconds back to pending. Returns count changed. */
   abstract requeueStale(timeoutSeconds: number): Promise<number>;
@@ -76,7 +91,10 @@ export abstract class StateRepositoryPort {
     findings: readonly IFindingInput[],
   ): Promise<void>;
 
-  abstract updateFindingStatus(id: number, status: EFindingStatus): Promise<void>;
+  abstract updateFindingStatus(
+    id: number,
+    status: EFindingStatus,
+  ): Promise<void>;
 
   /** Same as updateFindingStatus, but also stamps checkedAt - use for a live key-validation result, never a manual mark. */
   abstract recordTestResult(id: number, status: EFindingStatus): Promise<void>;
@@ -110,7 +128,9 @@ export abstract class StateRepositoryPort {
   ): Promise<IFindingsRepoOption[]>;
 
   /** Finding count per secret type, only for types with at least one finding. */
-  abstract listFindingsSecretTypeCounts(repoId?: number): Promise<ISecretTypeCount[]>;
+  abstract listFindingsSecretTypeCounts(
+    repoId?: number,
+  ): Promise<ISecretTypeCount[]>;
 
   /** Finding count per status (valid/invalid/unknown), optionally restricted to a repo and/or a set of secret types. */
   abstract listFindingsStatusCounts(

@@ -110,10 +110,30 @@ export class PrismaStateRepository extends StateRepositoryPort {
     });
   }
 
-  async markDone(repoId: number, lastCommitSha: string): Promise<void> {
+  async getScanCheckpoint(repoId: number) {
+    const row = await this.prisma.scannedRepo.findUnique({
+      where: { repoId },
+      select: { lastCommitSha: true, scannerVersion: true },
+    });
+    return row?.lastCommitSha && row.scannerVersion
+      ? { headSha: row.lastCommitSha, scannerVersion: row.scannerVersion }
+      : null;
+  }
+
+  async markDone(
+    repoId: number,
+    lastCommitSha: string,
+    scannerVersion?: string,
+  ): Promise<void> {
     await this.prisma.scannedRepo.update({
       where: { repoId },
-      data: { status: EScanStatus.DONE, lastCommitSha, scannedAt: new Date() },
+      data: {
+        status: EScanStatus.DONE,
+        lastCommitSha,
+        scannerVersion: scannerVersion ?? null,
+        scannedAt: new Date(),
+        failReason: null,
+      },
     });
   }
 
@@ -128,11 +148,30 @@ export class PrismaStateRepository extends StateRepositoryPort {
     });
   }
 
-  async startRepoScan(repoId: number, owner: string, name: string): Promise<void> {
-    await this.prisma.scannedRepo.upsert({
-      where: { repoId },
-      create: { repoId, owner, name, status: EScanStatus.IN_PROGRESS, startedAt: new Date(), retryCount: 0 },
-      update: { status: EScanStatus.IN_PROGRESS, startedAt: new Date() },
+  async startRepoScan(
+    repoId: number,
+    owner: string,
+    name: string,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.scannedRepo.upsert({
+        where: { repoId },
+        create: {
+          repoId,
+          owner,
+          name,
+          status: EScanStatus.IN_PROGRESS,
+          startedAt: new Date(),
+          retryCount: 0,
+        },
+        update: { status: EScanStatus.IN_PROGRESS, startedAt: new Date() },
+      });
+      // A directly scheduled repo must not remain pending in the discovery
+      // queue: claimNext would otherwise attempt a duplicate scannedRepo create.
+      await tx.candidate.updateMany({
+        where: { repoId },
+        data: { status: ECandidateStatus.CLAIMED },
+      });
     });
   }
 
@@ -231,7 +270,8 @@ export class PrismaStateRepository extends StateRepositoryPort {
     }
 
     const byKey = new Map<string, IMergeState>();
-    const keyOf = (secretType: string, secretValue: string) => `${secretType}|${secretValue}`;
+    const keyOf = (secretType: string, secretValue: string) =>
+      `${secretType}|${secretValue}`;
 
     // One query for every finding this repo already has, instead of one
     // findFirst per incoming finding - a repo scan can produce hundreds of
@@ -239,7 +279,13 @@ export class PrismaStateRepository extends StateRepositoryPort {
     // into a multi-minute tail after the scan itself had already finished.
     const existingRows = await this.prisma.finding.findMany({
       where: { repoId },
-      select: { id: true, secretType: true, secretValue: true, filePath: true, leakCommits: true },
+      select: {
+        id: true,
+        secretType: true,
+        secretValue: true,
+        filePath: true,
+        leakCommits: true,
+      },
     });
     for (const row of existingRows) {
       byKey.set(keyOf(row.secretType, row.secretValue), {
@@ -332,7 +378,9 @@ export class PrismaStateRepository extends StateRepositoryPort {
 
     const CHUNK_SIZE = 500;
     for (let i = 0; i < toInsert.length; i += CHUNK_SIZE) {
-      await this.prisma.finding.createMany({ data: toInsert.slice(i, i + CHUNK_SIZE) });
+      await this.prisma.finding.createMany({
+        data: toInsert.slice(i, i + CHUNK_SIZE),
+      });
     }
     // A re-scan of an already-known noisy repo routes almost everything
     // through here instead of toInsert (same findings, new commit sighting)
@@ -343,7 +391,9 @@ export class PrismaStateRepository extends StateRepositoryPort {
       await this.prisma.$transaction(
         toUpdate
           .slice(i, i + CHUNK_SIZE)
-          .map(({ id, data }) => this.prisma.finding.update({ where: { id }, data })),
+          .map(({ id, data }) =>
+            this.prisma.finding.update({ where: { id }, data }),
+          ),
       );
     }
   }
@@ -353,7 +403,10 @@ export class PrismaStateRepository extends StateRepositoryPort {
   }
 
   async recordTestResult(id: number, status: EFindingStatus): Promise<void> {
-    await this.prisma.finding.update({ where: { id }, data: { status, checkedAt: new Date() } });
+    await this.prisma.finding.update({
+      where: { id },
+      data: { status, checkedAt: new Date() },
+    });
   }
 
   async countFindings(repoId: number): Promise<number> {
@@ -411,7 +464,9 @@ export class PrismaStateRepository extends StateRepositoryPort {
   ): Promise<IFindingsRepoOption[]> {
     const rows = await this.prisma.finding.groupBy({
       by: ['repoId', 'owner', 'name', 'status'],
-      where: secretTypes?.length ? { secretType: { in: [...secretTypes] } } : undefined,
+      where: secretTypes?.length
+        ? { secretType: { in: [...secretTypes] } }
+        : undefined,
       _count: { _all: true },
     });
     return groupRepoOptionsByStatus(rows)
@@ -426,18 +481,26 @@ export class PrismaStateRepository extends StateRepositoryPort {
     if (pairs.length === 0) {
       return [];
     }
-    const wanted = new Set(pairs.map((p) => `${p.owner.toLowerCase()}/${p.name.toLowerCase()}`));
+    const wanted = new Set(
+      pairs.map((p) => `${p.owner.toLowerCase()}/${p.name.toLowerCase()}`),
+    );
     const rows = await this.prisma.finding.groupBy({
       by: ['repoId', 'owner', 'name', 'status'],
-      where: secretTypes?.length ? { secretType: { in: [...secretTypes] } } : undefined,
+      where: secretTypes?.length
+        ? { secretType: { in: [...secretTypes] } }
+        : undefined,
       _count: { _all: true },
     });
     return groupRepoOptionsByStatus(
-      rows.filter((row) => wanted.has(`${row.owner.toLowerCase()}/${row.name.toLowerCase()}`)),
+      rows.filter((row) =>
+        wanted.has(`${row.owner.toLowerCase()}/${row.name.toLowerCase()}`),
+      ),
     );
   }
 
-  async listFindingsSecretTypeCounts(repoId?: number): Promise<ISecretTypeCount[]> {
+  async listFindingsSecretTypeCounts(
+    repoId?: number,
+  ): Promise<ISecretTypeCount[]> {
     const rows = await this.prisma.finding.groupBy({
       by: ['secretType'],
       where: repoId !== undefined ? { repoId } : undefined,

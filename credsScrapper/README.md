@@ -13,9 +13,8 @@ This is an npm-workspaces monorepo, two applications:
 | [`apps/api`](apps/api) | NestJS backend, hexagonal architecture, Prisma/SQLite — the whole detection engine, git orchestration, GH Archive discovery, and the HTTP/WebSocket API |
 | [`apps/web`](apps/web) | Next.js dashboard — trigger a discover/scan run, watch live progress, browse findings |
 
-Design docs: [`../docs/superpowers/specs/`](../docs/superpowers/specs) —
-`2026-09-12-nestjs-backend-design.md` and `2026-09-12-nextjs-frontend-design.md`
-explain *why* each piece is shaped the way it is.
+Development rules: [`AGENTS.md`](AGENTS.md). Scanner analysis and performance
+measurements are linked below.
 
 ## Guardrails (read before touching detection or scan code)
 
@@ -38,6 +37,9 @@ explain *why* each piece is shaped the way it is.
 
 - Node.js 20+ (tested on Node 22) and `git` on `PATH` — the scanner shells
   out to the real `git` binary, it does not use a JS git library.
+- Persistent scan caching requires Linux `flock` (util-linux), `/bin/sh`
+  and `cat`. Cache locks must live on a local filesystem shared by API
+  processes that use the same SQLite database and scan work directory.
 - No database server to install: Prisma talks to a SQLite file
   (`apps/api/dev.db`, created on first migration).
 
@@ -109,6 +111,55 @@ cd apps/api && npx prisma migrate deploy && cd -
 
 `prisma migrate deploy` creates `apps/api/dev.db` and applies the schema. Run
 it again any time `apps/api/prisma/schema.prisma` changes.
+
+## Persistent and incremental scans
+
+The API retains bare Git repositories in `<SCAN_WORKDIR>/.scan-cache/`.
+After the first clone, scans fetch the remote's current HEAD. An unchanged
+HEAD with the same scanner version needs no detection work. A descendant
+HEAD scans only new commit diffs, then all current HEAD files to preserve
+finding locations and commit sightings. History coverage remains the
+ancestors of HEAD, not every branch.
+
+The checkpoint is stored in SQLite only after findings have been written.
+A failed scan/write retries from the preceding successful checkpoint.
+Changing detector/filter/parser code or source identity invalidates it;
+a missing base or rewritten history triggers a full scan. Fetch failure
+is a failed scan, never a successful result from stale cache content.
+Previously recorded findings remain historical records after force-push.
+
+An OS lock covers cache updates, scanning, and database persistence.
+Concurrent jobs in one API process join the active scan; a conflicting
+job in another process fails without modifying the active scan's state.
+Use the same absolute SCAN_WORKDIR and local filesystem across processes.
+This is not a cross-host/distributed lock.
+
+Cache directories unused for seven days are removed on a later scan
+(at most one sweep per hour per API process). Locked entries are skipped.
+The cache root is created with owner-only permissions. No separate cache
+of finding values is written; Git objects themselves still contain the
+repository content. There is no hard disk quota. Tiny lock files remain
+to preserve a stable lock inode; do not remove them while API processes run.
+
+After updating scanner code, regenerate Prisma Client, apply migrations,
+build, and restart the API so its worker processes use the new detector:
+
+```sh
+npm run prisma:generate -w apps/api
+npm run prisma:migrate -w apps/api
+npm run build -w apps/api
+```
+
+To discard the cache manually, stop all API processes first and remove
+only `.scan-cache/` under the configured scan work directory. Findings
+remain in SQLite; the next scan downloads Git data again. To force a full
+scan with unchanged code, clear that repo's `scanner_version` checkpoint
+in SQLite while the API is stopped. Do not delete finding records merely
+to force a rescan.
+
+Measurements and reproducible scripts:
+[incremental benchmark](../docs/benchmarks/2026-09-21-incremental-performance.md),
+[initial scanner optimization](../docs/benchmarks/2026-09-21-scan-performance.md).
 
 ## Running it
 

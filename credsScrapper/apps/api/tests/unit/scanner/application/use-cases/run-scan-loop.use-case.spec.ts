@@ -17,7 +17,12 @@ class RecordingScanner {
   readonly scanned: IRepoRef[] = [];
   constructor(private readonly state: FakeStateRepository) {}
 
-  execute = async (ref: IRepoRef, _source: string, _workdir: string, onProgress?: (message: string) => void): Promise<void> => {
+  execute = async (
+    ref: IRepoRef,
+    _source: string,
+    _workdir: string,
+    onProgress?: (message: string) => void,
+  ): Promise<void> => {
     onProgress?.(`scan: ${ref.owner}/${ref.name} - cloning`);
     this.scanned.push(ref);
     await this.state.markDone(ref.repoId);
@@ -90,7 +95,10 @@ describe('RunScanLoopUseCase', () => {
     );
 
     await useCase.execute({ workdirRoot: 'w', sourceUrlFn: () => 'x' });
-    const secondRun = await useCase.execute({ workdirRoot: 'w', sourceUrlFn: () => 'x' });
+    const secondRun = await useCase.execute({
+      workdirRoot: 'w',
+      sourceUrlFn: () => 'x',
+    });
 
     expect(secondRun).toBe(0);
   });
@@ -161,7 +169,9 @@ describe('RunScanLoopUseCase', () => {
 
     expect(messages).toContain('scan: octocat/repo1 - cloning');
     expect(messages).toContain('scan: octocat/repo1 - done, 0 findings total');
-    expect(messages).toContain('scan: loop finished, 1 repos processed this run');
+    expect(messages).toContain(
+      'scan: loop finished, 1 repos processed this run',
+    );
   });
 
   it('stops before claiming the next repo once shouldStop reports true, leaving later candidates untouched', async () => {
@@ -188,6 +198,57 @@ describe('RunScanLoopUseCase', () => {
 
     expect(processed).toBe(2);
     expect(scanner.scanned).toHaveLength(2);
-    expect(messages).toContain('scan: stopped by request, 2 repos processed this run');
+    expect(messages).toContain(
+      'scan: stopped by request, 2 repos processed this run',
+    );
+  });
+  it('reserves maxRepos atomically even when the stop check yields', async () => {
+    const state = new FakeStateRepository();
+    for (let i = 1; i <= 10; i++)
+      await state.addCandidate(i, 'local', `repo${i}`);
+    const scanner = new RecordingScanner(state);
+    const useCase = new RunScanLoopUseCase(
+      state,
+      scanner as never,
+      new FakeLogger(),
+      new FakeWorkdirJoiner(),
+    );
+    expect(
+      await useCase.execute({
+        workdirRoot: 'w',
+        sourceUrlFn: () => 'unused',
+        workers: 4,
+        maxRepos: 1,
+        shouldStop: async () => false,
+      }),
+    ).toBe(1);
+    expect(scanner.scanned).toHaveLength(1);
+  });
+  it('finishes the batch but reports failure if any repository failed', async () => {
+    const state = new FakeStateRepository();
+    for (let i = 1; i <= 3; i++)
+      await state.addCandidate(i, 'local', `repo${i}`);
+    const scanned: number[] = [];
+    const scanner = {
+      execute: async (ref: IRepoRef) => {
+        scanned.push(ref.repoId);
+        if (ref.repoId === 2) {
+          await state.markFailed(ref.repoId, 'synthetic failure');
+          return { status: 'failed' as const, failReason: 'synthetic failure' };
+        }
+        await state.markDone(ref.repoId);
+        return { status: 'done' as const, headSha: 'a'.repeat(40) };
+      },
+    };
+    const useCase = new RunScanLoopUseCase(
+      state,
+      scanner as never,
+      new FakeLogger(),
+      new FakeWorkdirJoiner(),
+    );
+    await expect(
+      useCase.execute({ workdirRoot: 'w', sourceUrlFn: () => 'unused' }),
+    ).rejects.toThrow('1 of 3 repositories failed');
+    expect(scanned).toEqual([1, 2, 3]);
   });
 });
