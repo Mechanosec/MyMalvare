@@ -1,6 +1,43 @@
 import { EFindingStatus } from '../../../../../src/modules/scanner/domain/constant/finding-status.constant';
 import { ESecretType } from '../../../../../src/modules/scanner/domain/constant/secret-type.constant';
-import { toFindingRecord } from '../../../../../src/modules/scanner/infrastructure/persistence/prisma-state.mapper';
+import {
+  groupRepoOptionsByStatus,
+  toFindingRecord,
+} from '../../../../../src/modules/scanner/infrastructure/persistence/prisma-state.mapper';
+
+describe('groupRepoOptionsByStatus', () => {
+  it('keeps failed findings separate from never-attempted unknown findings', () => {
+    expect(
+      groupRepoOptionsByStatus([
+        {
+          repoId: 1,
+          owner: 'fixture',
+          name: 'repo',
+          status: 'unknown',
+          _count: { _all: 2 },
+        },
+        {
+          repoId: 1,
+          owner: 'fixture',
+          name: 'repo',
+          status: 'failed',
+          _count: { _all: 3 },
+        },
+      ]),
+    ).toEqual([
+      {
+        repoId: 1,
+        owner: 'fixture',
+        name: 'repo',
+        count: 5,
+        validCount: 0,
+        invalidCount: 0,
+        failedCount: 3,
+        unknownCount: 2,
+      },
+    ]);
+  });
+});
 
 describe('toFindingRecord', () => {
   it('parses leakCommits JSON and casts status', () => {

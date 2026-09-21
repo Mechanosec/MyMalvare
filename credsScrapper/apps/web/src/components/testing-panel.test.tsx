@@ -26,7 +26,7 @@ const testedFinding = {
 describe('TestingPanel (regular user, scoped to own approved repos)', () => {
   beforeEach(() => {
     vi.spyOn(apiClient, 'fetchMyTestingFacets').mockResolvedValue({
-      repositories: [{ repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 0, invalidCount: 0, unknownCount: 1 }],
+      repositories: [{ repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 0, invalidCount: 0, failedCount: 0, unknownCount: 1 }],
       statuses: [
         { status: EFindingStatus.UNKNOWN, count: 1 },
         { status: EFindingStatus.VALID, count: 0 },
@@ -35,7 +35,7 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
       secretTypes: [{ secretType: ESecretType.GITHUB_PAT, count: 1 }],
     });
     vi.spyOn(apiClient, 'fetchMyTestableRepos').mockResolvedValue([
-      { repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 1, invalidCount: 0, unknownCount: 0 },
+      { repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 1, invalidCount: 0, failedCount: 0, unknownCount: 0 },
     ]);
     vi.spyOn(apiClient, 'fetchMyFindings').mockResolvedValue({
       items: [{ ...testedFinding, status: EFindingStatus.UNKNOWN, checkedAt: null }],
@@ -64,10 +64,10 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
   it('lets the user choose unknown before a repository and then narrows the repository picker', async () => {
     vi.mocked(apiClient.fetchMyTestingFacets).mockImplementation(async (query) => ({
       repositories: query.status === EFindingStatus.UNKNOWN
-        ? [{ repoId: 1, owner: 'acme', name: 'untested', count: 3, validCount: 0, invalidCount: 0, unknownCount: 3 }]
+        ? [{ repoId: 1, owner: 'acme', name: 'untested', count: 3, validCount: 0, invalidCount: 0, failedCount: 0, unknownCount: 3 }]
         : [
-          { repoId: 1, owner: 'acme', name: 'untested', count: 3, validCount: 0, invalidCount: 0, unknownCount: 3 },
-          { repoId: 2, owner: 'acme', name: 'tested', count: 2, validCount: 2, invalidCount: 0, unknownCount: 0 },
+          { repoId: 1, owner: 'acme', name: 'untested', count: 3, validCount: 0, invalidCount: 0, failedCount: 0, unknownCount: 3 },
+          { repoId: 2, owner: 'acme', name: 'tested', count: 2, validCount: 2, invalidCount: 0, failedCount: 0, unknownCount: 0 },
         ],
       statuses: [
         { status: EFindingStatus.UNKNOWN, count: 3 },
@@ -93,8 +93,8 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
   });
 
   it('cross-filters repository, status, and secret type in either order', async () => {
-    const repoOne = { repoId: 1, owner: 'acme', name: 'one', count: 2, validCount: 1, invalidCount: 0, unknownCount: 1 };
-    const repoTwo = { repoId: 2, owner: 'acme', name: 'two', count: 1, validCount: 0, invalidCount: 0, unknownCount: 1 };
+    const repoOne = { repoId: 1, owner: 'acme', name: 'one', count: 2, validCount: 1, invalidCount: 0, failedCount: 0, unknownCount: 1 };
+    const repoTwo = { repoId: 2, owner: 'acme', name: 'two', count: 1, validCount: 0, invalidCount: 0, failedCount: 0, unknownCount: 1 };
     vi.mocked(apiClient.fetchMyTestingFacets).mockImplementation(async (query) => ({
       repositories: query.secretTypes.length ? [repoOne] : [repoOne, repoTwo],
       statuses: query.secretTypes.length
@@ -131,7 +131,7 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
 
   it('does not offer every secret type while facets refresh after unchecking a type', async () => {
     const facets = {
-      repositories: [{ repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 0, invalidCount: 0, unknownCount: 1 }],
+      repositories: [{ repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 0, invalidCount: 0, failedCount: 0, unknownCount: 1 }],
       statuses: [{ status: EFindingStatus.UNKNOWN, count: 1 }],
       secretTypes: [{ secretType: ESecretType.GITHUB_PAT, count: 1 }, { secretType: ESecretType.SLACK_TOKEN, count: 1 }],
     };
@@ -200,7 +200,7 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
 
   it('searches inside the dropdown and selects a repository with the keyboard', async () => {
     render(<TestingPanel isAdmin={false} />);
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Search repositories' })).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText('Repository')).toBeEnabled());
     fireEvent.click(screen.getByLabelText('Repository'));
     const search = screen.getByRole('combobox', { name: 'Search repositories' });
@@ -209,16 +209,16 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
     await screen.findByRole('option', { name: /acme\/widgets/ });
     fireEvent.keyDown(search, { key: 'ArrowDown' });
     fireEvent.keyDown(search, { key: 'Enter' });
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Search repositories' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Repository')).toHaveTextContent('acme/widgets');
     await waitFor(() => expect(screen.getByLabelText('Repository')).toBeEnabled());
     fireEvent.click(screen.getByLabelText('Repository'));
     const selectedOption = screen.getByRole('option', { name: /acme\/widgets/ });
     expect(selectedOption).toHaveAttribute('aria-selected', 'true');
     expect(selectedOption).toHaveClass('bg-accent/15');
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'no-match' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search repositories' }), { target: { value: 'no-match' } });
     expect(screen.getByText('No matching repositories.')).toBeInTheDocument();
-    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Search repositories' }), { key: 'Escape' });
     expect(screen.getByLabelText('Repository')).toHaveFocus();
     expect(screen.getByLabelText('Repository')).toHaveTextContent('acme/widgets');
   });
@@ -282,7 +282,7 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
 
   it('shows the valid/invalid/unknown breakdown right in the repository picker, not just the total', async () => {
     vi.mocked(apiClient.fetchMyTestingFacets).mockResolvedValue({
-      repositories: [{ repoId: 1, owner: 'acme', name: 'widgets', count: 4, validCount: 1, invalidCount: 2, unknownCount: 1 }],
+      repositories: [{ repoId: 1, owner: 'acme', name: 'widgets', count: 4, validCount: 1, invalidCount: 2, failedCount: 0, unknownCount: 1 }],
       statuses: [{ status: EFindingStatus.UNKNOWN, count: 1 }, { status: EFindingStatus.VALID, count: 1 }, { status: EFindingStatus.INVALID, count: 2 }],
       secretTypes: [{ secretType: ESecretType.GITHUB_PAT, count: 4 }],
     });
@@ -296,8 +296,55 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
     ).toBeInTheDocument();
   });
 
+  it('filters failed checks and shows their counts in the status and repository filters', async () => {
+    vi.mocked(apiClient.fetchMyTestingFacets).mockResolvedValue({
+      repositories: [{ repoId: 1, owner: 'acme', name: 'widgets', count: 4, validCount: 1, invalidCount: 0, failedCount: 2, unknownCount: 1 }],
+      statuses: [
+        { status: EFindingStatus.UNKNOWN, count: 1 },
+        { status: EFindingStatus.FAILED, count: 2 },
+        { status: EFindingStatus.VALID, count: 1 },
+        { status: EFindingStatus.INVALID, count: 0 },
+      ],
+      secretTypes: [{ secretType: ESecretType.GITHUB_PAT, count: 4 }],
+    });
+    render(<TestingPanel isAdmin={false} />);
+    const statuses = await screen.findByRole('group', { name: 'Finding status' });
+    const failed = await within(statuses).findByRole('button', { name: 'failed 2' });
+    fireEvent.click(screen.getByLabelText('Repository'));
+    expect(screen.getByRole('option', { name: 'acme/widgets (4: 1 valid, 2 failed, 1 unknown)' })).toBeInTheDocument();
+    fireEvent.click(failed);
+    await waitFor(() => expect(apiClient.fetchMyFindings).toHaveBeenLastCalledWith({
+      repoIds: undefined, secretTypes: [...TESTABLE_SECRET_TYPES], statuses: [EFindingStatus.FAILED], limit: 50, offset: 0,
+    }));
+    expect(failed).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it.each([
+    [EFindingStatus.FAILED, 'Skipped: matching AWS Secret Access Key is missing.'],
+    [EFindingStatus.FAILED, 'Skipped: AWS credentials are incomplete or malformed.'],
+    [EFindingStatus.FAILED, 'Skipped: GCP credentials are not valid JSON.'],
+    [EFindingStatus.FAILED, 'Skipped: GCP credentials need private_key and client_email.'],
+    [EFindingStatus.FAILED, 'Skipped: GCP private key is not a readable PEM key.'],
+    [EFindingStatus.UNKNOWN, 'Skipped: matching AWS Secret Access Key is missing.'],
+  ])('offers a rescan for %s with reason %s', async (findingStatus, reason) => {
+    vi.mocked(apiClient.fetchMyFindings).mockResolvedValue({
+      items: [{ ...testedFinding, status: findingStatus, testReason: reason }], total: 1,
+    });
+    render(<TestingPanel isAdmin={false} />);
+    expect(await screen.findByRole('button', { name: 'Rescan' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Test' })).not.toBeInTheDocument();
+  });
+
+  it('keeps an inconclusive network failure testable', async () => {
+    vi.mocked(apiClient.fetchMyFindings).mockResolvedValue({
+      items: [{ ...testedFinding, status: EFindingStatus.FAILED, testReason: 'Network timeout' }], total: 1,
+    });
+    render(<TestingPanel isAdmin={false} />);
+    expect(await screen.findByRole('button', { name: 'Test' })).toBeInTheDocument();
+  });
+
   it('shows a skipped reason instead of claiming a successful test', async () => {
-    vi.spyOn(apiClient, 'testMyFinding').mockResolvedValue({ ...testedFinding, status: EFindingStatus.UNKNOWN, testReason: 'Skipped: matching AWS Secret Access Key is missing.' });
+    vi.spyOn(apiClient, 'testMyFinding').mockResolvedValue({ ...testedFinding, status: EFindingStatus.FAILED, testReason: 'Skipped: matching AWS Secret Access Key is missing.' });
     render(<TestingPanel isAdmin={false} />);
     await waitFor(() => expect(screen.getByLabelText('Repository')).toBeEnabled());
     fireEvent.click(screen.getByLabelText('Repository'));
@@ -472,6 +519,65 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
     }));
   });
 
+  it('changes the number of rows per page and clears selections without changing filters', async () => {
+    vi.mocked(apiClient.fetchMyFindings).mockResolvedValue({ items: [testedFinding], total: 4011 });
+    render(<TestingPanel isAdmin={false} />);
+    await screen.findByText('src/config.ts');
+
+    fireEvent.click(screen.getByLabelText('Select github_pat in src/config.ts'));
+    expect(screen.getByRole('button', { name: 'Test selected (1)' })).toBeEnabled();
+
+    const pageSize = screen.getByRole('combobox', { name: 'Rows per page' });
+    expect(within(pageSize).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      '10', '50', '100', '200', '500', '1000',
+    ]);
+    expect(pageSize).toHaveValue('50');
+
+    fireEvent.change(pageSize, { target: { value: '200' } });
+    await waitFor(() => expect(apiClient.fetchMyFindings).toHaveBeenLastCalledWith({
+      repoIds: undefined, secretTypes: [...TESTABLE_SECRET_TYPES], statuses: undefined, limit: 200, offset: 0,
+    }));
+    expect(screen.getByText('1-200 of 4011 rows')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Test selected (0)' })).toBeDisabled();
+
+    fireEvent.click(screen.getAllByRole('button', { name: '2' })[0]);
+    await waitFor(() => expect(apiClient.fetchMyFindings).toHaveBeenLastCalledWith({
+      repoIds: undefined, secretTypes: [...TESTABLE_SECRET_TYPES], statuses: undefined, limit: 200, offset: 200,
+    }));
+    expect(screen.getByText('201-400 of 4011 rows')).toBeInTheDocument();
+
+    fireEvent.change(pageSize, { target: { value: '1000' } });
+    await waitFor(() => expect(apiClient.fetchMyFindings).toHaveBeenLastCalledWith({
+      repoIds: undefined, secretTypes: [...TESTABLE_SECRET_TYPES], statuses: undefined, limit: 1000, offset: 0,
+    }));
+    expect(screen.getByText('1-1000 of 4011 rows')).toBeInTheDocument();
+  });
+
+  it('keeps page size fixed while a single key test is running', async () => {
+    vi.spyOn(apiClient, 'testMyFinding').mockImplementation(() => new Promise(() => {}));
+    render(<TestingPanel isAdmin={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Test' }));
+    await waitFor(() => expect(apiClient.testMyFinding).toHaveBeenCalledWith(10));
+
+    expect(screen.getByRole('combobox', { name: 'Rows per page' })).toBeDisabled();
+  });
+
+  it('prevents a second key test while the first is running', async () => {
+    vi.mocked(apiClient.fetchMyFindings).mockResolvedValue({
+      items: [testedFinding, { ...testedFinding, id: 11, filePath: 'src/other.ts' }],
+      total: 2,
+    });
+    vi.spyOn(apiClient, 'testMyFinding').mockImplementation(() => new Promise(() => {}));
+    render(<TestingPanel isAdmin={false} />);
+    await screen.findByText('src/other.ts');
+    fireEvent.click(screen.getByLabelText('Select github_pat in src/other.ts'));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Test' })[0]);
+    await waitFor(() => expect(apiClient.testMyFinding).toHaveBeenCalledWith(10));
+
+    expect(screen.getByRole('button', { name: 'Test' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test selected (1)' })).toBeDisabled();
+  });
+
   it('reports a load failure rather than showing it as an empty result', async () => {
     vi.mocked(apiClient.fetchMyFindings).mockRejectedValue(new Error('offline'));
     render(<TestingPanel isAdmin={false} />);
@@ -487,7 +593,7 @@ describe('TestingPanel (regular user, scoped to own approved repos)', () => {
 describe('TestingPanel (admin, unscoped to any repo)', () => {
   beforeEach(() => {
     vi.spyOn(apiClient, 'fetchTestingFacets').mockResolvedValue({
-      repositories: [{ repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 0, invalidCount: 0, unknownCount: 1 }],
+      repositories: [{ repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 0, invalidCount: 0, failedCount: 0, unknownCount: 1 }],
       statuses: [
         { status: EFindingStatus.UNKNOWN, count: 1 },
         { status: EFindingStatus.VALID, count: 0 },
@@ -496,7 +602,7 @@ describe('TestingPanel (admin, unscoped to any repo)', () => {
       secretTypes: [{ secretType: ESecretType.GITHUB_PAT, count: 1 }],
     });
     vi.spyOn(apiClient, 'fetchFindingsRepoOptions').mockResolvedValue([
-      { repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 1, invalidCount: 0, unknownCount: 0 },
+      { repoId: 1, owner: 'acme', name: 'widgets', count: 1, validCount: 1, invalidCount: 0, failedCount: 0, unknownCount: 0 },
     ]);
     vi.spyOn(apiClient, 'fetchFindings').mockResolvedValue({
       items: [{ ...testedFinding, status: EFindingStatus.UNKNOWN, checkedAt: null }],

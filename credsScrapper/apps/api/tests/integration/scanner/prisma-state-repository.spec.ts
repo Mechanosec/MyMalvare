@@ -96,7 +96,7 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
         ) {
           await repo.recordTestResult(
             finding.id,
-            EFindingStatus.VALID,
+            finding.repoId === 2 ? EFindingStatus.FAILED : EFindingStatus.VALID,
             'synthetic result',
           );
         }
@@ -131,7 +131,11 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
       });
       expect(unknown.statuses).toContainEqual({
         status: EFindingStatus.VALID,
-        count: 2,
+        count: 1,
+      });
+      expect(unknown.statuses).toContainEqual({
+        status: EFindingStatus.FAILED,
+        count: 1,
       });
     } finally {
       await prisma.$disconnect();
@@ -140,6 +144,75 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('backfills only previously attempted unknown findings', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'backfill.db'),
+    );
+    try {
+      for (let index = 0; index < 6; index += 1) {
+        await repo.addFinding(
+          1,
+          'fixture',
+          'repo',
+          `fixture-${index}.txt`,
+          'abc',
+          ESecretType.GITHUB_PAT,
+          `synthetic-${index}`,
+          1,
+          null,
+        );
+      }
+      const ids = (
+        await prisma.finding.findMany({ orderBy: { id: 'asc' } })
+      ).map((finding) => finding.id);
+      const checkedAt = new Date('2026-01-01T00:00:00Z');
+      await prisma.finding.update({
+        where: { id: ids[1] },
+        data: { checkedAt },
+      });
+      await prisma.finding.update({
+        where: { id: ids[2] },
+        data: { testReason: 'synthetic inconclusive result' },
+      });
+      await prisma.finding.update({
+        where: { id: ids[3] },
+        data: { testReason: '   ' },
+      });
+      await prisma.finding.update({
+        where: { id: ids[4] },
+        data: { status: EFindingStatus.VALID, checkedAt },
+      });
+      await prisma.finding.update({
+        where: { id: ids[5] },
+        data: { status: EFindingStatus.INVALID, checkedAt },
+      });
+
+      const migration = await fs.readFile(
+        path.join(
+          __dirname,
+          '../../../prisma/migrations/20260922000000_failed_finding_status/migration.sql',
+        ),
+        'utf8',
+      );
+      await prisma.$executeRawUnsafe(migration);
+
+      const rows = await prisma.finding.findMany({ orderBy: { id: 'asc' } });
+      expect(rows.map((finding) => finding.status)).toEqual([
+        EFindingStatus.UNKNOWN,
+        EFindingStatus.FAILED,
+        EFindingStatus.FAILED,
+        EFindingStatus.FAILED,
+        EFindingStatus.VALID,
+        EFindingStatus.INVALID,
+      ]);
+      expect(rows[1].checkedAt).toEqual(checkedAt);
+      expect(rows[2].testReason).toBe('synthetic inconclusive result');
+      expect(rows[3].testReason).toBe('   ');
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 
   it('resets test results only for the chosen repository and service', async () => {
@@ -465,13 +538,19 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
       });
       await repo.recordTestResult(
         row.id,
-        EFindingStatus.UNKNOWN,
+        EFindingStatus.FAILED,
         'Skipped: matching AWS Secret Access Key is missing.',
       );
       expect(await repo.getFindingById(row.id)).toMatchObject({
-        status: EFindingStatus.UNKNOWN,
+        status: EFindingStatus.FAILED,
         testReason: 'Skipped: matching AWS Secret Access Key is missing.',
         checkedAt: expect.any(Date),
+      });
+      await repo.updateFindingStatus(row.id, EFindingStatus.UNKNOWN);
+      expect(await repo.getFindingById(row.id)).toMatchObject({
+        status: EFindingStatus.UNKNOWN,
+        testReason: null,
+        checkedAt: null,
       });
       await repo.recordTestResult(row.id, EFindingStatus.VALID, null);
       expect(await repo.getFindingById(row.id)).toMatchObject({
@@ -633,6 +712,7 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
       count: 2,
       validCount: 0,
       invalidCount: 0,
+      failedCount: 0,
       unknownCount: 2,
     });
     expect(repoOptions).toContainEqual({
@@ -642,6 +722,7 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
       count: 1,
       validCount: 0,
       invalidCount: 0,
+      failedCount: 0,
       unknownCount: 1,
     });
 
@@ -658,7 +739,7 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
     await prisma.$disconnect();
   });
 
-  it('breaks down repo options by status (valid/invalid/unknown), not just a flat total', async () => {
+  it('breaks down repo options by status, including failed separately from unknown', async () => {
     const { repo, prisma } = await makeRepository(
       path.join(tmpDir, 'state.db'),
     );
@@ -696,19 +777,36 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
       1,
       null,
     );
+    await repo.addFinding(
+      1,
+      'octocat',
+      'repo1',
+      'd.py',
+      'sha',
+      'SLACK_TOKEN' as never,
+      'v4',
+      1,
+      null,
+    );
     const page = await repo.listFindings({ repoIds: [1] });
-    const [valid, invalid] = page.items;
+    const [valid, invalid, failed] = page.items;
     await repo.updateFindingStatus(valid.id, EFindingStatus.VALID);
     await repo.updateFindingStatus(invalid.id, EFindingStatus.INVALID);
+    await repo.recordTestResult(
+      failed.id,
+      EFindingStatus.FAILED,
+      'synthetic inconclusive result',
+    );
 
     const [option] = await repo.listFindingsRepoOptions(10);
     expect(option).toEqual({
       repoId: 1,
       owner: 'octocat',
       name: 'repo1',
-      count: 3,
+      count: 4,
       validCount: 1,
       invalidCount: 1,
+      failedCount: 1,
       unknownCount: 1,
     });
 

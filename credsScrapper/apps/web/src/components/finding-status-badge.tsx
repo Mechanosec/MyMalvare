@@ -3,6 +3,7 @@ import { EFindingStatus } from '../lib/constant/finding-status.constant';
 const TONE_BY_STATUS: Record<EFindingStatus, string> = {
   [EFindingStatus.VALID]: 'text-critical border-critical/50 bg-critical/10',
   [EFindingStatus.INVALID]: 'text-accent border-accent-dim bg-accent/10',
+  [EFindingStatus.FAILED]: 'text-warning border-warning/50 bg-warning/10',
   [EFindingStatus.UNKNOWN]: 'text-text-dim border-line bg-surface-2',
 };
 

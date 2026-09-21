@@ -26,9 +26,9 @@ export abstract class KeyValidatorPort {
    * Returns VALID/INVALID only on an unambiguous auth response from the
    * service (e.g. 401/403, or a provider's explicit "invalid credential"
    * body). Any other outcome - no validator registered for this type,
-   * network error, timeout, unexpected response - returns UNKNOWN rather
+   * network error, timeout, unexpected response - returns FAILED rather
    * than guessing, since a false INVALID would wrongly tell someone a
-   * live key is dead.
+   * live key is dead. UNKNOWN is reserved for findings never tested.
    */
   /**
    * pairedValue is for the rare secret type whose live check needs a

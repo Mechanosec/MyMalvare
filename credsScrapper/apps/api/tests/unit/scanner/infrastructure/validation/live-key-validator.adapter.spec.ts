@@ -12,15 +12,28 @@ describe('LiveKeyValidatorAdapter', () => {
     jest.restoreAllMocks();
   });
 
-  it('explains missing AWS credentials without making a request', async () => {
+  it('marks an attempted but inconclusive provider check as failed', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 429 });
+
+    expect(
+      await adapter.validateDetailed(ESecretType.GITHUB_PAT, 'synthetic'),
+    ).toEqual({
+      status: 'failed',
+      reason:
+        'Inconclusive: provider response did not establish credential validity.',
+    });
+  });
+
+  it('marks skipped incomplete AWS validation as failed without a request', async () => {
     global.fetch = jest.fn();
+
     expect(
       await adapter.validateDetailed(
         ESecretType.AWS_ACCESS_KEY_ID,
         'AKIA_SYNTHETIC',
       ),
     ).toEqual({
-      status: EFindingStatus.UNKNOWN,
+      status: 'failed',
       reason: 'Skipped: matching AWS Secret Access Key is missing.',
     });
     expect(global.fetch).not.toHaveBeenCalled();
@@ -58,7 +71,7 @@ describe('LiveKeyValidatorAdapter', () => {
         ESecretType.AWS_ACCESS_KEY_ID,
         value,
       );
-      expect(result.status).toBe(EFindingStatus.UNKNOWN);
+      expect(result.status).toBe(EFindingStatus.FAILED);
       expect(global.fetch).not.toHaveBeenCalled();
     },
   );
@@ -71,7 +84,7 @@ describe('LiveKeyValidatorAdapter', () => {
         'not-json',
       ),
     ).toEqual({
-      status: EFindingStatus.UNKNOWN,
+      status: EFindingStatus.FAILED,
       reason: 'Skipped: GCP credentials are not valid JSON.',
     });
     expect(global.fetch).not.toHaveBeenCalled();
@@ -97,7 +110,7 @@ describe('LiveKeyValidatorAdapter', () => {
     );
     expect(
       await adapter.validateDetailed(ESecretType.OPENAI_API_KEY, 'synthetic'),
-    ).toEqual({ status: EFindingStatus.UNKNOWN, reason });
+    ).toEqual({ status: EFindingStatus.FAILED, reason });
   });
 
   it('reports timeout without including error text or credentials', async () => {
@@ -107,7 +120,7 @@ describe('LiveKeyValidatorAdapter', () => {
     expect(
       await adapter.validateDetailed(ESecretType.GITHUB_PAT, 'synthetic'),
     ).toEqual({
-      status: EFindingStatus.UNKNOWN,
+      status: EFindingStatus.FAILED,
       reason: 'Inconclusive: provider request timed out.',
     });
   });
@@ -139,7 +152,7 @@ describe('LiveKeyValidatorAdapter', () => {
   ])('explains skipped validation for %s', async (type, value, reason) => {
     global.fetch = jest.fn();
     expect(await adapter.validateDetailed(type as ESecretType, value)).toEqual({
-      status: EFindingStatus.UNKNOWN,
+      status: EFindingStatus.FAILED,
       reason,
     });
     expect(global.fetch).not.toHaveBeenCalled();
@@ -162,12 +175,12 @@ describe('LiveKeyValidatorAdapter', () => {
     );
   });
 
-  it('returns UNKNOWN for a secret type with no registered checker', async () => {
+  it('returns FAILED for a secret type with no registered checker', async () => {
     const status = await adapter.validate(
       ESecretType.AWS_ACCESS_KEY_ID,
       'AKIAABCDEFGH12345678',
     );
-    expect(status).toBe(EFindingStatus.UNKNOWN);
+    expect(status).toBe(EFindingStatus.FAILED);
   });
 
   it('returns VALID for a Telegram token that getMe confirms', async () => {
@@ -196,13 +209,13 @@ describe('LiveKeyValidatorAdapter', () => {
     expect(status).toBe(EFindingStatus.INVALID);
   });
 
-  it('returns UNKNOWN (never INVALID) when the request throws, e.g. a timeout', async () => {
+  it('returns FAILED (never INVALID) when the request throws, e.g. a timeout', async () => {
     global.fetch = jest
       .fn()
       .mockRejectedValue(new Error('network error')) as never;
 
     const status = await adapter.validate(ESecretType.GITHUB_PAT, 'fake-token');
-    expect(status).toBe(EFindingStatus.UNKNOWN);
+    expect(status).toBe(EFindingStatus.FAILED);
   });
 
   it('returns VALID for a GitHub PAT that /user confirms with 200', async () => {
@@ -327,7 +340,7 @@ describe('LiveKeyValidatorAdapter', () => {
         ESecretType.DISCORD_WEBHOOK_URL,
         value,
       );
-      expect(status).toBe(EFindingStatus.UNKNOWN);
+      expect(status).toBe(EFindingStatus.FAILED);
     }
     expect(global.fetch).not.toHaveBeenCalled();
   });
@@ -392,14 +405,14 @@ describe('LiveKeyValidatorAdapter', () => {
     );
   });
 
-  it('returns UNKNOWN for a Mailchimp key with no datacenter suffix, rather than guessing a host', async () => {
+  it('returns FAILED for a Mailchimp key with no datacenter suffix, rather than guessing a host', async () => {
     global.fetch = jest.fn() as never;
 
     const status = await adapter.validate(
       ESecretType.MAILCHIMP_API_KEY,
       'nodashsuffix',
     );
-    expect(status).toBe(EFindingStatus.UNKNOWN);
+    expect(status).toBe(EFindingStatus.FAILED);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -703,7 +716,7 @@ describe('LiveKeyValidatorAdapter', () => {
     );
   });
 
-  it('returns UNKNOWN for an AWS access key ID with no paired secret key, without making a request', async () => {
+  it('returns FAILED for an AWS access key ID with no paired secret key, without making a request', async () => {
     global.fetch = jest.fn() as never;
 
     const status = await adapter.validate(
@@ -711,7 +724,7 @@ describe('LiveKeyValidatorAdapter', () => {
       'AKIAABCDEFGH12345678',
     );
 
-    expect(status).toBe(EFindingStatus.UNKNOWN);
+    expect(status).toBe(EFindingStatus.FAILED);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -799,7 +812,7 @@ describe('LiveKeyValidatorAdapter', () => {
     expect(status).toBe(EFindingStatus.INVALID);
   });
 
-  it('returns UNKNOWN for a GCP key value that is not valid JSON, without making a request', async () => {
+  it('returns FAILED for a GCP key value that is not valid JSON, without making a request', async () => {
     global.fetch = jest.fn() as never;
 
     const status = await adapter.validate(
@@ -807,7 +820,7 @@ describe('LiveKeyValidatorAdapter', () => {
       'not json',
     );
 
-    expect(status).toBe(EFindingStatus.UNKNOWN);
+    expect(status).toBe(EFindingStatus.FAILED);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -825,7 +838,7 @@ describe('LiveKeyValidatorAdapter', () => {
     expect(url).toBe('https://oauth2.googleapis.com/token');
   });
 
-  it('returns UNKNOWN for a GCP key JSON missing private_key/client_email, without making a request', async () => {
+  it('returns FAILED for a GCP key JSON missing private_key/client_email, without making a request', async () => {
     global.fetch = jest.fn() as never;
 
     const status = await adapter.validate(
@@ -833,7 +846,7 @@ describe('LiveKeyValidatorAdapter', () => {
       JSON.stringify({ type: 'service_account' }),
     );
 
-    expect(status).toBe(EFindingStatus.UNKNOWN);
+    expect(status).toBe(EFindingStatus.FAILED);
     expect(global.fetch).not.toHaveBeenCalled();
   });
 });

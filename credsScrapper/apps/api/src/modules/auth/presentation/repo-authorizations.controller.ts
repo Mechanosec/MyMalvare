@@ -242,7 +242,10 @@ export class RepoAuthorizationsController {
     @Param('id') id: string,
     @Body('status') status: string,
   ) {
-    if (!Object.values(EFindingStatus).includes(status as EFindingStatus)) {
+    if (
+      status === EFindingStatus.FAILED ||
+      !Object.values(EFindingStatus).includes(status as EFindingStatus)
+    ) {
       throw new BadRequestException(`Invalid status: ${status}`);
     }
     const ok = await this.setMyFindingStatus.execute(

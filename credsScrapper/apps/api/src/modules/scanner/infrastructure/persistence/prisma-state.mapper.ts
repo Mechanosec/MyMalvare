@@ -111,7 +111,7 @@ export function scannedRepoStatus(row: TPrismaScannedRepo): EScanStatus {
 
 // Collapses one row per (repoId, status) - the shape a `groupBy(['repoId',
 // 'owner', 'name', 'status'])` returns - into one IFindingsRepoOption per
-// repo, so the repo picker can show a valid/invalid/unknown breakdown
+// repo, so the repo picker can show a status breakdown
 // alongside the total, not just the total.
 export function groupRepoOptionsByStatus(
   rows: ReadonlyArray<{
@@ -136,6 +136,7 @@ export function groupRepoOptionsByStatus(
         count: 0,
         validCount: 0,
         invalidCount: 0,
+        failedCount: 0,
         unknownCount: 0,
       };
       byRepo.set(row.repoId, existing);
@@ -146,6 +147,8 @@ export function groupRepoOptionsByStatus(
       existing.validCount += row._count._all;
     } else if (status === EFindingStatus.INVALID) {
       existing.invalidCount += row._count._all;
+    } else if (status === EFindingStatus.FAILED) {
+      existing.failedCount += row._count._all;
     } else {
       existing.unknownCount += row._count._all;
     }

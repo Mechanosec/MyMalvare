@@ -61,6 +61,7 @@ export class FakeStateRepository extends StateRepositoryPort {
     context: string | null;
     status: EFindingStatus;
     checkedAt: Date | null;
+    testReason: string | null;
     leakCommits: string;
   }> = [];
 
@@ -326,6 +327,7 @@ export class FakeStateRepository extends StateRepositoryPort {
       context,
       status: EFindingStatus.UNKNOWN,
       checkedAt: null,
+      testReason: null,
       leakCommits: '[]',
     });
   }
@@ -359,6 +361,7 @@ export class FakeStateRepository extends StateRepositoryPort {
       if (row.repoId === repoId && secretTypes.includes(row.secretType)) {
         row.status = EFindingStatus.UNKNOWN;
         row.checkedAt = null;
+        row.testReason = null;
       }
     }
   }
@@ -367,14 +370,23 @@ export class FakeStateRepository extends StateRepositoryPort {
     const row = this.findings[id];
     if (row) {
       row.status = status;
+      if (status === EFindingStatus.UNKNOWN) {
+        row.checkedAt = null;
+        row.testReason = null;
+      }
     }
   }
 
-  async recordTestResult(id: number, status: EFindingStatus): Promise<void> {
+  async recordTestResult(
+    id: number,
+    status: EFindingStatus,
+    testReason?: string | null,
+  ): Promise<void> {
     const row = this.findings[id];
     if (row) {
       row.status = status;
       row.checkedAt = new Date();
+      row.testReason = testReason ?? null;
     }
   }
 
@@ -450,6 +462,7 @@ export class FakeStateRepository extends StateRepositoryPort {
       count: 0,
       validCount: 0,
       invalidCount: 0,
+      failedCount: 0,
       unknownCount: 0,
     };
     counts.set(f.repoId, {
@@ -459,6 +472,8 @@ export class FakeStateRepository extends StateRepositoryPort {
         existing.validCount + (f.status === EFindingStatus.VALID ? 1 : 0),
       invalidCount:
         existing.invalidCount + (f.status === EFindingStatus.INVALID ? 1 : 0),
+      failedCount:
+        existing.failedCount + (f.status === EFindingStatus.FAILED ? 1 : 0),
       unknownCount:
         existing.unknownCount + (f.status === EFindingStatus.UNKNOWN ? 1 : 0),
     });

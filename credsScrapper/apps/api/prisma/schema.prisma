@@ -72,7 +72,7 @@ model Finding {
   lineNumber  Int?     @map("line_number")
   foundAt     DateTime @default(now()) @map("found_at")
   context     String?
-  status      String   @default("unknown") // EFindingStatus: unknown | valid | invalid
+  status      String   @default("unknown") // EFindingStatus: unknown | valid | invalid | failed
   testReason  String?  @map("test_reason")
   checkedAt   DateTime? @map("checked_at") // last live key-validation run, null if never tested
   leakCommits String   @default("[]") @map("leak_commits") // JSON array of commit SHAs, oldest first

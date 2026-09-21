@@ -640,7 +640,13 @@ export class PrismaStateRepository extends StateRepositoryPort {
   }
 
   async updateFindingStatus(id: number, status: EFindingStatus): Promise<void> {
-    await this.prisma.finding.update({ where: { id }, data: { status } });
+    await this.prisma.finding.update({
+      where: { id },
+      data:
+        status === EFindingStatus.UNKNOWN
+          ? { status, checkedAt: null, testReason: null }
+          : { status },
+    });
   }
 
   async recordTestResult(

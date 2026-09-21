@@ -1,8 +1,8 @@
-// Manually recorded verdict, not an automated probe result - see
-// CLAUDE.md's "Detection is passive, always" rule. A finding starts
-// unknown and only a human marks it valid/invalid via the Testing tab.
+// A finding starts unknown. Opt-in live testing can establish a verdict
+// or fail to establish one; manual status changes are separate.
 export enum EFindingStatus {
   UNKNOWN = 'unknown',
   VALID = 'valid',
   INVALID = 'invalid',
+  FAILED = 'failed',
 }

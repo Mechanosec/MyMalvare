@@ -32,6 +32,7 @@ export interface IFindingsRepoOption {
   readonly count: number;
   readonly validCount: number;
   readonly invalidCount: number;
+  readonly failedCount: number;
   readonly unknownCount: number;
 }
 

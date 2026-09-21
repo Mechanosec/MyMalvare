@@ -39,7 +39,7 @@ describe('FindingsTable', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(apiClient, 'fetchFindingsRepoOptions').mockResolvedValue([
-      { repoId: 42, owner: 'octocat', name: 'hello-world', count: 1, validCount: 0, invalidCount: 0, unknownCount: 1 },
+      { repoId: 42, owner: 'octocat', name: 'hello-world', count: 1, validCount: 0, invalidCount: 0, failedCount: 0, unknownCount: 1 },
     ]);
     vi.spyOn(apiClient, 'fetchFindingsSecretTypeCounts').mockResolvedValue(
       Object.values(ESecretType).map((secretType) => ({ secretType, count: 1 })),

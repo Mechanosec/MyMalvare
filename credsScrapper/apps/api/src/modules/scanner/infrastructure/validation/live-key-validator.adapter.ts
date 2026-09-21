@@ -117,8 +117,8 @@ async function checkAwsCredentials(
   // AWS returns 403 for both "bad access key id" (InvalidClientTokenId)
   // and "bad secret key" (SignatureDoesNotMatch) - either way the pair
   // is dead. A malformed request from our own signing bug would show up
-  // as some other 4xx, which correctly falls through to UNKNOWN instead
-  // of a false INVALID.
+  // as some other 4xx, which falls through to an inconclusive result
+  // rather than a false INVALID.
   if (res.status === 403) return EFindingStatus.INVALID;
   if (res.ok) return EFindingStatus.VALID;
   return EFindingStatus.UNKNOWN;
@@ -191,7 +191,7 @@ async function checkGcpServiceAccountKey(
 // One read-only, side-effect-free request per service - a plain identity/
 // "who am I" check, never an action the credential's real owner would
 // notice or that touches their data. Services with no entry here always
-// resolve to UNKNOWN (see the port's contract) - usually because it
+// resolve to FAILED (see the port's contract) - usually because it
 // needs a per-account host we don't know (Shopify shop domain,
 // self-hosted Grafana/Vault/Databricks), or isn't a bearer credential at
 // all (private keys, OAuth client secrets, webhook signing secrets).
@@ -533,13 +533,13 @@ export class LiveKeyValidatorAdapter extends KeyValidatorPort {
     secretValue: string,
     pairedValue?: string,
   ): Promise<IValidationResult> {
-    const unknown = (reason: string): IValidationResult => ({
-      status: EFindingStatus.UNKNOWN,
+    const failed = (reason: string): IValidationResult => ({
+      status: EFindingStatus.FAILED,
       reason,
     });
     const check = CHECKERS[secretType];
     if (!check)
-      return unknown(
+      return failed(
         'Skipped: this credential type has no supported validator.',
       );
     if (secretType === ESecretType.AWS_ACCESS_KEY_ID) {
@@ -548,21 +548,21 @@ export class LiveKeyValidatorAdapter extends KeyValidatorPort {
         secretValue = credentials.access;
         pairedValue = credentials.private;
       } else if (secretValue.trimStart().startsWith('{')) {
-        return unknown('Skipped: AWS credentials are incomplete or malformed.');
+        return failed('Skipped: AWS credentials are incomplete or malformed.');
       }
       if (secretValue.startsWith('ASIA'))
-        return unknown(
+        return failed(
           'Skipped: temporary AWS credentials require a session token; this validator does not support it.',
         );
       if (!pairedValue)
-        return unknown('Skipped: matching AWS Secret Access Key is missing.');
+        return failed('Skipped: matching AWS Secret Access Key is missing.');
     }
     if (secretType === ESecretType.GCP_SERVICE_ACCOUNT_KEY) {
       let key;
       try {
         key = JSON.parse(secretValue);
       } catch {
-        return unknown('Skipped: GCP credentials are not valid JSON.');
+        return failed('Skipped: GCP credentials are not valid JSON.');
       }
       if (
         !key ||
@@ -570,7 +570,7 @@ export class LiveKeyValidatorAdapter extends KeyValidatorPort {
         typeof key.client_email !== 'string' ||
         !key.client_email.trim()
       ) {
-        return unknown(
+        return failed(
           'Skipped: GCP credentials need private_key and client_email.',
         );
       }
@@ -580,18 +580,19 @@ export class LiveKeyValidatorAdapter extends KeyValidatorPort {
           parsed.asymmetricKeyType !== 'rsa' ||
           (parsed.asymmetricKeyDetails?.modulusLength ?? 0) < 2048
         ) {
-          return unknown(
+          return failed(
             'Skipped: GCP private key must be an RSA key of at least 2048 bits.',
           );
         }
       } catch {
-        return unknown('Skipped: GCP private key is not a readable PEM key.');
+        return failed('Skipped: GCP private key is not a readable PEM key.');
       }
     }
     try {
       const status = await check(secretValue, pairedValue);
       return {
-        status,
+        status:
+          status === EFindingStatus.UNKNOWN ? EFindingStatus.FAILED : status,
         reason:
           status === EFindingStatus.UNKNOWN
             ? 'Inconclusive: provider response did not establish credential validity.'
@@ -612,7 +613,7 @@ export class LiveKeyValidatorAdapter extends KeyValidatorPort {
       switch (code) {
         case 'ENOTFOUND':
         case 'EAI_AGAIN':
-          return unknown(
+          return failed(
             'Inconclusive: provider hostname could not be resolved.',
           );
         case 'ECONNRESET':
@@ -620,26 +621,26 @@ export class LiveKeyValidatorAdapter extends KeyValidatorPort {
         case 'ENETUNREACH':
         case 'EHOSTUNREACH':
         case 'UND_ERR_SOCKET':
-          return unknown('Inconclusive: connection to provider failed.');
+          return failed('Inconclusive: connection to provider failed.');
         case 'CERT_HAS_EXPIRED':
         case 'DEPTH_ZERO_SELF_SIGNED_CERT':
         case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
         case 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY':
         case 'ERR_TLS_CERT_ALTNAME_INVALID':
-          return unknown(
+          return failed(
             'Inconclusive: provider TLS certificate could not be verified.',
           );
         case 'ETIMEDOUT':
         case 'UND_ERR_CONNECT_TIMEOUT':
         case 'UND_ERR_HEADERS_TIMEOUT':
         case 'UND_ERR_BODY_TIMEOUT':
-          return unknown('Inconclusive: provider request timed out.');
+          return failed('Inconclusive: provider request timed out.');
         case 'ERR_INVALID_CHAR':
-          return unknown(
+          return failed(
             'Skipped: credential cannot be used in an HTTP header.',
           );
       }
-      return unknown(
+      return failed(
         name === 'TimeoutError' || name === 'AbortError'
           ? 'Inconclusive: provider request timed out.'
           : 'Inconclusive: provider request failed or its response could not be read.',

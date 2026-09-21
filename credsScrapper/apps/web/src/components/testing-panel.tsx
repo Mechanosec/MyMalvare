@@ -29,8 +29,9 @@ function formatCheckedAt(checkedAt: string | null): string {
 }
 
 function needsRescan(finding: IFinding): boolean {
-  return finding.status === EFindingStatus.UNKNOWN && [
+  return (finding.status === EFindingStatus.FAILED || finding.status === EFindingStatus.UNKNOWN) && [
     'Skipped: matching AWS Secret Access Key is missing.',
+    'Skipped: AWS credentials are incomplete or malformed.',
     'Skipped: GCP credentials are not valid JSON.',
     'Skipped: GCP credentials need private_key and client_email.',
     'Skipped: GCP private key is not a readable PEM key.',
@@ -43,6 +44,7 @@ function formatRepoOptionLabel(repo: IFindingsRepoOption): string {
   const breakdown = [
     repo.validCount > 0 ? `${repo.validCount} valid` : null,
     repo.invalidCount > 0 ? `${repo.invalidCount} invalid` : null,
+    repo.failedCount > 0 ? `${repo.failedCount} failed` : null,
     repo.unknownCount > 0 ? `${repo.unknownCount} unknown` : null,
   ].filter((part): part is string => part !== null);
   return `${repo.owner}/${repo.name} (${repo.count}${breakdown.length ? `: ${breakdown.join(', ')}` : ''})`;
@@ -71,6 +73,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
   const [findings, setFindings] = useState<readonly IFinding[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(FINDINGS_PAGE_SIZE);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
   const [feedback, setFeedback] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -148,12 +151,11 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
       if (isAdmin) {
         const result = await fetchFindings({
           repoIds: repoId === null ? undefined : [repoId],
-          // Untested-type findings are pointless to show here - they'll
-          // never resolve to anything but "unknown" (see TESTABLE_SECRET_TYPES).
+          // Only types with a live checker can provide a useful result here.
           secretTypes: secretTypes.length ? secretTypes : [...TESTABLE_SECRET_TYPES],
           statuses: status ? [status] : undefined,
-          limit: FINDINGS_PAGE_SIZE,
-          offset: targetPage * FINDINGS_PAGE_SIZE,
+          limit: pageSize,
+          offset: targetPage * pageSize,
         });
         items = result.items;
         totalCount = result.total;
@@ -162,8 +164,8 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
           repoIds: repoId === null ? undefined : [repoId],
           secretTypes: secretTypes.length ? secretTypes : [...TESTABLE_SECRET_TYPES],
           statuses: status ? [status] : undefined,
-          limit: FINDINGS_PAGE_SIZE,
-          offset: targetPage * FINDINGS_PAGE_SIZE,
+          limit: pageSize,
+          offset: targetPage * pageSize,
         });
         items = result.items;
         totalCount = result.total;
@@ -181,7 +183,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
     } finally {
       if (currentRequest === requestId.current) setLoading(false);
     }
-  }, [isAdmin, repoId, secretTypes, status]);
+  }, [isAdmin, repoId, secretTypes, status, pageSize]);
 
   useEffect(() => {
     let cancelled = false;
@@ -255,12 +257,12 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
     setSelectedIds(allSelected ? new Set() : new Set(findings.map((f) => f.id)));
   }
 
-  const pageCount = Math.max(1, Math.ceil(total / FINDINGS_PAGE_SIZE));
-  const firstRow = total === 0 ? 0 : page * FINDINGS_PAGE_SIZE + 1;
-  const lastRow = Math.min(total, (page + 1) * FINDINGS_PAGE_SIZE);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const firstRow = total === 0 ? 0 : page * pageSize + 1;
+  const lastRow = Math.min(total, (page + 1) * pageSize);
   const allStatusCount = statusCounts.reduce((sum, count) => sum + count.count, 0);
   const selectedRepoOption = selectedRepo && !repoOptions.some((repo) => repo.repoId === selectedRepo.repoId)
-    ? { ...selectedRepo, count: 0, validCount: 0, invalidCount: 0, unknownCount: 0 }
+    ? { ...selectedRepo, count: 0, validCount: 0, invalidCount: 0, failedCount: 0, unknownCount: 0 }
     : null;
   const visibleRepoOptions = selectedRepoOption ? [selectedRepoOption, ...repoOptions] : repoOptions;
 
@@ -296,11 +298,21 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
     setSecretTypes(values);
   }
 
+  function choosePageSize(value: number) {
+    requestId.current += 1;
+    filterRevision.current += 1;
+    setSelectedIds(new Set());
+    setLoading(true);
+    setLoadError(false);
+    setPage(0);
+    setPageSize(value);
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Finding status">
           <span className="mr-1 text-xs text-text-dim">Status</span>
-          {([null, EFindingStatus.UNKNOWN, EFindingStatus.INVALID, EFindingStatus.VALID] as const).map((value) => {
+          {([null, EFindingStatus.UNKNOWN, EFindingStatus.FAILED, EFindingStatus.INVALID, EFindingStatus.VALID] as const).map((value) => {
             const count = value === null ? allStatusCount : statusCounts.find((item) => item.status === value)?.count ?? 0;
             return (
               <button key={value ?? 'all'} type="button" onClick={() => chooseStatus(value)}
@@ -350,11 +362,22 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
         <button
           type="button"
           onClick={testSelected}
-          disabled={loading || selectedIds.size === 0 || testingSelected}
+          disabled={loading || selectedIds.size === 0 || testingSelected || testingId !== null}
           className="border border-accent px-3 py-1.5 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-40"
         >
           {testingSelected ? 'Testing selected…' : `Test selected (${selectedIds.size})`}
         </button>
+        <label className="flex items-center gap-2 text-xs text-text-dim">
+          Rows per page
+          <select
+            value={pageSize}
+            onChange={(event) => choosePageSize(Number(event.target.value))}
+            disabled={loading || testingSelected || testingId !== null}
+            className="border border-line bg-surface-2 px-2 py-1.5 text-sm text-text outline-none focus:border-accent disabled:opacity-50"
+          >
+            {[10, 50, 100, 200, 500, 1000].map((size) => <option key={size} value={size}>{size}</option>)}
+          </select>
+        </label>
         <span className="ml-auto font-mono text-xs text-text-dim">
           {loading ? 'Loading…' : loadError ? 'Load failed' : `${firstRow}-${lastRow} of ${total} rows`}
         </span>
@@ -422,7 +445,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
                       <button
                         type="button"
                         onClick={() => needsRescan(finding) ? rescan(finding) : testOne(finding)}
-                        disabled={loading || testingId === finding.id || rescanningRepoId === finding.repoId}
+                        disabled={loading || testingId !== null || testingSelected || rescanningRepoId === finding.repoId}
                         className="bg-accent px-3 py-1 text-xs font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
                       >
                         {needsRescan(finding)

@@ -145,7 +145,10 @@ export class FindingsController {
     @Param('id') id: string,
     @Body('status') status: string,
   ): Promise<{ ok: true }> {
-    if (!Object.values(EFindingStatus).includes(status as EFindingStatus)) {
+    if (
+      status === EFindingStatus.FAILED ||
+      !Object.values(EFindingStatus).includes(status as EFindingStatus)
+    ) {
       throw new BadRequestException(`Invalid status: ${status}`);
     }
     await this.setFindingStatus.execute(Number(id), status as EFindingStatus);
