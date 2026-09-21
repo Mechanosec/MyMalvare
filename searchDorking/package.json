@@ -1,0 +1,9 @@
+{
+  "name": "search-dorking",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "search": "node cli.js",
+    "test": "node test_dorks.js"
+  }
+}

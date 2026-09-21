@@ -1,3 +1,4 @@
 **/myenv/
 node_modules/
 .vscode/
+credsScrapper/apps/api/prisma/*.db.bak-*

@@ -2,6 +2,8 @@
 
 - [`credsScrapper`](credsScrapper/README.md) — NestJS API та Next.js UI для
   виявлення витоків секретів у Git-репозиторіях.
+- [`searchDorking`](searchDorking/README.md) — CLI для побудови пошукових
+  запитів і опційного пошуку через Google Custom Search API.
 
 ## Робота з Codex
 
