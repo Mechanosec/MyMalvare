@@ -21,6 +21,45 @@ There is no root `package.json`. Run npm commands in the relevant project.
 - Keep changes focused and follow the existing architecture.
 - Report checks actually run, failures, and checks not run.
 
+## Agent delegation
+
+The user wants useful agent delegation as the normal project workflow. Delegate
+bounded independent work when it can run alongside useful parent work; do not
+ask for delegation permission on every task. Handle tiny or tightly coupled
+changes locally. Use the smallest useful team, normally 1–2 children, at most
+3 concurrently. Do not spawn an agent just to wait for it.
+
+Project roles are registered in `.codex/config.toml`:
+
+- `api_worker`: NestJS implementation in assigned API files.
+- `web_worker`: Next.js implementation in assigned UI files.
+- `verifier`: independent reproduction, behavioral tests and builds.
+- `reviewer`: read-only correctness, architecture, secret-handling and simplicity review.
+
+The parent owns requirements, shared API contracts, integration and the final
+report. Each delegation must give the goal, acceptance criteria, exact writable
+files (or read-only scope), dependencies and expected verification/report.
+One file has one writer at a time. Agree shared types/contracts before parallel
+edits; never revert another agent's work. Children do not delegate further.
+
+Use the native role selector when available. If the client exposes only a
+generic spawn tool, read the corresponding `.codex/agents/<role>.toml` and pass
+its instructions with the bounded assignment. Do not claim the custom role
+was loaded automatically in that fallback. If agent tools are unavailable,
+perform the same workflow locally and disclose that limitation.
+
+Workers may run focused checks while implementing. Give the verifier exclusive
+ownership of full tests/builds after the relevant edits settle. Serialize checks
+that share build artifacts, a database or browser. Use isolated test data, never
+real leaked keys, and never include secret values in inter-agent messages.
+An independent reviewer is useful for substantial or security-sensitive changes;
+mandatory project review checklists still apply when the parent reviews locally.
+
+The parent must inspect agent results and resolve findings before completion.
+Only the parent publishes, and only with user authorization for that action.
+Child agents never commit, push, reset, deploy or delete data/volumes.
+See [the setup guide](docs/codex-agents.md) for examples and verification.
+
 ## Project skills
 
 Codex skills live under `.agents/skills/`, each with a `SKILL.md`:

@@ -44,3 +44,9 @@ export interface IStatusCount {
   readonly status: EFindingStatus;
   readonly count: number;
 }
+
+export interface ITestingFacets {
+  readonly repositories: readonly IFindingsRepoOption[];
+  readonly statuses: readonly IStatusCount[];
+  readonly secretTypes: readonly ISecretTypeCount[];
+}

@@ -18,6 +18,7 @@ import { GetFindingsRepoOptionsUseCase } from '../application/use-cases/get-find
 import { GetFindingsSecretTypeCountsUseCase } from '../application/use-cases/get-findings-secret-type-counts.use-case';
 import { GetFindingsStatusCountsUseCase } from '../application/use-cases/get-findings-status-counts.use-case';
 import { GetFindingsUseCase } from '../application/use-cases/get-findings.use-case';
+import { GetTestingFacetsUseCase } from '../application/use-cases/get-testing-facets.use-case';
 import { EFindingStatus } from '../domain/constant/finding-status.constant';
 import { ESecretType } from '../domain/constant/secret-type.constant';
 import {
@@ -26,9 +27,13 @@ import {
   IFindingsRepoOption,
   ISecretTypeCount,
   IStatusCount,
+  ITestingFacets,
 } from '../domain/types/finding-record.type';
 
-function parseCsv<T>(value: string | undefined, map: (raw: string) => T = (raw) => raw as T): T[] | undefined {
+function parseCsv<T>(
+  value: string | undefined,
+  map: (raw: string) => T = (raw) => raw as T,
+): T[] | undefined {
   return value ? value.split(',').filter(Boolean).map(map) : undefined;
 }
 
@@ -41,6 +46,7 @@ function parseCsv<T>(value: string | undefined, map: (raw: string) => T = (raw) 
 export class FindingsController {
   constructor(
     private readonly getFindings: GetFindingsUseCase,
+    private readonly getTestingFacets: GetTestingFacetsUseCase,
     private readonly getFindingsRepoOptions: GetFindingsRepoOptionsUseCase,
     private readonly getFindingsSecretTypeCounts: GetFindingsSecretTypeCountsUseCase,
     private readonly getFindingsStatusCounts: GetFindingsStatusCountsUseCase,
@@ -73,12 +79,54 @@ export class FindingsController {
     @Query('limit') limit?: string,
     @Query('secretTypes') secretTypes?: string,
   ): Promise<IFindingsRepoOption[]> {
-    return this.getFindingsRepoOptions.execute(limit ? Number(limit) : undefined, parseCsv<ESecretType>(secretTypes));
+    return this.getFindingsRepoOptions.execute(
+      limit ? Number(limit) : undefined,
+      parseCsv<ESecretType>(secretTypes),
+    );
+  }
+
+  @Get('testing-facets')
+  async testingFacets(
+    @Query('repoId') repoId?: string,
+    @Query('status') status?: EFindingStatus,
+    @Query('secretTypes') secretTypes?: string,
+    @Query('testableTypes') testableTypes?: string,
+  ): Promise<ITestingFacets> {
+    if (
+      repoId &&
+      (!Number.isSafeInteger(Number(repoId)) || Number(repoId) <= 0)
+    ) {
+      throw new BadRequestException('repoId must be a positive integer');
+    }
+    if (status && !Object.values(EFindingStatus).includes(status)) {
+      throw new BadRequestException('Invalid finding status');
+    }
+    const allowedTypes = parseCsv<ESecretType>(testableTypes);
+    if (
+      !allowedTypes?.length ||
+      allowedTypes.some((type) => !Object.values(ESecretType).includes(type))
+    ) {
+      throw new BadRequestException('Invalid testable secret types');
+    }
+    const selectedTypes = parseCsv<ESecretType>(secretTypes) ?? [];
+    if (selectedTypes.some((type) => !allowedTypes.includes(type))) {
+      throw new BadRequestException('Secret types must be testable');
+    }
+    return this.getTestingFacets.execute({
+      repoId: repoId ? Number(repoId) : undefined,
+      status,
+      secretTypes: selectedTypes,
+      testableTypes: allowedTypes,
+    });
   }
 
   @Get('secret-type-counts')
-  async secretTypeCounts(@Query('repoId') repoId?: string): Promise<ISecretTypeCount[]> {
-    return this.getFindingsSecretTypeCounts.execute(repoId ? Number(repoId) : undefined);
+  async secretTypeCounts(
+    @Query('repoId') repoId?: string,
+  ): Promise<ISecretTypeCount[]> {
+    return this.getFindingsSecretTypeCounts.execute(
+      repoId ? Number(repoId) : undefined,
+    );
   }
 
   @Get('status-counts')
@@ -105,7 +153,9 @@ export class FindingsController {
   }
 
   @Post('test-repo/:repoId')
-  async testRepo(@Param('repoId') repoId: string): Promise<readonly IFindingRecord[]> {
+  async testRepo(
+    @Param('repoId') repoId: string,
+  ): Promise<readonly IFindingRecord[]> {
     return this.adminTestRepoFindings.execute(Number(repoId));
   }
 

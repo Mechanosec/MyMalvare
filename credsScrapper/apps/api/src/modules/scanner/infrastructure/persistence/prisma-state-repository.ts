@@ -18,6 +18,8 @@ import {
   IFindingsRepoOption,
   ISecretTypeCount,
   IStatusCount,
+  ITestingFacets,
+  ITestingFacetsFilter,
 } from '../../domain/types/finding-record.type';
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
@@ -771,6 +773,66 @@ export class PrismaStateRepository extends StateRepositoryPort {
       status: row.status as EFindingStatus,
       count: row._count._all,
     }));
+  }
+
+  async getTestingFacets(
+    filter: ITestingFacetsFilter,
+  ): Promise<ITestingFacets> {
+    const scopedRepoIds = filter.scopeRepoIds
+      ? [...filter.scopeRepoIds]
+      : undefined;
+    const effectiveTypes = filter.secretTypes.length
+      ? filter.secretTypes
+      : filter.testableTypes;
+    const base: Prisma.FindingWhereInput = {
+      repoId: scopedRepoIds ? { in: scopedRepoIds } : undefined,
+    };
+    const [repoRows, statusRows, typeRows] = await Promise.all([
+      this.prisma.finding.groupBy({
+        by: ['repoId', 'owner', 'name', 'status'],
+        where: {
+          ...base,
+          secretType: { in: [...effectiveTypes] },
+          status: filter.status,
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.finding.groupBy({
+        by: ['status'],
+        where: {
+          ...base,
+          repoId: filter.repoId ?? base.repoId,
+          secretType: { in: [...effectiveTypes] },
+        },
+        _count: { _all: true },
+      }),
+      this.prisma.finding.groupBy({
+        by: ['secretType'],
+        where: {
+          ...base,
+          repoId: filter.repoId ?? base.repoId,
+          secretType: { in: [...filter.testableTypes] },
+          status: filter.status,
+        },
+        _count: { _all: true },
+      }),
+    ]);
+    const statusCounts = new Map(
+      statusRows.map((row) => [row.status, row._count._all]),
+    );
+    return {
+      repositories: groupRepoOptionsByStatus(repoRows).sort(
+        (a, b) => b.count - a.count,
+      ),
+      statuses: Object.values(EFindingStatus).map((status) => ({
+        status,
+        count: statusCounts.get(status) ?? 0,
+      })),
+      secretTypes: typeRows.map((row) => ({
+        secretType: row.secretType as ESecretType,
+        count: row._count._all,
+      })),
+    };
   }
 
   async listScannedRepos(limit: number): Promise<IScannedRepoRecord[]> {

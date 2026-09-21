@@ -6,9 +6,11 @@ interface IRepositorySelectProps {
   readonly options: readonly { value: number; label: string; name: string }[];
   readonly value: number | null;
   readonly onChange: (value: number | null) => void;
+  readonly placeholder?: string;
+  readonly disabled?: boolean;
 }
 
-export function RepositorySelect({ options, value, onChange }: IRepositorySelectProps) {
+export function RepositorySelect({ options, value, onChange, placeholder = 'Select a repository…', disabled = false }: IRepositorySelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(-1);
@@ -47,13 +49,13 @@ export function RepositorySelect({ options, value, onChange }: IRepositorySelect
     }}>
       <label htmlFor={id} className="mb-1 block text-xs text-text-dim">Repository</label>
       <button
-        ref={trigger} id={id} type="button" aria-haspopup="listbox" aria-expanded={open}
+        ref={trigger} id={id} type="button" aria-haspopup="listbox" aria-expanded={open} disabled={disabled}
         aria-controls={open ? `${id}-list` : undefined}
         title={selected?.label}
         onClick={() => { setOpen(!open); setQuery(''); setActive(-1); }}
-        className="flex w-full items-center justify-between gap-2 border border-line bg-surface-2 px-2 py-1.5 text-left text-sm text-text outline-none focus:border-accent"
+        className="flex w-full items-center justify-between gap-2 border border-line bg-surface-2 px-2 py-1.5 text-left text-sm text-text outline-none focus:border-accent disabled:opacity-50"
       >
-        <span className="truncate">{selected?.label ?? 'Select a repository…'}</span>
+        <span className="truncate">{selected?.label ?? placeholder}</span>
         <span aria-hidden="true" className="shrink-0 text-text-dim">▾</span>
       </button>
       {open && (

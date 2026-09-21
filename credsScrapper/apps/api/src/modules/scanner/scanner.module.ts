@@ -30,6 +30,7 @@ import { GetFindingsSecretTypeCountsUseCase } from './application/use-cases/get-
 import { GetFindingsStatusCountsUseCase } from './application/use-cases/get-findings-status-counts.use-case';
 import { StopJobUseCase } from './application/use-cases/stop-job.use-case';
 import { GetFindingsUseCase } from './application/use-cases/get-findings.use-case';
+import { GetTestingFacetsUseCase } from './application/use-cases/get-testing-facets.use-case';
 import { GetScannedReposUseCase } from './application/use-cases/get-scanned-repos.use-case';
 import { GetScanStatusUseCase } from './application/use-cases/get-scan-status.use-case';
 import { RunScanLoopUseCase } from './application/use-cases/run-scan-loop.use-case';
@@ -174,6 +175,11 @@ import { ScanController } from './presentation/scan.controller';
       GetFindingsUseCase,
       [StateRepositoryPort],
       (state) => new GetFindingsUseCase(state),
+    ),
+    provideUseCase(
+      GetTestingFacetsUseCase,
+      [StateRepositoryPort],
+      (state) => new GetTestingFacetsUseCase(state),
     ),
     provideUseCase(
       GetFindingsRepoOptionsUseCase,

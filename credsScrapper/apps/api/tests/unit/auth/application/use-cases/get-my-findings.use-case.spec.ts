@@ -22,7 +22,11 @@ function makeApproval(overrides: Partial<Record<string, unknown>> = {}) {
 describe('GetMyFindingsUseCase', () => {
   it('returns an empty page when the user has no approved repos', async () => {
     const authorizations = {
-      listByUser: jest.fn().mockResolvedValue([makeApproval({ status: ERepoAuthorizationStatus.PENDING })]),
+      listByUser: jest
+        .fn()
+        .mockResolvedValue([
+          makeApproval({ status: ERepoAuthorizationStatus.PENDING }),
+        ]),
     } as unknown as RepoAuthorizationRepositoryPort;
     const state = {
       findFindingsRepoOptionsByOwnerName: jest.fn(),
@@ -59,7 +63,9 @@ describe('GetMyFindingsUseCase', () => {
     const state = {
       findFindingsRepoOptionsByOwnerName: jest
         .fn()
-        .mockResolvedValue([{ repoId: 42, owner: 'acme', name: 'widgets', count: 3 }]),
+        .mockResolvedValue([
+          { repoId: 42, owner: 'acme', name: 'widgets', count: 3 },
+        ]),
       listFindings: jest.fn().mockResolvedValue({ items: [], total: 3 }),
     } as unknown as StateRepositoryPort;
     const useCase = new GetMyFindingsUseCase(authorizations, state);
@@ -69,6 +75,41 @@ describe('GetMyFindingsUseCase', () => {
     expect(state.findFindingsRepoOptionsByOwnerName).toHaveBeenCalledWith([
       { owner: 'acme', name: 'widgets' },
     ]);
-    expect(state.listFindings).toHaveBeenCalledWith({ search: 'aws', limit: 10, repoIds: [42] });
+    expect(state.listFindings).toHaveBeenCalledWith({
+      search: 'aws',
+      limit: 10,
+      repoIds: [42],
+    });
+  });
+
+  it('paginates one requested approved repository without exposing another repository', async () => {
+    const authorizations = {
+      listByUser: jest
+        .fn()
+        .mockResolvedValue([makeApproval(), makeApproval({ name: 'other' })]),
+    } as unknown as RepoAuthorizationRepositoryPort;
+    const state = {
+      findFindingsRepoOptionsByOwnerName: jest.fn().mockResolvedValue([
+        { repoId: 42, owner: 'acme', name: 'widgets' },
+        { repoId: 43, owner: 'acme', name: 'other' },
+      ]),
+      listFindings: jest.fn().mockResolvedValue({ items: [], total: 1500 }),
+    } as unknown as StateRepositoryPort;
+    const useCase = new GetMyFindingsUseCase(authorizations, state);
+
+    expect(
+      await useCase.execute(1, { repoIds: [42], limit: 50, offset: 1000 }),
+    ).toEqual({ items: [], total: 1500 });
+    expect(state.listFindings).toHaveBeenCalledWith({
+      repoIds: [42],
+      limit: 50,
+      offset: 1000,
+    });
+
+    expect(await useCase.execute(1, { repoIds: [99], limit: 50 })).toEqual({
+      items: [],
+      total: 0,
+    });
+    expect(state.listFindings).toHaveBeenCalledTimes(1);
   });
 });

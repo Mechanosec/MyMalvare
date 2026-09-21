@@ -8,6 +8,8 @@ import {
   IFindingsRepoOption,
   ISecretTypeCount,
   IStatusCount,
+  ITestingFacets,
+  ITestingFacetsFilter,
 } from '../../domain/types/finding-record.type';
 import { IQueueStatus } from '../../domain/types/queue-status.type';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
@@ -196,6 +198,11 @@ export abstract class StateRepositoryPort {
     repoId?: number,
     secretTypes?: readonly ESecretType[],
   ): Promise<IStatusCount[]>;
+
+  /** Counts for each Testing filter, applying the other two filters but not its own. */
+  abstract getTestingFacets(
+    filter: ITestingFacetsFilter,
+  ): Promise<ITestingFacets>;
 
   /** Most recently scanned repos first, newest attempt (started/scanned) on top. */
   abstract listScannedRepos(limit: number): Promise<IScannedRepoRecord[]>;

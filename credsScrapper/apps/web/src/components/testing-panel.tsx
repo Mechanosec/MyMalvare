@@ -2,21 +2,15 @@
 
 import { RepositorySelect } from './repository-select';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   adminTestFinding,
-  adminTestRepoFindings,
   fetchFindings,
-  fetchFindingsRepoOptions,
-  fetchFindingsSecretTypeCounts,
-  fetchFindingsStatusCounts,
   fetchMyFindings,
-  fetchMySecretTypeCounts,
-  fetchMyStatusCounts,
-  fetchMyTestableRepos,
+  fetchMyTestingFacets,
+  fetchTestingFacets,
   FINDINGS_PAGE_SIZE,
   testMyFinding,
-  testMyRepoFindings,
   scanMyRepo,
   startScanRepo,
 } from '../lib/api-client';
@@ -66,20 +60,27 @@ interface ITestingPanelProps {
 // authoritative, so there's no separate manual status override here.
 export function TestingPanel({ isAdmin }: ITestingPanelProps) {
   const [repoOptions, setRepoOptions] = useState<IFindingsRepoOption[]>([]);
+  const [selectedRepo, setSelectedRepo] = useState<IFindingsRepoOption | null>(null);
   const [repoId, setRepoId] = useState<number | null>(null);
   const [secretTypes, setSecretTypes] = useState<ESecretType[]>([]);
-  const [statuses, setStatuses] = useState<EFindingStatus[]>([]);
+  const [status, setStatus] = useState<EFindingStatus | null>(null);
   const [secretTypeCounts, setSecretTypeCounts] = useState<ISecretTypeCount[]>([]);
   const [statusCounts, setStatusCounts] = useState<IStatusCount[]>([]);
+  const [countsLoading, setCountsLoading] = useState(true);
+  const [countsError, setCountsError] = useState(false);
   const [findings, setFindings] = useState<readonly IFinding[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
-  const [log, setLog] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [testingId, setTestingId] = useState<number | null>(null);
-  const [testingAll, setTestingAll] = useState(false);
   const [testingSelected, setTestingSelected] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const requestId = useRef(0);
+  const countsRequestId = useRef(0);
+  const selectedRepoId = useRef<number | null>(null);
+  const filterRevision = useRef(0);
   const [rescanningRepoId, setRescanningRepoId] = useState<number | null>(null);
   const [rescanJobId, setRescanJobId] = useState<string | null>(null);
 
@@ -88,7 +89,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
     try {
       const result = await (isAdmin ? startScanRepo : scanMyRepo)(finding.owner, finding.name, finding.secretType);
       setRescanJobId(result.jobId);
-      setLog((prev) => [...prev, `Rescan queued for ${finding.owner}/${finding.name} (${finding.secretType}): job ${result.jobId}. After successful completion, previous test results for this service will be reset. Findings will refresh automatically so you can test again. No key tests were started.`]);
+      setFeedback(`Rescan queued for ${finding.owner}/${finding.name} (${finding.secretType}): job ${result.jobId}. Findings will refresh when it completes; no key tests were started.`);
     } catch (error) {
       const status = error instanceof Error
         ? /^POST (?:\/repo-authorizations\/mine\/scan-repo|\/scan\/repo) failed: (\d{3})$/.exec(error.message)?.[1]
@@ -102,150 +103,123 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
           : status === '404'
             ? 'The repository could not be found.'
             : 'The API request failed. Check server availability and retry.';
-      setLog((prev) => [...prev, `Could not queue rescan for ${finding.owner}/${finding.name}. ${reason}`]);
+      setFeedback(`Could not queue rescan for ${finding.owner}/${finding.name}. ${reason}`);
     } finally {
       setRescanningRepoId(null);
     }
   }
 
-  useEffect(() => {
-    // Only repos with at least one live-testable finding are worth
-    // offering here - the count shown is scoped the same way.
-    const fetchOptions = isAdmin
-      ? () => fetchFindingsRepoOptions(undefined, [...TESTABLE_SECRET_TYPES])
-      : () => fetchMyTestableRepos([...TESTABLE_SECRET_TYPES]);
-    fetchOptions().then(setRepoOptions).catch(() => setRepoOptions([]));
+  const refreshFacets = useCallback((targetRepoId: number | null, targetStatus: EFindingStatus | null, targetSecretTypes: readonly ESecretType[]) => {
+    if (targetRepoId !== selectedRepoId.current) return;
+    const currentRequest = ++countsRequestId.current;
+    setCountsLoading(true);
+    setCountsError(false);
+    const fetchFacets = isAdmin ? fetchTestingFacets : fetchMyTestingFacets;
+    fetchFacets({ repoId: targetRepoId, status: targetStatus, secretTypes: targetSecretTypes, testableTypes: TESTABLE_SECRET_TYPES }).then((facets) => {
+      if (currentRequest === countsRequestId.current) {
+        setRepoOptions([...facets.repositories]);
+        setStatusCounts([...facets.statuses]);
+        setSecretTypeCounts([...facets.secretTypes]);
+        setCountsLoading(false);
+      }
+    }).catch(() => {
+      if (currentRequest === countsRequestId.current) {
+        setRepoOptions([]);
+        setStatusCounts([]);
+        setSecretTypeCounts([]);
+        setCountsLoading(false);
+        setCountsError(true);
+      }
+    });
   }, [isAdmin]);
 
   useEffect(() => {
-    setSecretTypes([]);
-    setStatuses([]);
-    if (repoId === null) {
-      setSecretTypeCounts([]);
-      return;
-    }
-    const fetchCounts = isAdmin ? () => fetchFindingsSecretTypeCounts(repoId) : () => fetchMySecretTypeCounts(repoId);
-    fetchCounts().then(setSecretTypeCounts).catch(() => setSecretTypeCounts([]));
-  }, [isAdmin, repoId]);
+    refreshFacets(repoId, status, secretTypes);
+  }, [refreshFacets, repoId, status, secretTypes]);
 
-  function refreshStatusCounts(targetRepoId: number, targetSecretTypes: readonly ESecretType[]) {
-    const scopedTypes = targetSecretTypes.length ? targetSecretTypes : TESTABLE_SECRET_TYPES;
-    const fetchCounts = isAdmin
-      ? () => fetchFindingsStatusCounts(targetRepoId, [...scopedTypes])
-      : () => fetchMyStatusCounts(targetRepoId, [...scopedTypes]);
-    fetchCounts().then(setStatusCounts).catch(() => setStatusCounts([]));
-  }
-
-  useEffect(() => {
-    if (repoId === null) {
-      setStatusCounts([]);
-      return;
-    }
-    refreshStatusCounts(repoId, secretTypes);
-  }, [isAdmin, repoId, secretTypes]);
-
-  async function loadPage(targetPage: number) {
-    if (repoId === null) return;
+  const loadPage = useCallback(async (targetPage: number) => {
+    if (repoId !== selectedRepoId.current) return;
+    const currentRequest = ++requestId.current;
     setLoading(true);
+    setLoadError(false);
     try {
       let items: readonly IFinding[];
       let totalCount: number;
       if (isAdmin) {
         const result = await fetchFindings({
-          repoIds: [repoId],
+          repoIds: repoId === null ? undefined : [repoId],
           // Untested-type findings are pointless to show here - they'll
           // never resolve to anything but "unknown" (see TESTABLE_SECRET_TYPES).
           secretTypes: secretTypes.length ? secretTypes : [...TESTABLE_SECRET_TYPES],
-          statuses: statuses.length ? statuses : undefined,
+          statuses: status ? [status] : undefined,
           limit: FINDINGS_PAGE_SIZE,
           offset: targetPage * FINDINGS_PAGE_SIZE,
         });
         items = result.items;
         totalCount = result.total;
       } else {
-        // mine/findings has no repoIds filter (it's already scoped to the
-        // caller's own approved repos, which is at most a handful) - fetch
-        // them all and paginate the selected repo's slice client-side.
-        const filtered = (
-          await fetchMyFindings({
-            // Untested-type findings are pointless to show here - they'll
-            // never resolve to anything but "unknown" (see TESTABLE_SECRET_TYPES).
-            secretTypes: secretTypes.length ? secretTypes : [...TESTABLE_SECRET_TYPES],
-            statuses: statuses.length ? statuses : undefined,
-            limit: 1000,
-          })
-        ).items.filter((f) => f.repoId === repoId);
-        totalCount = filtered.length;
-        items = filtered.slice(targetPage * FINDINGS_PAGE_SIZE, (targetPage + 1) * FINDINGS_PAGE_SIZE);
+        const result = await fetchMyFindings({
+          repoIds: repoId === null ? undefined : [repoId],
+          secretTypes: secretTypes.length ? secretTypes : [...TESTABLE_SECRET_TYPES],
+          statuses: status ? [status] : undefined,
+          limit: FINDINGS_PAGE_SIZE,
+          offset: targetPage * FINDINGS_PAGE_SIZE,
+        });
+        items = result.items;
+        totalCount = result.total;
       }
+      if (currentRequest !== requestId.current) return;
       setFindings(items);
       setTotal(totalCount);
       setPage(targetPage);
       setSelectedIds(new Set());
-      setLog((prev) => [...prev, `Loaded ${items.length} of ${totalCount} finding(s) for repo ${repoId}`]);
     } catch {
+      if (currentRequest !== requestId.current) return;
       setFindings([]);
       setTotal(0);
-      setLog((prev) => [...prev, `Failed to load findings for repo ${repoId}`]);
+      setLoadError(true);
     } finally {
-      setLoading(false);
+      if (currentRequest === requestId.current) setLoading(false);
     }
-  }
+  }, [isAdmin, repoId, secretTypes, status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void loadPage(0);
+    });
+    return () => { cancelled = true; };
+  }, [loadPage]);
 
   async function refreshAfterRescan() {
+    const revision = filterRevision.current;
     await loadPage(0);
-    try {
-      const options = await (isAdmin
-        ? fetchFindingsRepoOptions(undefined, [...TESTABLE_SECRET_TYPES])
-        : fetchMyTestableRepos([...TESTABLE_SECRET_TYPES]));
-      setRepoOptions(options);
-      if (repoId !== null) {
-        const scopedTypes = secretTypes.length ? secretTypes : [...TESTABLE_SECRET_TYPES];
-        const [types, counts] = await Promise.all([
-          isAdmin ? fetchFindingsSecretTypeCounts(repoId) : fetchMySecretTypeCounts(repoId),
-          isAdmin ? fetchFindingsStatusCounts(repoId, scopedTypes) : fetchMyStatusCounts(repoId, scopedTypes),
-        ]);
-        setSecretTypeCounts(types);
-        setStatusCounts(counts);
-      }
-    } catch {
-      setLog((prev) => [...prev, 'Rescan completed, but counters could not be refreshed. Reload to retry.']);
+    if (revision === filterRevision.current) {
+      refreshFacets(repoId, status, secretTypes);
+      setFeedback(null);
     }
   }
 
   async function testOne(finding: IFinding) {
+    const revision = filterRevision.current;
     setTestingId(finding.id);
     try {
       const updated = await (isAdmin ? adminTestFinding(finding.id) : testMyFinding(finding.id));
-      setFindings((prev) => prev.map((f) => (f.id === finding.id ? updated : f)));
-      setLog((prev) => [
-        ...prev,
-        `Check ${finding.secretType} in ${finding.filePath}: ${updated.testReason ?? updated.status}`,
-      ]);
-      if (repoId !== null) refreshStatusCounts(repoId, secretTypes);
+      if (revision === filterRevision.current) setFindings((prev) => prev.map((f) => (f.id === finding.id ? updated : f)));
+      setFeedback(`Check ${finding.secretType} in ${finding.filePath}: ${updated.testReason ?? updated.status}`);
+      if (revision === filterRevision.current) {
+        refreshFacets(repoId, status, secretTypes);
+        if (status !== null) await loadPage(0);
+      }
     } catch {
-      setLog((prev) => [...prev, `Failed to test ${finding.secretType} in ${finding.filePath}`]);
+      setFeedback(`Failed to test ${finding.secretType} in ${finding.filePath}`);
     } finally {
       setTestingId(null);
     }
   }
 
-  async function testAll() {
-    if (repoId === null) return;
-    setTestingAll(true);
-    try {
-      const updated = await (isAdmin ? adminTestRepoFindings(repoId) : testMyRepoFindings(repoId));
-      setLog((prev) => [...prev, `Processed ${updated.length} finding(s) for repo ${repoId}`]);
-      await loadPage(page);
-      refreshStatusCounts(repoId, secretTypes);
-    } catch {
-      setLog((prev) => [...prev, `Failed to test findings for repo ${repoId}`]);
-    } finally {
-      setTestingAll(false);
-    }
-  }
-
   async function testSelected() {
+    const revision = filterRevision.current;
     const targets = findings.filter((f) => selectedIds.has(f.id));
     if (targets.length === 0) return;
     setTestingSelected(true);
@@ -253,16 +227,17 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
     for (const finding of targets) {
       try {
         const updated = await (isAdmin ? adminTestFinding(finding.id) : testMyFinding(finding.id));
-        setFindings((prev) => prev.map((f) => (f.id === finding.id ? updated : f)));
+        if (revision === filterRevision.current) setFindings((prev) => prev.map((f) => (f.id === finding.id ? updated : f)));
         succeeded += 1;
-      } catch {
-        setLog((prev) => [...prev, `Failed to test ${finding.secretType} in ${finding.filePath}`]);
-      }
+      } catch { /* The summary below includes failures without flooding the page. */ }
     }
-    setLog((prev) => [...prev, `Processed ${succeeded}/${targets.length} selected finding(s)`]);
+    setFeedback(`Processed ${succeeded}/${targets.length} selected finding(s)${succeeded < targets.length ? '; failed checks can be retried' : ''}.`);
     setSelectedIds(new Set());
     setTestingSelected(false);
-    if (repoId !== null) refreshStatusCounts(repoId, secretTypes);
+    if (revision === filterRevision.current) {
+      refreshFacets(repoId, status, secretTypes);
+      if (status !== null) await loadPage(0);
+    }
   }
 
   function toggleSelected(id: number) {
@@ -283,14 +258,78 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
   const pageCount = Math.max(1, Math.ceil(total / FINDINGS_PAGE_SIZE));
   const firstRow = total === 0 ? 0 : page * FINDINGS_PAGE_SIZE + 1;
   const lastRow = Math.min(total, (page + 1) * FINDINGS_PAGE_SIZE);
+  const allStatusCount = statusCounts.reduce((sum, count) => sum + count.count, 0);
+  const selectedRepoOption = selectedRepo && !repoOptions.some((repo) => repo.repoId === selectedRepo.repoId)
+    ? { ...selectedRepo, count: 0, validCount: 0, invalidCount: 0, unknownCount: 0 }
+    : null;
+  const visibleRepoOptions = selectedRepoOption ? [selectedRepoOption, ...repoOptions] : repoOptions;
+
+  function invalidateResults() {
+    filterRevision.current += 1;
+    requestId.current += 1;
+    countsRequestId.current += 1;
+    setSelectedIds(new Set());
+    setLoading(true);
+    setCountsLoading(true);
+    setCountsError(false);
+    setLoadError(false);
+    setFeedback(null);
+  }
+
+  function chooseRepo(value: number | null) {
+    if (value === repoId) return;
+    invalidateResults();
+    selectedRepoId.current = value;
+    setSelectedRepo(value === null ? null : visibleRepoOptions.find((repo) => repo.repoId === value) ?? null);
+    setRepoId(value);
+  }
+
+  function chooseStatus(value: EFindingStatus | null) {
+    if (value === status) return;
+    invalidateResults();
+    setStatus(value);
+  }
+
+  function chooseSecretTypes(values: ESecretType[]) {
+    if (values.length === secretTypes.length && values.every((value) => secretTypes.includes(value))) return;
+    invalidateResults();
+    setSecretTypes(values);
+  }
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-2">
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Finding status">
+          <span className="mr-1 text-xs text-text-dim">Status</span>
+          {([null, EFindingStatus.UNKNOWN, EFindingStatus.INVALID, EFindingStatus.VALID] as const).map((value) => {
+            const count = value === null ? allStatusCount : statusCounts.find((item) => item.status === value)?.count ?? 0;
+            return (
+              <button key={value ?? 'all'} type="button" onClick={() => chooseStatus(value)}
+                aria-pressed={status === value}
+                className={`border px-3 py-1.5 text-xs transition-colors ${status === value ? 'border-accent bg-accent/15 text-accent' : 'border-line bg-surface-2 text-text-dim hover:border-accent hover:text-text'}`}
+              >
+                {value ?? 'All'} <span className={`font-mono ${countsLoading ? 'opacity-50' : ''}`}>{countsError ? '—' : count}</span>
+              </button>
+            );
+          })}
+          <span className="ml-auto text-xs text-text-dim">
+            {countsError ? 'Repositories —' : countsLoading ? 'Updating filters…' : `${repoOptions.length} repositories`}
+          </span>
+          {(repoId !== null || status !== null || secretTypes.length > 0) && (
+            <button type="button" className="text-xs text-text-dim underline hover:text-text" onClick={() => {
+              chooseRepo(null);
+              chooseStatus(null);
+              chooseSecretTypes([]);
+            }}>Clear filters</button>
+          )}
+        </div>
+
+      <div className="flex flex-wrap items-end gap-3">
         <RepositorySelect
-          options={repoOptions.map((repo) => ({ value: repo.repoId, name: `${repo.owner}/${repo.name}`, label: formatRepoOptionLabel(repo) }))}
+          options={visibleRepoOptions.map((repo) => ({ value: repo.repoId, name: `${repo.owner}/${repo.name}`, label: formatRepoOptionLabel(repo) }))}
           value={repoId}
-          onChange={setRepoId}
+          onChange={chooseRepo}
+          placeholder="All repositories"
+          disabled={countsLoading || countsError}
         />
 
         <MultiSelect
@@ -298,57 +337,39 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
           options={TESTABLE_SECRET_TYPES.map((value) => ({
             value,
             label: value.replace(/_/g, ' '),
-            count: secretTypeCounts.find((c) => c.secretType === value)?.count,
-          }))}
+            count: countsError || (countsLoading && secretTypeCounts.length === 0)
+              ? undefined
+              : (secretTypeCounts.find((c) => c.secretType === value)?.count ?? 0),
+          })).sort((a, b) => (b.count ?? 0) - (a.count ?? 0))}
           selected={secretTypes}
-          onChange={setSecretTypes}
+          onChange={chooseSecretTypes}
+          updating={countsLoading}
+          unavailable={countsError}
         />
 
-        <MultiSelect
-          label="Status"
-          options={Object.values(EFindingStatus).map((value) => ({
-            value,
-            label: value,
-            count: statusCounts.find((c) => c.status === value)?.count,
-          }))}
-          selected={statuses}
-          onChange={setStatuses}
-        />
-
-        <button
-          type="button"
-          onClick={() => loadPage(0)}
-          disabled={repoId === null || loading}
-          className="border border-line bg-surface-2 px-3 py-1.5 text-sm text-text hover:border-accent disabled:opacity-50"
-        >
-          Load keys
-        </button>
         <button
           type="button"
           onClick={testSelected}
-          disabled={selectedIds.size === 0 || testingSelected}
+          disabled={loading || selectedIds.size === 0 || testingSelected}
           className="border border-accent px-3 py-1.5 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-40"
         >
           {testingSelected ? 'Testing selected…' : `Test selected (${selectedIds.size})`}
         </button>
-        <button
-          type="button"
-          onClick={testAll}
-          disabled={repoId === null || total === 0 || testingAll}
-          className="bg-accent px-3 py-1.5 text-sm font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
-        >
-          {testingAll ? 'Testing all…' : 'Test all'}
-        </button>
         <span className="ml-auto font-mono text-xs text-text-dim">
-          {firstRow}-{lastRow} of {total} rows
+          {loading ? 'Loading…' : loadError ? 'Load failed' : `${firstRow}-${lastRow} of ${total} rows`}
         </span>
       </div>
 
+      {countsError && <p role="alert" className="text-sm text-red-400">Could not load filters. <button type="button" className="underline" onClick={() => refreshFacets(repoId, status, secretTypes)}>Retry</button></p>}
+
+      {loadError && <p role="alert" className="text-sm text-red-400">Could not load findings. Check the API and try again.</p>}
+      {!loading && !loadError && total === 0 && <p className="py-4 text-sm text-text-dim">No findings match these filters.</p>}
+
       {findings.length > 0 && (
         <>
-          <Pagination page={page} pageCount={pageCount} onChange={loadPage} />
+          <fieldset disabled={loading}><Pagination page={page} pageCount={pageCount} onChange={loadPage} /></fieldset>
 
-          <div className="overflow-x-auto border border-line">
+          <div aria-busy={loading} className={`overflow-x-auto border border-line ${loading ? 'opacity-50' : ''}`}>
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-line bg-surface-2 text-left text-xs text-text-dim">
@@ -357,9 +378,11 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
                       type="checkbox"
                       aria-label="Select all on this page"
                       checked={allSelected}
+                      disabled={loading}
                       onChange={toggleSelectAll}
                     />
                   </th>
+                  {repoId === null && <th className="px-3 py-2 font-medium">Repository</th>}
                   <th className="px-3 py-2 font-medium">File</th>
                   <th className="px-3 py-2 font-medium">Type</th>
                   <th className="px-3 py-2 font-medium">Secret</th>
@@ -375,9 +398,11 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
                         type="checkbox"
                         aria-label={`Select ${finding.secretType} in ${finding.filePath}`}
                         checked={selectedIds.has(finding.id)}
+                        disabled={loading}
                         onChange={() => toggleSelected(finding.id)}
                       />
                     </td>
+                    {repoId === null && <td className="max-w-48 truncate px-3 py-2 font-mono text-text-dim" title={`${finding.owner}/${finding.name}`}>{finding.owner}/{finding.name}</td>}
                     <td className="max-w-64 truncate px-3 py-2 font-mono text-text-dim" title={finding.filePath}>
                       {finding.filePath}
                     </td>
@@ -397,7 +422,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
                       <button
                         type="button"
                         onClick={() => needsRescan(finding) ? rescan(finding) : testOne(finding)}
-                        disabled={testingId === finding.id || rescanningRepoId === finding.repoId}
+                        disabled={loading || testingId === finding.id || rescanningRepoId === finding.repoId}
                         className="bg-accent px-3 py-1 text-xs font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
                       >
                         {needsRescan(finding)
@@ -408,7 +433,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
                         <button
                           type="button"
                           onClick={() => rescan(finding)}
-                          disabled={testingId === finding.id || rescanningRepoId === finding.repoId}
+                          disabled={loading || testingId === finding.id || rescanningRepoId === finding.repoId}
                           title="Rescan this repository for this service and reset its previous test results"
                           className="border border-line px-3 py-1 text-xs font-medium hover:bg-surface-2 disabled:opacity-40"
                         >
@@ -423,21 +448,12 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
             </table>
           </div>
 
-          <Pagination page={page} pageCount={pageCount} onChange={loadPage} />
+          <fieldset disabled={loading}><Pagination page={page} pageCount={pageCount} onChange={loadPage} /></fieldset>
         </>
       )}
 
       {rescanJobId && <ProgressPanel key={rescanJobId} jobId={rescanJobId} onDone={refreshAfterRescan} />}
-      {log.length > 0 && (
-        <div className="max-h-56 overflow-y-auto border border-line bg-ink px-4 py-2 font-mono text-xs leading-relaxed">
-          {log.map((line, index) => (
-            <p key={index} className="text-text-dim">
-              <span className="text-text-dim">{String(index + 1).padStart(3, '0')} </span>
-              {line}
-            </p>
-          ))}
-        </div>
-      )}
+      {feedback && <p role="status" className="border border-line bg-surface-2 px-3 py-2 text-xs text-text-dim">{feedback}</p>}
     </div>
   );
 }

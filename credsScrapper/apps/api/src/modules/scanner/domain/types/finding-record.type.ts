@@ -54,6 +54,21 @@ export interface IStatusCount {
   readonly count: number;
 }
 
+export interface ITestingFacetsFilter {
+  readonly repoId?: number;
+  readonly status?: EFindingStatus;
+  readonly secretTypes: readonly ESecretType[];
+  readonly testableTypes: readonly ESecretType[];
+  /** Restricts regular users to approved repositories; absent for administrators. */
+  readonly scopeRepoIds?: readonly number[];
+}
+
+export interface ITestingFacets {
+  readonly repositories: readonly IFindingsRepoOption[];
+  readonly statuses: readonly IStatusCount[];
+  readonly secretTypes: readonly ISecretTypeCount[];
+}
+
 /** One finding to persist via addFindings - everything except the repo/owner/name it belongs to (those are shared across a whole scan's batch). */
 export interface IFindingInput {
   readonly filePath: string;

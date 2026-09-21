@@ -1,6 +1,6 @@
 import { EFindingStatus } from './constant/finding-status.constant';
 import { ESecretType } from './constant/secret-type.constant';
-import { IFinding, IFindingsPage, IFindingsRepoOption, ISecretTypeCount, IStatusCount } from './types/finding.type';
+import { IFinding, IFindingsPage, IFindingsRepoOption, ISecretTypeCount, IStatusCount, ITestingFacets } from './types/finding.type';
 import { IJobState } from './types/job-progress-event.type';
 import { IQueueStatus } from './types/queue-status.type';
 import { IScannedRepo } from './types/scanned-repo.type';
@@ -98,6 +98,29 @@ export interface IFindingsQuery {
 
 export const FINDINGS_PAGE_SIZE = 50;
 
+export interface ITestingFacetsQuery {
+  repoId?: number | null;
+  status?: EFindingStatus | null;
+  secretTypes: readonly ESecretType[];
+  testableTypes: readonly ESecretType[];
+}
+
+function testingFacetParams(query: ITestingFacetsQuery): string {
+  const params = new URLSearchParams({ testableTypes: query.testableTypes.join(',') });
+  if (query.repoId !== null && query.repoId !== undefined) params.set('repoId', String(query.repoId));
+  if (query.status) params.set('status', query.status);
+  if (query.secretTypes.length) params.set('secretTypes', query.secretTypes.join(','));
+  return params.toString();
+}
+
+export function fetchTestingFacets(query: ITestingFacetsQuery): Promise<ITestingFacets> {
+  return get<ITestingFacets>(`/findings/testing-facets?${testingFacetParams(query)}`);
+}
+
+export function fetchMyTestingFacets(query: ITestingFacetsQuery): Promise<ITestingFacets> {
+  return get<ITestingFacets>(`/repo-authorizations/mine/testing-facets?${testingFacetParams(query)}`);
+}
+
 export function fetchFindings(query: IFindingsQuery = {}): Promise<IFindingsPage> {
   const params = new URLSearchParams();
   if (query.secretTypes?.length) params.set('secretTypes', query.secretTypes.join(','));
@@ -171,6 +194,7 @@ export function adminTestRepoFindings(repoId: number): Promise<IFinding[]> {
 
 export function fetchMyFindings(query: IFindingsQuery = {}): Promise<IFindingsPage> {
   const params = new URLSearchParams();
+  if (query.repoIds?.length === 1) params.set('repoId', String(query.repoIds[0]));
   if (query.secretTypes?.length) params.set('secretTypes', query.secretTypes.join(','));
   if (query.statuses?.length) params.set('statuses', query.statuses.join(','));
   if (query.search) params.set('search', query.search);

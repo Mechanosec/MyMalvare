@@ -22,6 +22,7 @@ import { TestRepoFindingsUseCase } from '../application/use-cases/test-repo-find
 import { TestFindingUseCase } from '../application/use-cases/test-finding.use-case';
 import { ScanMyRepoUseCase } from '../application/use-cases/scan-my-repo.use-case';
 import { GetMyFindingsUseCase } from '../application/use-cases/get-my-findings.use-case';
+import { GetMyTestingFacetsUseCase } from '../application/use-cases/get-my-testing-facets.use-case';
 import { GetMyScannedReposUseCase } from '../application/use-cases/get-my-scanned-repos.use-case';
 import { SetMyFindingStatusUseCase } from '../application/use-cases/set-my-finding-status.use-case';
 import { GetMySecretTypeCountsUseCase } from '../application/use-cases/get-my-secret-type-counts.use-case';
@@ -54,6 +55,7 @@ export class RepoAuthorizationsController {
     private readonly testFinding: TestFindingUseCase,
     private readonly scanMyRepo: ScanMyRepoUseCase,
     private readonly getMyFindings: GetMyFindingsUseCase,
+    private readonly getMyTestingFacets: GetMyTestingFacetsUseCase,
     private readonly getMyScannedRepos: GetMyScannedReposUseCase,
     private readonly setMyFindingStatus: SetMyFindingStatusUseCase,
     private readonly getMySecretTypeCounts: GetMySecretTypeCountsUseCase,
@@ -86,18 +88,63 @@ export class RepoAuthorizationsController {
   @UseGuards(AuthGuard)
   async myFindings(
     @Req() req: TAuthedRequest,
+    @Query('repoId') repoId?: string,
     @Query('secretTypes') secretTypes?: string,
     @Query('statuses') statuses?: string,
     @Query('search') search?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    if (
+      repoId &&
+      (!Number.isSafeInteger(Number(repoId)) || Number(repoId) <= 0)
+    ) {
+      throw new BadRequestException('repoId must be a positive integer');
+    }
     return this.getMyFindings.execute(req.user.id, {
+      repoIds: repoId ? [Number(repoId)] : undefined,
       secretTypes: parseCsv<ESecretType>(secretTypes),
       statuses: parseCsv<EFindingStatus>(statuses),
       search: search || undefined,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
+    });
+  }
+
+  @Get('mine/testing-facets')
+  @UseGuards(AuthGuard)
+  async myTestingFacets(
+    @Req() req: TAuthedRequest,
+    @Query('repoId') repoId?: string,
+    @Query('status') status?: EFindingStatus,
+    @Query('secretTypes') secretTypes?: string,
+    @Query('testableTypes') testableTypes?: string,
+  ) {
+    if (
+      repoId &&
+      (!Number.isSafeInteger(Number(repoId)) || Number(repoId) <= 0)
+    ) {
+      throw new BadRequestException('repoId must be a positive integer');
+    }
+    if (status && !Object.values(EFindingStatus).includes(status)) {
+      throw new BadRequestException('Invalid finding status');
+    }
+    const allowedTypes = parseCsv<ESecretType>(testableTypes);
+    if (
+      !allowedTypes?.length ||
+      allowedTypes.some((type) => !Object.values(ESecretType).includes(type))
+    ) {
+      throw new BadRequestException('Invalid testable secret types');
+    }
+    const selectedTypes = parseCsv<ESecretType>(secretTypes) ?? [];
+    if (selectedTypes.some((type) => !allowedTypes.includes(type))) {
+      throw new BadRequestException('Secret types must be testable');
+    }
+    return this.getMyTestingFacets.execute(req.user.id, {
+      repoId: repoId ? Number(repoId) : undefined,
+      status,
+      secretTypes: selectedTypes,
+      testableTypes: allowedTypes,
     });
   }
 

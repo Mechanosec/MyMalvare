@@ -65,6 +65,79 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'creds-prisma-test-'));
   });
 
+  it('calculates Testing facets from the other filters within the authorized repository scope', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'facets.db'),
+    );
+    try {
+      for (const [repoId, name, secretType] of [
+        [1, 'one', ESecretType.GITHUB_PAT],
+        [1, 'one', ESecretType.SLACK_TOKEN],
+        [2, 'two', ESecretType.GITHUB_PAT],
+        [3, 'private', ESecretType.GITHUB_PAT],
+      ] as const) {
+        await repo.addFinding(
+          repoId,
+          'fixture',
+          name,
+          'synthetic.txt',
+          'abc',
+          secretType,
+          'synthetic-only',
+          1,
+          null,
+        );
+      }
+      const page = await repo.listFindings({ limit: 10 });
+      for (const finding of page.items) {
+        if (
+          finding.repoId !== 1 ||
+          finding.secretType !== ESecretType.GITHUB_PAT
+        ) {
+          await repo.recordTestResult(
+            finding.id,
+            EFindingStatus.VALID,
+            'synthetic result',
+          );
+        }
+      }
+
+      const facets = await repo.getTestingFacets({
+        repoId: 1,
+        status: EFindingStatus.UNKNOWN,
+        secretTypes: [ESecretType.SLACK_TOKEN],
+        testableTypes: [ESecretType.GITHUB_PAT, ESecretType.SLACK_TOKEN],
+        scopeRepoIds: [1, 2],
+      });
+      expect(facets.repositories).toEqual([]);
+      expect(facets.statuses).toContainEqual({
+        status: EFindingStatus.VALID,
+        count: 1,
+      });
+      expect(facets.secretTypes).toEqual([
+        { secretType: ESecretType.GITHUB_PAT, count: 1 },
+      ]);
+
+      const unknown = await repo.getTestingFacets({
+        status: EFindingStatus.UNKNOWN,
+        secretTypes: [],
+        testableTypes: [ESecretType.GITHUB_PAT, ESecretType.SLACK_TOKEN],
+        scopeRepoIds: [1, 2],
+      });
+      expect(unknown.repositories.map((entry) => entry.repoId)).toEqual([1]);
+      expect(unknown.statuses).toContainEqual({
+        status: EFindingStatus.UNKNOWN,
+        count: 1,
+      });
+      expect(unknown.statuses).toContainEqual({
+        status: EFindingStatus.VALID,
+        count: 2,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });

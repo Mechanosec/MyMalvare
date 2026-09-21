@@ -1,0 +1,20 @@
+# Project agent roles. Explicit registration also supports Codex CLI 0.130.
+# Keep the user's model, reasoning effort, permissions and approval policy.
+[agents]
+max_threads = 3
+
+[agents.api_worker]
+description = "Implement bounded NestJS API changes with the project's hexagonal architecture."
+config_file = "agents/api_worker.toml"
+
+[agents.web_worker]
+description = "Implement bounded Next.js UI changes, including accessible asynchronous states."
+config_file = "agents/web_worker.toml"
+
+[agents.verifier]
+description = "Independently reproduce bugs and verify acceptance criteria with synthetic data, tests and builds."
+config_file = "agents/verifier.toml"
+
+[agents.reviewer]
+description = "Read-only review for correctness, secret handling, architecture and unnecessary complexity."
+config_file = "agents/reviewer.toml"

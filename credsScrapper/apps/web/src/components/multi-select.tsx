@@ -14,6 +14,8 @@ interface IMultiSelectProps<T extends string | number> {
   readonly options: readonly IMultiSelectOption<T>[];
   readonly selected: readonly T[];
   readonly onChange: (values: T[]) => void;
+  readonly updating?: boolean;
+  readonly unavailable?: boolean;
 }
 
 export function MultiSelect<T extends string | number>({
@@ -21,6 +23,8 @@ export function MultiSelect<T extends string | number>({
   options,
   selected,
   onChange,
+  updating = false,
+  unavailable = false,
 }: IMultiSelectProps<T>) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -66,13 +70,16 @@ export function MultiSelect<T extends string | number>({
       {open && (
         <div
           role="listbox"
+          aria-busy={updating}
           className="absolute z-10 mt-1 max-h-64 w-64 overflow-y-auto border border-line bg-surface-2 shadow-lg"
         >
+          {updating && <p className="border-b border-line px-2 py-1 text-xs text-text-dim">Updating options…</p>}
+          {unavailable && <p className="border-b border-line px-2 py-1 text-xs text-text-dim">Options unavailable. Retry filters.</p>}
           {options.length === 0 ? (
             <p className="px-2 py-1.5 text-sm text-text-dim">No options</p>
           ) : (
             options.map((option) => {
-              const disabled = option.count === 0;
+              const disabled = (updating || unavailable || option.count === 0) && !selected.includes(option.value);
               return (
                 <label
                   key={option.value}

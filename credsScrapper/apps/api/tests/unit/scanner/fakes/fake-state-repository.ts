@@ -15,6 +15,8 @@ import {
   IFindingsRepoOption,
   ISecretTypeCount,
   IStatusCount,
+  ITestingFacets,
+  ITestingFacetsFilter,
 } from '../../../../src/modules/scanner/domain/types/finding-record.type';
 import { IQueueStatus } from '../../../../src/modules/scanner/domain/types/queue-status.type';
 import { IRepoRef } from '../../../../src/modules/scanner/domain/types/repo-ref.type';
@@ -516,6 +518,56 @@ export class FakeStateRepository extends StateRepositoryPort {
       counts.set(f.status, (counts.get(f.status) ?? 0) + 1);
     }
     return [...counts.entries()].map(([status, count]) => ({ status, count }));
+  }
+
+  async getTestingFacets(
+    filter: ITestingFacetsFilter,
+  ): Promise<ITestingFacets> {
+    const scoped = this.findings.filter(
+      (finding) =>
+        (!filter.scopeRepoIds ||
+          filter.scopeRepoIds.includes(finding.repoId)) &&
+        filter.testableTypes.includes(finding.secretType),
+    );
+    const selectedTypes = filter.secretTypes.length
+      ? filter.secretTypes
+      : filter.testableTypes;
+    const repositories = new Map<number, IFindingsRepoOption>();
+    const statusCounts = new Map<EFindingStatus, number>();
+    const typeCounts = new Map<ESecretType, number>();
+    for (const finding of scoped) {
+      if (selectedTypes.includes(finding.secretType)) {
+        if (filter.repoId === undefined || finding.repoId === filter.repoId) {
+          statusCounts.set(
+            finding.status,
+            (statusCounts.get(finding.status) ?? 0) + 1,
+          );
+        }
+        if (filter.status === undefined || finding.status === filter.status) {
+          this.bumpRepoOption(repositories, finding);
+        }
+      }
+      if (
+        (filter.repoId === undefined || finding.repoId === filter.repoId) &&
+        (filter.status === undefined || finding.status === filter.status)
+      ) {
+        typeCounts.set(
+          finding.secretType,
+          (typeCounts.get(finding.secretType) ?? 0) + 1,
+        );
+      }
+    }
+    return {
+      repositories: [...repositories.values()],
+      statuses: Object.values(EFindingStatus).map((status) => ({
+        status,
+        count: statusCounts.get(status) ?? 0,
+      })),
+      secretTypes: [...typeCounts.entries()].map(([secretType, count]) => ({
+        secretType,
+        count,
+      })),
+    };
   }
 
   async listScannedRepos(limit: number): Promise<IScannedRepoRecord[]> {
