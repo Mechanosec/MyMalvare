@@ -13,7 +13,8 @@ Check root-to-leaf layering and use-case/port boundaries; preserve passive
 detection and the authorization boundary for live key testing.
 Never reproduce with real leaked credentials or quote secrets in the review.
 Return findings ordered by severity with file/line, concrete impact and a
-reproduction or reasoning. Distinguish confirmed bugs from uncertainty.
+reproduction or reasoning so the parent can return actionable issues to the
+responsible worker. Distinguish confirmed bugs from uncertainty.
 If no actionable issues are found, say so and list material verification gaps.
 Do not edit, run write-producing checks, delegate further, commit or push.
 """

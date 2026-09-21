@@ -1,7 +1,14 @@
 # Project agent roles. Explicit registration also supports Codex CLI 0.130.
-# Keep the user's model, reasoning effort, permissions and approval policy.
+# Development defaults. A client-selected model can override the main session.
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+
 [agents]
 max_threads = 3
+
+[agents.planner]
+description = "Own substantive brainstorming, design and implementation planning, including Superpowers planning stages."
+config_file = "agents/planner.toml"
 
 [agents.api_worker]
 description = "Implement bounded NestJS API changes with the project's hexagonal architecture."
