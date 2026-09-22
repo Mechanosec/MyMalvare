@@ -3,22 +3,7 @@ import { AdminScanRepoUseCase } from '../../../../../src/modules/scanner/applica
 import { StateRepositoryPort } from '../../../../../src/modules/scanner/application/ports/state-repository.port';
 import { GithubRepoLookupPort } from '../../../../../src/modules/scanner/application/ports/github-repo-lookup.port';
 import { WorkdirJoinerPort } from '../../../../../src/modules/scanner/application/ports/workdir-joiner.port';
-import { JobQueuePort } from '../../../../../src/modules/scanner/application/ports/job-queue.port';
-
-class FakeJobQueue extends JobQueuePort {
-  enqueued: Array<{ type: string; payload: unknown }> = [];
-  async enqueue(type: string, payload: unknown): Promise<string> {
-    this.enqueued.push({ type, payload });
-    return 'fake-job-id';
-  }
-  async getJob(): Promise<null> {
-    return null;
-  }
-  async requestStop(): Promise<void> {}
-  async isStopRequested(): Promise<boolean> {
-    return false;
-  }
-}
+import { FakeScanJobQueue } from '../../fakes/fake-scan-job-queue';
 
 describe('AdminScanRepoUseCase', () => {
   it("returns 'not-found' when GitHub has no such repo, without starting a scan", async () => {
@@ -28,7 +13,7 @@ describe('AdminScanRepoUseCase', () => {
     const githubLookup = {
       resolveRepoId: jest.fn().mockResolvedValue(null),
     } as unknown as GithubRepoLookupPort;
-    const jobQueue = new FakeJobQueue();
+    const jobQueue = new FakeScanJobQueue();
     const workdirJoiner = {
       join: jest.fn(),
       ensureDir: jest.fn(),
@@ -53,7 +38,7 @@ describe('AdminScanRepoUseCase', () => {
     const githubLookup = {
       resolveRepoId: jest.fn().mockResolvedValue(42),
     } as unknown as GithubRepoLookupPort;
-    const jobQueue = new FakeJobQueue();
+    const jobQueue = new FakeScanJobQueue();
     const workdirJoiner = {
       join: jest.fn().mockReturnValue('workdir/repo-42'),
       ensureDir: jest.fn(),
@@ -86,7 +71,7 @@ describe('AdminScanRepoUseCase', () => {
     const githubLookup = {
       resolveRepoId: jest.fn().mockResolvedValue(42),
     } as unknown as GithubRepoLookupPort;
-    const jobQueue = new FakeJobQueue();
+    const jobQueue = new FakeScanJobQueue();
     const workdirJoiner = {
       join: jest.fn().mockReturnValue('workdir/repo-42'),
       ensureDir: jest.fn(),
@@ -100,7 +85,7 @@ describe('AdminScanRepoUseCase', () => {
 
     const result = await useCase.execute('acme', 'widgets');
 
-    expect(state.startRepoScan).toHaveBeenCalledWith(42, 'acme', 'widgets');
+    expect(state.startRepoScan).not.toHaveBeenCalled();
     expect(jobQueue.enqueued).toHaveLength(1);
     expect(jobQueue.enqueued[0].type).toBe('scan-repo');
     expect(jobQueue.enqueued[0].payload).toEqual({

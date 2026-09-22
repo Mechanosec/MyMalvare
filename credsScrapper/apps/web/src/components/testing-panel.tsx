@@ -52,6 +52,7 @@ function formatRepoOptionLabel(repo: IFindingsRepoOption): string {
 
 interface ITestingPanelProps {
   readonly isAdmin: boolean;
+  readonly scansStopping?: boolean;
 }
 
 // "Test" runs a live, read-only check against the third-party service the
@@ -60,7 +61,7 @@ interface ITestingPanelProps {
 // and need rotating. An admin can pick any repository, unscoped - an MVP
 // stand-in for the future automated scan-and-alert flow. The live check is
 // authoritative, so there's no separate manual status override here.
-export function TestingPanel({ isAdmin }: ITestingPanelProps) {
+export function TestingPanel({ isAdmin, scansStopping = false }: ITestingPanelProps) {
   const [repoOptions, setRepoOptions] = useState<IFindingsRepoOption[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<IFindingsRepoOption | null>(null);
   const [repoId, setRepoId] = useState<number | null>(null);
@@ -88,6 +89,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
   const [rescanJobId, setRescanJobId] = useState<string | null>(null);
 
   async function rescan(finding: IFinding) {
+    if (scansStopping) return;
     setRescanningRepoId(finding.repoId);
     try {
       const result = await (isAdmin ? startScanRepo : scanMyRepo)(finding.owner, finding.name, finding.secretType);
@@ -97,7 +99,9 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
       const status = error instanceof Error
         ? /^POST (?:\/repo-authorizations\/mine\/scan-repo|\/scan\/repo) failed: (\d{3})$/.exec(error.message)?.[1]
         : undefined;
-      const reason = status === '403'
+      const reason = error instanceof Error && error.message.includes('Scan stopping (409)')
+        ? error.message
+        : status === '403'
         ? isAdmin
           ? 'Administrator access is required. Sign in again with an administrator account.'
           : 'Your account has no approved authorization for this repository. Rescan requires repository-owner permission.'
@@ -445,7 +449,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
                       <button
                         type="button"
                         onClick={() => needsRescan(finding) ? rescan(finding) : testOne(finding)}
-                        disabled={loading || testingId !== null || testingSelected || rescanningRepoId === finding.repoId}
+                        disabled={loading || testingId !== null || testingSelected || rescanningRepoId === finding.repoId || (needsRescan(finding) && scansStopping)}
                         className="bg-accent px-3 py-1 text-xs font-medium text-ink transition-opacity hover:opacity-90 disabled:opacity-40"
                       >
                         {needsRescan(finding)
@@ -456,7 +460,7 @@ export function TestingPanel({ isAdmin }: ITestingPanelProps) {
                         <button
                           type="button"
                           onClick={() => rescan(finding)}
-                          disabled={loading || testingId === finding.id || rescanningRepoId === finding.repoId}
+                          disabled={loading || scansStopping || testingId === finding.id || rescanningRepoId === finding.repoId}
                           title="Rescan this repository for this service and reset its previous test results"
                           className="border border-line px-3 py-1 text-xs font-medium hover:bg-surface-2 disabled:opacity-40"
                         >

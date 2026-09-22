@@ -12,6 +12,7 @@ import {
 } from '../../../src/modules/scanner/domain/constant/scan-phase.constant';
 import { PrismaStateRepository } from '../../../src/modules/scanner/infrastructure/persistence/prisma-state-repository';
 import { PrismaService } from '../../../src/modules/scanner/infrastructure/persistence/prisma.service';
+import { EScanStatus } from '../../../src/modules/scanner/domain/constant/scan-status.constant';
 
 async function makeRepository(dbFile: string): Promise<{
   repo: PrismaStateRepository;
@@ -34,7 +35,8 @@ async function makeRepository(dbFile: string): Promise<{
     CREATE TABLE scanned_repos (
       repo_id INTEGER PRIMARY KEY, owner TEXT NOT NULL, name TEXT NOT NULL,
       last_commit_sha TEXT, scanner_version TEXT, status TEXT NOT NULL, started_at DATETIME, scanned_at DATETIME,
-      fail_reason TEXT, retry_count INTEGER NOT NULL DEFAULT 0
+      fail_reason TEXT, retry_count INTEGER NOT NULL DEFAULT 0,
+      scan_epoch INTEGER NOT NULL DEFAULT 0
     )
   `);
   await prisma.$executeRawUnsafe(`
@@ -43,6 +45,7 @@ async function makeRepository(dbFile: string): Promise<{
       target_sha TEXT, completed_sha TEXT, scanner_version TEXT,
       started_at DATETIME, completed_at DATETIME, reason TEXT,
       retry_count INTEGER NOT NULL DEFAULT 0,
+      scan_epoch INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (repo_id, phase)
     )
   `);
@@ -434,6 +437,32 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
     }
   });
 
+  it('does not claim an old pending phase after its repository starts a newer epoch', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'phase-repo-epoch-race.db'),
+    );
+    const targetSha = 'b'.repeat(40);
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture', 0);
+      await repo.schedulePhase(1, EScanPhase.HEAD, targetSha, 0);
+      await repo.startRepoScan(1, 'local', 'fixture', 1);
+
+      expect(await repo.claimPhase(1, EScanPhase.HEAD, targetSha, 0)).toBe(
+        false,
+      );
+      expect(await repo.getPhase(1, EScanPhase.HEAD)).toMatchObject({
+        status: EScanPhaseStatus.PENDING,
+        scanEpoch: 0,
+      });
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.IN_PROGRESS,
+        scanEpoch: 1,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
   it('does not let an older running history result overwrite a newer pending target', async () => {
     const { repo, prisma } = await makeRepository(
       path.join(tmpDir, 'phase-target-race.db'),
@@ -455,6 +484,322 @@ describe('PrismaStateRepository (real SQLite, no mocks)', () => {
         targetSha: newSha,
         completedSha: null,
       });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('cancels unfinished old HEAD without retry or automatic requeue', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'cancel-head.db'),
+    );
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture', 0);
+      await repo.schedulePhase(1, EScanPhase.HEAD, 'latest', 0);
+      expect(await repo.claimPhase(1, EScanPhase.HEAD, 'latest', 0)).toBe(true);
+      await repo.cancelScansBefore(1);
+      expect(await repo.getPhase(1, EScanPhase.HEAD)).toMatchObject({
+        status: EScanPhaseStatus.CANCELLED,
+        scanEpoch: 0,
+        retryCount: 0,
+      });
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.CANCELLED,
+        scanEpoch: 0,
+        retryCount: 0,
+      });
+      expect(await repo.requeueFailed(3)).toBe(0);
+      expect(await repo.requeueStale(0)).toBe(0);
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('does not reopen a cancelled attempt through late root or phase scheduling', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'cancel-late-schedule.db'),
+    );
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture', 0);
+      await repo.schedulePhase(1, EScanPhase.HEAD, 'latest', 0);
+      await repo.cancelScansBefore(1);
+
+      await repo.startRepoScan(1, 'local', 'fixture', 0);
+      await repo.schedulePhase(1, EScanPhase.HEAD, 'latest', 0);
+      await repo.schedulePhase(1, EScanPhase.HISTORY, 'latest', 0);
+
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.CANCELLED,
+        scanEpoch: 0,
+      });
+      expect(await repo.getPhase(1, EScanPhase.HEAD)).toMatchObject({
+        status: EScanPhaseStatus.CANCELLED,
+        scanEpoch: 0,
+      });
+      expect(await repo.getPhase(1, EScanPhase.HISTORY)).toBeNull();
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('keeps completed HEAD, checkpoint and findings when cancelling pending HISTORY', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'cancel-history.db'),
+    );
+    const sha = 'a'.repeat(40);
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture', 0);
+      await repo.schedulePhase(1, EScanPhase.HEAD, sha, 0);
+      await repo.claimPhase(1, EScanPhase.HEAD, sha, 0);
+      await repo.markPhaseDone(1, EScanPhase.HEAD, {
+        targetSha: sha,
+        completedSha: sha,
+        scannerVersion: 'v1',
+        scanEpoch: 0,
+      });
+      await repo.addFinding(
+        1,
+        'local',
+        'fixture',
+        'synthetic.txt',
+        sha,
+        ESecretType.GITHUB_PAT,
+        'synthetic-only',
+        1,
+        null,
+      );
+      await repo.schedulePhase(1, EScanPhase.HISTORY, sha, 0);
+      await repo.cancelScansBefore(1);
+      expect(await repo.getPhase(1, EScanPhase.HEAD)).toMatchObject({
+        status: EScanPhaseStatus.DONE,
+        completedSha: sha,
+      });
+      expect(await repo.getPhase(1, EScanPhase.HISTORY)).toMatchObject({
+        status: EScanPhaseStatus.CANCELLED,
+        scanEpoch: 0,
+      });
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.DONE,
+        lastCommitSha: sha,
+      });
+      expect(await repo.getScanCheckpoint(1)).toEqual({
+        headSha: sha,
+        scannerVersion: 'v1',
+      });
+      expect(await repo.countFindings(1)).toBe(1);
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('retains a prior true failure when a retried HEAD is cancelled', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'prior-failure.db'),
+    );
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture', 0);
+      await repo.markFailed(1, 'previous true failure', 0);
+      await repo.startRepoScan(1, 'local', 'fixture', 0);
+      await repo.schedulePhase(1, EScanPhase.HEAD, 'latest', 0);
+      await repo.claimPhase(1, EScanPhase.HEAD, 'latest', 0);
+      await repo.markPhaseCancelled(1, EScanPhase.HEAD, {
+        targetSha: 'latest',
+        reason: 'scan_cancelled',
+        scanEpoch: 0,
+      });
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.CANCELLED,
+        failReason: 'previous true failure',
+        retryCount: 1,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('reopens an individually cancelled HEAD only after an explicit same-epoch repo start', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'individual-stop-retry.db'),
+    );
+    const sha = 'a'.repeat(40);
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture', 1);
+      await repo.schedulePhase(1, EScanPhase.HEAD, sha, 1);
+      expect(await repo.claimPhase(1, EScanPhase.HEAD, sha, 1)).toBe(true);
+      await repo.markPhaseCancelled(1, EScanPhase.HEAD, {
+        targetSha: sha,
+        reason: 'scan_cancelled',
+        scanEpoch: 1,
+      });
+
+      await repo.schedulePhase(1, EScanPhase.HEAD, sha, 1);
+      expect(await repo.getPhase(1, EScanPhase.HEAD)).toMatchObject({
+        status: EScanPhaseStatus.CANCELLED,
+      });
+
+      await repo.startRepoScan(1, 'local', 'fixture', 1);
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.CANCELLED,
+      });
+      await repo.startRepoScan(1, 'local', 'fixture', 1, true);
+      await repo.schedulePhase(1, EScanPhase.HEAD, sha, 1);
+      expect(await repo.claimPhase(1, EScanPhase.HEAD, sha, 1)).toBe(true);
+      expect(await repo.getPhase(1, EScanPhase.HEAD)).toMatchObject({
+        status: EScanPhaseStatus.RUNNING,
+        scanEpoch: 1,
+      });
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.IN_PROGRESS,
+        scanEpoch: 1,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('prevents old terminal writes and schedule from changing a newer same-SHA attempt', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'epoch-race.db'),
+    );
+    const sha = 'b'.repeat(40);
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture', 0);
+      await repo.schedulePhase(1, EScanPhase.HEAD, sha, 0);
+      await repo.claimPhase(1, EScanPhase.HEAD, sha, 0);
+      await repo.cancelScansBefore(1);
+      await repo.startRepoScan(1, 'local', 'fixture', 1);
+      await repo.schedulePhase(1, EScanPhase.HEAD, sha, 1);
+      expect(await repo.claimPhase(1, EScanPhase.HEAD, sha, 1)).toBe(true);
+      await repo.markPhaseFailed(1, EScanPhase.HEAD, {
+        targetSha: sha,
+        reason: 'old failure',
+        scanEpoch: 0,
+      });
+      await repo.markPhaseDone(1, EScanPhase.HEAD, {
+        targetSha: sha,
+        completedSha: sha,
+        scannerVersion: 'v1',
+        scanEpoch: 0,
+      });
+      await repo.schedulePhase(1, EScanPhase.HEAD, sha, 0);
+      expect(await repo.claimPhase(1, EScanPhase.HEAD, sha, 0)).toBe(false);
+      expect(await repo.getPhase(1, EScanPhase.HEAD)).toMatchObject({
+        status: EScanPhaseStatus.RUNNING,
+        scanEpoch: 1,
+        targetSha: sha,
+        retryCount: 0,
+      });
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.IN_PROGRESS,
+        scanEpoch: 1,
+        retryCount: 0,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('does not let an old repo claim or terminal write downgrade a newer attempt', async () => {
+    const { repo, prisma } = await makeRepository(
+      path.join(tmpDir, 'repo-epoch-race.db'),
+    );
+    try {
+      await repo.startRepoScan(1, 'local', 'fixture', 1);
+      await repo.markDone(1, 'a'.repeat(40), 'v1', 0);
+      await repo.markFailed(1, 'old failure', 0);
+      await repo.startRepoScan(1, 'local', 'fixture', 0, true);
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.IN_PROGRESS,
+        scanEpoch: 1,
+        retryCount: 0,
+        lastCommitSha: null,
+      });
+      await prisma.scannedRepo.update({
+        where: { repoId: 1 },
+        data: { status: EScanStatus.PENDING },
+      });
+      expect(await repo.claimNext(0)).toBeNull();
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.PENDING,
+        scanEpoch: 1,
+      });
+      expect(await repo.claimNext(1)).toMatchObject({ repoId: 1 });
+      expect((await repo.listScannedRepos(10))[0]).toMatchObject({
+        status: EScanStatus.IN_PROGRESS,
+        scanEpoch: 1,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  });
+
+  it('adds epoch zero to legacy rows without changing status or checkpoint', async () => {
+    const prisma = new PrismaService({
+      datasources: {
+        db: { url: `file:${path.join(tmpDir, 'epoch-migration.db')}` },
+      },
+    });
+    try {
+      await prisma.$executeRawUnsafe(
+        'CREATE TABLE scanned_repos (repo_id INTEGER PRIMARY KEY, status TEXT NOT NULL, last_commit_sha TEXT)',
+      );
+      await prisma.$executeRawUnsafe(
+        'CREATE TABLE scan_phases (repo_id INTEGER NOT NULL, phase TEXT NOT NULL, status TEXT NOT NULL, completed_sha TEXT, PRIMARY KEY (repo_id, phase))',
+      );
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO scanned_repos (repo_id, status, last_commit_sha) VALUES (1, 'done', '${'c'.repeat(40)}')`,
+      );
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO scan_phases (repo_id, phase, status, completed_sha) VALUES (1, 'head', 'done', '${'c'.repeat(40)}')`,
+      );
+      const sql = await fs.readFile(
+        path.join(
+          process.cwd(),
+          'prisma/migrations/20260922010000_global_scan_stop/migration.sql',
+        ),
+        'utf8',
+      );
+      for (const statement of sql.split(';').map((part) => part.trim())) {
+        if (statement) await prisma.$executeRawUnsafe(statement);
+      }
+      await prisma.$executeRawUnsafe(
+        "INSERT INTO scanned_repos (repo_id, status) VALUES (2, 'pending')",
+      );
+      const repos = await prisma.$queryRawUnsafe<
+        Array<{
+          repo_id: number;
+          status: string;
+          last_commit_sha: string | null;
+          scan_epoch: number;
+        }>
+      >(
+        'SELECT repo_id, status, last_commit_sha, scan_epoch FROM scanned_repos ORDER BY repo_id',
+      );
+      const phases = await prisma.$queryRawUnsafe<
+        Array<{
+          repo_id: number;
+          status: string;
+          completed_sha: string | null;
+          scan_epoch: number;
+        }>
+      >('SELECT repo_id, status, completed_sha, scan_epoch FROM scan_phases');
+      expect(repos).toEqual([
+        {
+          repo_id: 1,
+          status: 'done',
+          last_commit_sha: 'c'.repeat(40),
+          scan_epoch: 0,
+        },
+        { repo_id: 2, status: 'pending', last_commit_sha: null, scan_epoch: 0 },
+      ]);
+      expect(phases).toEqual([
+        {
+          repo_id: 1,
+          status: 'done',
+          completed_sha: 'c'.repeat(40),
+          scan_epoch: 0,
+        },
+      ]);
     } finally {
       await prisma.$disconnect();
     }

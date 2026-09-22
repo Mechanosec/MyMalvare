@@ -5,9 +5,10 @@ import { startDiscover, startScan, startScanRepo } from '../lib/api-client';
 
 interface IScanControlsProps {
   readonly onJobStarted: (jobId: string) => void;
+  readonly scansStopping?: boolean;
 }
 
-export function ScanControls({ onJobStarted }: IScanControlsProps) {
+export function ScanControls({ onJobStarted, scansStopping = false }: IScanControlsProps) {
   const [workers, setWorkers] = useState(1);
   const [maxRepos, setMaxRepos] = useState('');
   const [repoOwner, setRepoOwner] = useState('');
@@ -29,6 +30,7 @@ export function ScanControls({ onJobStarted }: IScanControlsProps) {
   }
 
   async function runScan() {
+    if (scansStopping) return;
     setError(null);
     setPending(true);
     try {
@@ -45,7 +47,7 @@ export function ScanControls({ onJobStarted }: IScanControlsProps) {
   }
 
   async function runScanRepo() {
-    if (!repoOwner.trim() || !repoName.trim()) return;
+    if (scansStopping || !repoOwner.trim() || !repoName.trim()) return;
     setError(null);
     setPending(true);
     try {
@@ -95,7 +97,7 @@ export function ScanControls({ onJobStarted }: IScanControlsProps) {
       <button
         type="button"
         onClick={runScan}
-        disabled={pending}
+        disabled={pending || scansStopping}
         className="border border-accent px-4 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-40"
       >
         Scan
@@ -127,7 +129,7 @@ export function ScanControls({ onJobStarted }: IScanControlsProps) {
         <button
           type="button"
           onClick={runScanRepo}
-          disabled={pending || !repoOwner.trim() || !repoName.trim()}
+          disabled={pending || scansStopping || !repoOwner.trim() || !repoName.trim()}
           className="border border-accent px-4 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-40"
         >
           Scan repo

@@ -41,7 +41,7 @@ function PhaseLine({
     return <p className="text-xs text-text-dim">{label}: not scheduled</p>;
   const sha = phase.completedSha ?? phase.targetSha;
   return (
-    <p className="text-xs text-text-dim">
+    <p className={`text-xs ${phase.status === 'cancelled' ? 'text-warning' : 'text-text-dim'}`}>
       <span className="text-text">{label}:</span> {phase.status}
       {sha ? ` @ ${sha.slice(0, 8)}` : ""}
       {phase.reason ? ` — ${phase.reason}` : ""}
@@ -108,7 +108,7 @@ export function ScannedReposTable({ repos }: IScannedReposTableProps) {
             <option value="">All</option>
             {Object.values(EScanStatus).map((value) => (
               <option key={value} value={value}>
-                {value.replace("_", " ")}
+                {value.replaceAll("_", " ")}
               </option>
             ))}
           </select>
@@ -187,6 +187,7 @@ export function ScannedReposTable({ repos }: IScannedReposTableProps) {
                   <td className="px-3 py-2">
                     {repo.headPhase || repo.historyPhase ? (
                       <div className="space-y-1 break-words">
+                        {repo.status === EScanStatus.CANCELLED && <StatusBadge status={repo.status} />}
                         <PhaseLine
                           label="Current files checked"
                           phase={repo.headPhase}

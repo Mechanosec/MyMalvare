@@ -1,6 +1,10 @@
 import { IJobState } from '../../domain/types/job-state.type';
 import { EScanPhase } from '../../domain/constant/scan-phase.constant';
 import { IRepoRef } from '../../domain/types/repo-ref.type';
+import {
+  IScanControlState,
+  IScanRuntime,
+} from '../../domain/types/scan-control.type';
 
 export abstract class JobQueuePort {
   /** Enqueues a job and returns its id immediately - the caller never waits for it to run. */
@@ -27,4 +31,21 @@ export abstract class JobQueuePort {
   abstract requestStop(jobId: string): Promise<void>;
 
   abstract isStopRequested(jobId: string): Promise<boolean>;
+
+  abstract readScanControl(): Promise<IScanControlState>;
+
+  abstract requestStopAllScans(): Promise<IScanControlState>;
+
+  abstract getScanRuntime(): Promise<IScanRuntime>;
+
+  abstract hasActiveScansBefore(epoch: number): Promise<boolean>;
+
+  /** Other active work that could still mutate this repo during an explicit retry. */
+  abstract hasOtherActiveScanForRepo(
+    repoId: number,
+    currentJobId: string,
+    currentTimestamp: number,
+  ): Promise<boolean>;
+
+  abstract completeScanStop(epoch: number): Promise<boolean>;
 }

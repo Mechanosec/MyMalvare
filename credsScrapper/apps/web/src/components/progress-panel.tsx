@@ -16,6 +16,8 @@ interface IProgressPanelProps {
 const DOT_TONE: Record<EJobStatus, string> = {
   [EJobStatus.QUEUED]: 'bg-line',
   [EJobStatus.RUNNING]: 'bg-warning animate-pulse',
+  [EJobStatus.STOPPING]: 'bg-warning animate-pulse',
+  [EJobStatus.STOPPED]: 'bg-text-dim',
   [EJobStatus.DONE]: 'bg-accent',
   [EJobStatus.FAILED]: 'bg-critical',
 };
@@ -23,6 +25,8 @@ const DOT_TONE: Record<EJobStatus, string> = {
 const LINE_TONE: Record<EJobStatus, string> = {
   [EJobStatus.QUEUED]: 'text-text-dim',
   [EJobStatus.RUNNING]: 'text-text',
+  [EJobStatus.STOPPING]: 'text-warning',
+  [EJobStatus.STOPPED]: 'text-text-dim',
   [EJobStatus.DONE]: 'text-accent',
   [EJobStatus.FAILED]: 'text-critical',
 };
@@ -42,7 +46,7 @@ export function ProgressPanel({ jobId, showStopButton, onDone }: IProgressPanelP
 
   const latestStatus = events[events.length - 1]?.status;
   useEffect(() => {
-    if (jobId && latestStatus === EJobStatus.DONE && notifiedJob.current !== jobId && onDone) {
+    if (jobId && (latestStatus === EJobStatus.DONE || latestStatus === EJobStatus.STOPPED) && notifiedJob.current !== jobId && onDone) {
       notifiedJob.current = jobId;
       onDone();
     }
@@ -69,8 +73,10 @@ export function ProgressPanel({ jobId, showStopButton, onDone }: IProgressPanelP
     // no output at all.
     fetchJob(jobId)
       .then((job) => {
-        if (!cancelled && job.log.length > 0) {
-          setEvents([...job.log]);
+        if (!cancelled) {
+          setEvents((current) => current.length > 0 ? current : job.log.length > 0
+            ? [...job.log]
+            : [{ jobId, status: job.status, message: job.message, processed: job.processed }]);
         }
       })
       .catch(() => {
@@ -83,9 +89,12 @@ export function ProgressPanel({ jobId, showStopButton, onDone }: IProgressPanelP
     socket.on('connect', () => {
       connected = true;
     });
-    socket.on(`job:${jobId}`, (payload: IJobProgressEvent) =>
-      setEvents((prev) => [...prev, payload]),
-    );
+    socket.on('disconnect', () => {
+      connected = false;
+    });
+    socket.on(`job:${jobId}`, (payload: IJobProgressEvent) => {
+      if (!cancelled) setEvents((prev) => [...prev, payload]);
+    });
 
     // Fallback for the window before the socket connects, or if it never
     // does: poll GET /jobs/:id until the job finishes. Only appends when
@@ -94,15 +103,16 @@ export function ProgressPanel({ jobId, showStopButton, onDone }: IProgressPanelP
     const poll = setInterval(() => {
       if (connected) return;
       fetchJob(jobId)
-        .then((job) =>
+        .then((job) => {
+          if (cancelled) return;
           setEvents((prev) => {
             const last = prev[prev.length - 1];
-            if (last?.message === job.message && last?.processed === job.processed) {
+            if (last?.status === job.status && last?.message === job.message && last?.processed === job.processed) {
               return prev;
             }
             return [...prev, { jobId, status: job.status, message: job.message, processed: job.processed }];
-          }),
-        )
+          });
+        })
         .catch(() => {
           /* job may not exist yet right after starting; ignore and retry */
         });

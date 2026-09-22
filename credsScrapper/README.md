@@ -3,8 +3,9 @@
 A tool that discovers public GitHub repositories, clones them, and scans both
 the current file tree and the full commit history for accidentally leaked
 secrets (API keys, tokens, private keys — ~41 known service formats, plus a
-generic high-entropy detector for anything else). State is persisted so a
-stopped run resumes without re-scanning what's already done.
+generic high-entropy detector for anything else). State is persisted so an
+interrupted run can resume without re-scanning completed work; global Stop
+instead cancels unfinished scan work.
 
 This is an npm-workspaces monorepo, two applications:
 
@@ -29,9 +30,9 @@ measurements are linked below.
 - **Findings are stored as plaintext for now** (an explicit MVP tradeoff, not
   an oversight) — `findings.secretValue` in the database is the raw secret.
   Encryption at rest is a known gap before any real/shared use.
-- No auth exists yet. The frontend calls the API directly over plain HTTP —
-  see `apps/web`'s own note about this being a deliberate, temporary
-  simplification that goes away the moment an auth/user model is added.
+- The API has user authentication and admin-only scanner controls. The browser
+  currently stores its bearer token in localStorage and calls the API directly;
+  use HTTPS and protect browser access before any shared or production use.
 
 ## Prerequisites
 
@@ -110,7 +111,9 @@ cd apps/api && npx prisma migrate deploy && cd -
 ```
 
 `prisma migrate deploy` creates `apps/api/dev.db` and applies the schema. Run
-it again any time `apps/api/prisma/schema.prisma` changes.
+it again any time `apps/api/prisma/schema.prisma` changes. Before the first
+scan on a fresh installation, initialize the persistent Redis barrier as
+described in [Global Stop and scan control](#global-stop-and-scan-control).
 
 ## Persistent and incremental scans
 
@@ -227,16 +230,60 @@ curl http://localhost:3000/jobs/<jobId>
 # {"id":"...","type":"scan","status":"running","processed":3,...}
 
 curl http://localhost:3000/scan/status
-# {"pendingCandidates":123,"scannedByStatus":{"done":40,"failed":2}}
+# admin-only: candidate/repository counts plus runtime state and queue counts
 
 curl http://localhost:3000/findings
 curl "http://localhost:3000/findings?secretType=aws_access_key_id&limit=20"
 ```
 
-A stopped scan resumes safely on the next run — a repo already marked `done`
-is never re-scanned, and a repo stuck `in_progress` past its stale timeout
-(`staleTimeoutSeconds` in the `POST /scan` body, default 3600) is requeued
-automatically at the start of the next scan.
+For ordinary interrupted runs, a repo already marked `done` is not re-scanned,
+and a stale `in_progress` repo can be requeued on the next scan
+(`staleTimeoutSeconds` in the `POST /scan` body, default 3600). A global Stop
+is different: it marks unfinished older work cancelled, not stale work to
+resume automatically.
+
+### Global Stop and scan control
+
+The dashboard's admin-only **Stop all scans** action cancels unfinished scan
+jobs from current and earlier runs, including queued or active HEAD and HISTORY
+work. It does not stop discovery or delete completed findings, checkpoints, or
+repository results. A future explicit Scan starts a new generation; cancelled
+work is not silently resumed as part of the old generation. The dashboard uses
+the server's `stopping` / `stopped` state, rather than a single job's log or a
+repository count, to report completion.
+
+Scan admission depends on a persistent Redis control record. On a **first
+controlled deployment only**, stop all old API/worker processes, apply the
+SQLite migration, and initialize the record before starting the new processes.
+For the control commands, explicitly set `REDIS_URL` and `DATABASE_URL` in
+the shell to the intended Redis and SQLite targets; the CLI refuses to run
+without both:
+
+```sh
+npm run prisma:generate -w apps/api
+npm run prisma:migrate -w apps/api
+npm run scan:control -w apps/api -- init
+```
+
+All API and worker processes must use the new protocol; mixed old/new workers
+are unsupported. Keep Redis persistence enabled: normal API restarts must
+retain the control record and must never reset its epoch to zero. If the record
+is lost, scan starts fail closed until an operator investigates the Redis and
+SQLite state. Do not run `init` against an existing record or recreate it
+automatically on startup.
+
+Only after checking persisted scan generations and stopping old workers, an
+operator may restore a missing record with an epoch **greater than every
+persisted generation**:
+
+```sh
+npm run scan:control -w apps/api -- recover --epoch 8
+```
+
+`8` is illustrative, not a recommended value. The command refuses an existing
+control record or an epoch that is not greater than the persisted maximum.
+Recovery enters `stopping` so unfinished older work is reconciled before new
+scan admission. These commands do not remove findings or cache data.
 
 Live progress while a job runs is pushed over WebSocket
 (`socket.io`, events `job:<jobId>` and `job`) — that's what the dashboard's
@@ -277,15 +324,13 @@ classes (constructible with `new` in a unit test, no DI container needed)
 plus the `*.port.ts` abstract classes they depend on — a port doubles as its
 own NestJS injection token, no separate `Symbol`. `infrastructure/`
 implements each port (Prisma repository, git CLI adapter, GH Archive HTTP
-client, WebSocket gateway, in-memory job runner) and is the only layer
+client, WebSocket gateway, BullMQ workers) and is the only layer
 allowed to import Prisma or Node's `fs`/`child_process`. `presentation/` is
 the REST controllers, thin — they call exactly one use-case each.
 `scanner.module.ts` is the single file that wires which adapter implements
 which port.
 
-**`apps/web`** is one dashboard screen — no auth, no i18n, no design system.
-It calls the API directly (`NEXT_PUBLIC_API_URL`) for both REST calls and
-the WebSocket connection, which is a deliberate simplification: there's no
-auth token yet to protect by routing everything through a server-side proxy.
-The moment auth exists, this should move to Server Actions + httpOnly
-cookies (see the frontend design spec for the full reasoning).
+**`apps/web`** calls the API directly (`NEXT_PUBLIC_API_URL`) for REST and
+WebSocket updates. Users sign in; the browser stores the bearer token in
+localStorage. The global Stop control and scan runtime counters are visible
+only to admins. Moving the token to httpOnly cookies is future hardening.

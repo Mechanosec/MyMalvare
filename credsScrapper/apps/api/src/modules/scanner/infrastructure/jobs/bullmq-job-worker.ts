@@ -25,6 +25,10 @@ import { EScanPhase } from '../../domain/constant/scan-phase.constant';
 import { ReconcileScanPhasesUseCase } from '../../application/use-cases/reconcile-scan-phases.use-case';
 import { RescanRepositoryServiceUseCase } from '../../application/use-cases/rescan-repository-service.use-case';
 import { ESecretType } from '../../domain/constant/secret-type.constant';
+import { EScanControlState } from '../../domain/constant/scan-control.constant';
+import { ScanControlError } from '../../domain/errors/scan-control.error';
+import { StateRepositoryPort } from '../../application/ports/state-repository.port';
+import { ReconcileScanStopUseCase } from '../../application/use-cases/reconcile-scan-stop.use-case';
 
 function buildCloneUrl(ref: IRepoRef): string {
   return `https://github.com/${ref.owner}/${ref.name}.git`;
@@ -35,6 +39,7 @@ interface IScanRepoJobData {
   readonly cloneSource: string;
   readonly workdir: string;
   readonly parentJobId?: string;
+  readonly scanEpoch?: number;
 }
 
 interface IScanLoopJobData {
@@ -42,10 +47,25 @@ interface IScanLoopJobData {
   readonly workers?: number;
   readonly maxRepos?: number;
   readonly staleTimeoutSeconds?: number;
+  readonly scanEpoch?: number;
 }
 
 interface IDiscoverJobData {
   readonly date?: string;
+}
+
+function scanEpoch(data: unknown): number {
+  if (typeof data !== 'object' || data === null)
+    throw new ScanControlError('scan_control_unavailable');
+  const value = (data as { scanEpoch?: unknown }).scanEpoch;
+  if (
+    value === undefined &&
+    !Object.prototype.hasOwnProperty.call(data, 'scanEpoch')
+  )
+    return 0;
+  if (!Number.isSafeInteger(value) || (value as number) < 0)
+    throw new ScanControlError('scan_control_unavailable');
+  return value as number;
 }
 
 @Injectable()
@@ -53,6 +73,8 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
   private worker?: Worker;
   private headWorker?: Worker;
   private historyWorker?: Worker;
+  private reconcileTimer?: NodeJS.Timeout;
+  private reconcileInFlight?: Promise<void>;
 
   constructor(
     private readonly discoverRepos: DiscoverReposUseCase,
@@ -66,13 +88,92 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
     private readonly reconcilePhases?: ReconcileScanPhasesUseCase,
     @Optional()
     private readonly rescanService?: RescanRepositoryServiceUseCase,
+    @Optional()
+    private readonly state?: StateRepositoryPort,
+    @Optional()
+    private readonly reconcileStop?: ReconcileScanStopUseCase,
   ) {}
 
   async onModuleInit(): Promise<void> {
     await this.start();
+    await this.reconcileStopTick();
     if (this.reconcilePhases) {
-      await this.reconcilePhases.execute(process.env.SCAN_WORKDIR ?? 'workdir');
+      try {
+        await this.reconcilePhases.execute(
+          process.env.SCAN_WORKDIR ?? 'workdir',
+        );
+      } catch {
+        console.error('[BullmqJobWorker] Phase reconciliation unavailable');
+      }
     }
+    if (this.reconcileStop) {
+      this.reconcileTimer = setInterval(() => {
+        void this.reconcileStopTick();
+      }, 500);
+      this.reconcileTimer.unref();
+    }
+  }
+
+  private reconcileStopTick(): Promise<void> {
+    if (!this.reconcileStop) return Promise.resolve();
+    if (this.reconcileInFlight) return this.reconcileInFlight;
+    const running = this.reconcileStop
+      .execute()
+      .catch(() =>
+        console.error('[BullmqJobWorker] Stop reconciliation failed'),
+      )
+      .finally(() => {
+        this.reconcileInFlight = undefined;
+      });
+    this.reconcileInFlight = running;
+    return running;
+  }
+
+  private async admitted(epoch: number): Promise<boolean> {
+    const control = await this.jobQueue.readScanControl();
+    return control.state === EScanControlState.READY && control.epoch === epoch;
+  }
+
+  private stopMonitor(jobId: string, epoch?: number, parentJobId?: string) {
+    const abort = new AbortController();
+    let checking: Promise<void> | undefined;
+    let failure: ScanControlError | undefined;
+    const shouldStop = async (): Promise<boolean> => {
+      try {
+        // A failed global read takes precedence over a local stop flag.
+        if (epoch !== undefined && !(await this.admitted(epoch))) return true;
+        if (await this.jobQueue.isStopRequested(jobId)) return true;
+        return parentJobId ? this.jobQueue.isStopRequested(parentJobId) : false;
+      } catch {
+        throw new ScanControlError('scan_control_unavailable');
+      }
+    };
+    const poll = (): Promise<void> => {
+      if (checking) return checking;
+      checking = (async () => {
+        try {
+          if (await shouldStop()) abort.abort();
+        } catch {
+          failure = new ScanControlError('scan_control_unavailable');
+          abort.abort(failure);
+        }
+      })().finally(() => {
+        checking = undefined;
+      });
+      return checking;
+    };
+    const timer = setInterval(() => void poll(), 500);
+    timer.unref();
+    return {
+      signal: abort.signal,
+      shouldStop,
+      finish: async (): Promise<boolean> => {
+        clearInterval(timer);
+        await poll();
+        if (failure) throw failure;
+        return abort.signal.aborted;
+      },
+    };
   }
 
   async start(): Promise<void> {
@@ -107,43 +208,91 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
     if (!this.phaseScanner) throw new Error('Phase scanner is unavailable');
     const data = job.data as IScanRepoJobData & { targetSha?: string };
     const publicId = `${phase}:${job.id!}`;
-    const abort = new AbortController();
-    const timer = setInterval(() => {
-      void Promise.all([
-        this.jobQueue.isStopRequested(publicId),
-        data.parentJobId
-          ? this.jobQueue.isStopRequested(data.parentJobId)
-          : Promise.resolve(false),
-      ]).then(([self, parent]) => {
-        if (self || parent) abort.abort();
-      });
-    }, 500);
-    try {
-      const result = await this.phaseScanner.execute({
-        repoRef: data.repoRef,
-        phase,
-        cloneSource: data.cloneSource,
-        workdir: data.workdir,
-        targetSha: data.targetSha,
-        signal: abort.signal,
-        onProgress: (message) => {
-          const event: IJobProgressEvent = {
-            jobId: publicId,
-            status: EJobStatus.RUNNING,
-            message,
-            processed: 0,
-          };
-          void job.updateProgress({ message, processed: 0, log: [event] });
-          this.progress.emit(event);
-        },
-      });
-      if (result.status !== 'done') throw new Error(result.failReason);
-      if (phase === EScanPhase.HEAD) {
-        await this.enqueueHistory(data, result.headSha, data.parentJobId);
-      }
-    } finally {
-      clearInterval(timer);
+    const epoch = scanEpoch(data);
+    if (!(await this.admitted(epoch))) {
+      await this.recordStopped(job, publicId);
+      return;
     }
+    const monitor = this.stopMonitor(publicId, epoch, data.parentJobId);
+    let result:
+      Awaited<ReturnType<ScanRepositoryPhaseUseCase['execute']>> | undefined;
+    let error: unknown;
+    let stopped = false;
+    let progressWrite = Promise.resolve();
+    try {
+      if (await monitor.shouldStop()) stopped = true;
+      else {
+        result = await this.phaseScanner.execute({
+          repoRef: data.repoRef,
+          phase,
+          cloneSource: data.cloneSource,
+          workdir: data.workdir,
+          targetSha: data.targetSha,
+          scanEpoch: epoch,
+          signal: monitor.signal,
+          shouldStop: monitor.shouldStop,
+          onProgress: (message) => {
+            const event: IJobProgressEvent = {
+              jobId: publicId,
+              status: EJobStatus.RUNNING,
+              message,
+              processed: 0,
+            };
+            progressWrite = progressWrite
+              .then(() =>
+                job.updateProgress({ message, processed: 0, log: [event] }),
+              )
+              .then(() => undefined)
+              .catch(() => undefined);
+            this.progress.emit(event);
+          },
+        });
+      }
+    } catch (caught) {
+      error = caught;
+    }
+    await progressWrite;
+    try {
+      stopped = (await monitor.finish()) || stopped;
+    } catch (caught) {
+      error = caught;
+    }
+    if (error) throw error;
+    if (stopped || result?.status === 'cancelled') {
+      await this.recordStopped(job, publicId);
+      return;
+    }
+    if (!result || result.status !== 'done') {
+      throw new Error(result?.failReason ?? 'scan_phase_unavailable');
+    }
+    if (phase === EScanPhase.HEAD) {
+      if (await monitor.shouldStop()) {
+        await this.recordStopped(job, publicId);
+        return;
+      }
+      await this.enqueueHistory(data, result.headSha, data.parentJobId);
+    }
+  }
+
+  private async recordStopped(
+    job: Job,
+    publicId: string,
+    processed = 0,
+    log: IJobProgressEvent[] = [],
+  ): Promise<void> {
+    const event: IJobProgressEvent = {
+      jobId: publicId,
+      status: EJobStatus.STOPPED,
+      message: 'Scan stopped',
+      processed,
+    };
+    await job.updateProgress({
+      message: event.message,
+      processed,
+      log: [...log, event],
+      outcome: EJobStatus.STOPPED,
+    });
+    this.progress.emit(event);
   }
 
   private async enqueueHistory(
@@ -162,6 +311,7 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
   private async process(job: Job): Promise<void> {
     const log: IJobProgressEvent[] = [];
     let processed = 0;
+    let progressWrite = Promise.resolve();
     // Synchronous and fire-and-forget, matching the onProgress contract
     // DiscoverReposUseCase/RunScanLoopUseCase/ScanRepositoryUseCase
     // already take (unchanged by this plan) - job.updateProgress()'s
@@ -179,26 +329,31 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
         processed,
       };
       log.push(event);
-      void job.updateProgress({ message, processed, log }).catch(() => {});
+      progressWrite = progressWrite
+        .then(() => job.updateProgress({ message, processed, log: [...log] }))
+        .then(() => undefined)
+        .catch(() => undefined);
       this.progress.emit(event);
     };
 
-    const shouldStop = () => this.jobQueue.isStopRequested(job.id!);
-    const abort = new AbortController();
-    const stopTimer = setInterval(() => {
-      void shouldStop().then((stop) => {
-        if (stop) abort.abort();
-      });
-    }, 500);
-
+    const isScan = ['scan', 'scan-repo', 'rescan-service'].includes(job.name);
+    const epoch = isScan ? scanEpoch(job.data) : undefined;
+    if (epoch !== undefined && !(await this.admitted(epoch))) {
+      await this.recordStopped(job, job.id!);
+      return;
+    }
+    const monitor = this.stopMonitor(job.id!, epoch);
+    let stopped = false;
+    let error: unknown;
     try {
-      if (job.name === 'discover') {
+      if (await monitor.shouldStop()) stopped = true;
+      else if (job.name === 'discover') {
         const data = job.data as IDiscoverJobData;
         const date = data.date ? new Date(data.date) : undefined;
         processed = await this.discoverRepos.execute(
           date,
           onProgress,
-          shouldStop,
+          monitor.shouldStop,
         );
       } else if (job.name === 'scan') {
         const data = job.data as IScanLoopJobData;
@@ -210,8 +365,9 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
           maxRepos: data.maxRepos,
           staleTimeoutSeconds: data.staleTimeoutSeconds,
           onProgress,
-          shouldStop,
-          signal: abort.signal,
+          scanEpoch: epoch,
+          shouldStop: monitor.shouldStop,
+          signal: monitor.signal,
           parentJobId: job.id!,
         });
       } else if (job.name === 'rescan-service') {
@@ -223,54 +379,86 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
         );
         const result = await this.rescanService.execute({
           ...data,
-          signal: abort.signal,
+          scanEpoch: epoch,
+          signal: monitor.signal,
+          shouldStop: monitor.shouldStop,
           onProgress,
         });
-        if (result.status !== 'done') throw new Error(result.failReason);
-        processed = 1;
+        if (result.status === 'cancelled') stopped = true;
+        else if (result.status !== 'done') throw new Error(result.failReason);
+        else processed = 1;
       } else if (job.name === 'scan-repo') {
         const data = job.data as IScanRepoJobData;
-        const result = this.phaseScanner
-          ? await this.phaseScanner.execute({
-              repoRef: data.repoRef,
-              phase: EScanPhase.HEAD,
-              cloneSource: data.cloneSource,
-              workdir: data.workdir,
-              signal: abort.signal,
-              onProgress: (message) => onProgress(message),
-            })
-          : await this.scanRepository.execute(
-              data.repoRef,
-              data.cloneSource,
-              data.workdir,
-              (message) => onProgress(message),
+        if (await monitor.shouldStop()) stopped = true;
+        else {
+          if (!this.state)
+            throw new Error('Scan state repository is unavailable');
+          if (
+            await this.jobQueue.hasOtherActiveScanForRepo(
+              data.repoRef.repoId,
+              job.id!,
+              job.timestamp,
+            )
+          ) {
+            onProgress('Scan retry deferred while another scan is active');
+            stopped = true;
+          } else {
+            await this.state.startRepoScan(
+              data.repoRef.repoId,
+              data.repoRef.owner,
+              data.repoRef.name,
+              epoch,
+              true,
             );
-        if (result.status === 'failed') throw new Error(result.failReason);
-        if (result.status !== 'done') throw new Error(result.failReason);
-        if (this.phaseScanner)
-          await this.enqueueHistory(data, result.headSha, job.id!);
-        processed = 1;
+          }
+        }
+        if (!stopped) {
+          const result = this.phaseScanner
+            ? await this.phaseScanner.execute({
+                repoRef: data.repoRef,
+                phase: EScanPhase.HEAD,
+                cloneSource: data.cloneSource,
+                workdir: data.workdir,
+                scanEpoch: epoch,
+                signal: monitor.signal,
+                shouldStop: monitor.shouldStop,
+                onProgress: (message) => onProgress(message),
+              })
+            : await this.scanRepository.execute(
+                data.repoRef,
+                data.cloneSource,
+                data.workdir,
+                (message) => onProgress(message),
+              );
+          if (result.status === 'cancelled') stopped = true;
+          else if (result.status !== 'done') throw new Error(result.failReason);
+          else {
+            if (this.phaseScanner) {
+              if (await monitor.shouldStop()) stopped = true;
+              else await this.enqueueHistory(data, result.headSha, job.id!);
+            }
+            processed = 1;
+          }
+        }
       } else {
         throw new Error(`Unknown job name: ${job.name}`);
       }
-
-      const doneMessage =
-        job.name === 'scan'
-          ? `scan HEAD processing finished: ${processed} processed; history continues in background`
-          : `${job.name} finished: ${processed} processed`;
-      const doneEvent: IJobProgressEvent = {
-        jobId: job.id!,
-        status: EJobStatus.DONE,
-        message: doneMessage,
-        processed,
-      };
-      log.push(doneEvent);
-      void job
-        .updateProgress({ message: doneMessage, processed, log })
-        .catch(() => {});
-      this.progress.emit(doneEvent);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
+    } catch (caught) {
+      error = caught;
+    }
+    await progressWrite;
+    try {
+      stopped = (await monitor.finish()) || stopped;
+    } catch (caught) {
+      error = caught;
+    }
+    if (stopped && !(error instanceof ScanControlError)) {
+      await this.recordStopped(job, job.id!, processed, log);
+      return;
+    }
+    if (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       const failMessage = `${job.name} failed: ${errorMessage}`;
       const failEvent: IJobProgressEvent = {
         jobId: job.id!,
@@ -279,17 +467,29 @@ export class BullmqJobWorker implements OnModuleInit, OnModuleDestroy {
         processed,
       };
       log.push(failEvent);
-      void job
-        .updateProgress({ message: failMessage, processed, log })
-        .catch(() => {});
+      await job.updateProgress({ message: failMessage, processed, log });
       this.progress.emit(failEvent);
-      throw err;
-    } finally {
-      clearInterval(stopTimer);
+      throw error;
     }
+
+    const doneMessage =
+      job.name === 'scan'
+        ? `scan HEAD processing finished: ${processed} processed; history continues in background`
+        : `${job.name} finished: ${processed} processed`;
+    const doneEvent: IJobProgressEvent = {
+      jobId: job.id!,
+      status: EJobStatus.DONE,
+      message: doneMessage,
+      processed,
+    };
+    log.push(doneEvent);
+    await job.updateProgress({ message: doneMessage, processed, log });
+    this.progress.emit(doneEvent);
   }
 
   async close(): Promise<void> {
+    if (this.reconcileTimer) clearInterval(this.reconcileTimer);
+    await this.reconcileInFlight;
     await Promise.all([
       this.worker?.close(),
       this.headWorker?.close(),

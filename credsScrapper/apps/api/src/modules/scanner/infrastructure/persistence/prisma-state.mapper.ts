@@ -170,6 +170,7 @@ export function toScannedRepoRecord(
     scannedAt: row.scannedAt,
     failReason: row.failReason,
     retryCount: row.retryCount,
+    scanEpoch: row.scanEpoch,
     findingsCount,
     headPhase: null,
     historyPhase: null,

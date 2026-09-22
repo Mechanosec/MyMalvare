@@ -2,8 +2,36 @@ import { EFindingStatus } from '../../../../../src/modules/scanner/domain/consta
 import { ESecretType } from '../../../../../src/modules/scanner/domain/constant/secret-type.constant';
 import {
   groupRepoOptionsByStatus,
+  toScannedRepoRecord,
   toFindingRecord,
 } from '../../../../../src/modules/scanner/infrastructure/persistence/prisma-state.mapper';
+import { EScanStatus } from '../../../../../src/modules/scanner/domain/constant/scan-status.constant';
+
+describe('toScannedRepoRecord', () => {
+  it('exposes cancelled attempt epoch without changing its checkpoint', () => {
+    const record = toScannedRepoRecord(
+      {
+        repoId: 7,
+        owner: 'local',
+        name: 'fixture',
+        status: EScanStatus.CANCELLED,
+        scanEpoch: 1,
+        lastCommitSha: 'a'.repeat(40),
+        startedAt: null,
+        scannedAt: null,
+        failReason: null,
+        retryCount: 0,
+      } as never,
+      0,
+    );
+
+    expect(record).toMatchObject({
+      status: EScanStatus.CANCELLED,
+      scanEpoch: 1,
+      lastCommitSha: 'a'.repeat(40),
+    });
+  });
+});
 
 describe('groupRepoOptionsByStatus', () => {
   it('keeps failed findings separate from never-attempted unknown findings', () => {

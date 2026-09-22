@@ -1,0 +1,2 @@
+ALTER TABLE "scanned_repos" ADD COLUMN "scan_epoch" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "scan_phases" ADD COLUMN "scan_epoch" INTEGER NOT NULL DEFAULT 0;

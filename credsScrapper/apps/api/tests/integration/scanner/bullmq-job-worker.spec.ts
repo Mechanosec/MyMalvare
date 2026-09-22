@@ -7,6 +7,8 @@ import {
 import { BullmqJobQueueAdapter } from '../../../src/modules/scanner/infrastructure/jobs/bullmq-job-queue.adapter';
 import { EJobStatus } from '../../../src/modules/scanner/domain/constant/job-status.constant';
 import { ESecretType } from '../../../src/modules/scanner/domain/constant/secret-type.constant';
+import Redis from 'ioredis';
+import { SCAN_CONTROL_KEY } from '../../../src/modules/scanner/domain/constant/scan-control.constant';
 
 class RecordingScanRepository {
   calls: unknown[] = [];
@@ -72,9 +74,31 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
   let runScanLoop: RecordingRunScanLoop;
   let scanRepository: RecordingScanRepository;
   let progress: RecordingProgress;
-  const rescan = { execute: jest.fn().mockResolvedValue({ status: 'done', headSha: 'a'.repeat(40) }) };
+  let redis: Redis;
+  const rescan = {
+    execute: jest
+      .fn()
+      .mockResolvedValue({ status: 'done', headSha: 'a'.repeat(40) }),
+  };
 
   beforeAll(async () => {
+    if (
+      !process.env.SCAN_CONTROL_TEST_REDIS_URL ||
+      process.env.REDIS_URL !== process.env.SCAN_CONTROL_TEST_REDIS_URL
+    ) {
+      throw new Error('This test requires an explicit isolated Redis endpoint');
+    }
+    redis = new Redis(redisConnection.url);
+    await redis.set(
+      SCAN_CONTROL_KEY,
+      JSON.stringify({
+        epoch: 0,
+        state: 'ready',
+        stopEpoch: null,
+        requestedAt: null,
+        finishedAt: null,
+      }),
+    );
     queue = new Queue(SCANNER_QUEUE_NAME, { connection: redisConnection });
     queueAdapter = new BullmqJobQueueAdapter();
     discover = new RecordingDiscoverRepos();
@@ -90,6 +114,7 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
       undefined,
       undefined,
       rescan as never,
+      { startRepoScan: jest.fn(async () => {}) } as never,
     );
     await worker.start();
   });
@@ -105,6 +130,7 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
     await worker.close();
     await queueAdapter.close();
     await queue.close();
+    await redis.quit();
   });
 
   async function waitForStatus(
@@ -157,14 +183,17 @@ describe('BullmqJobWorker (real Redis + real BullMQ Worker)', () => {
   it('delivers the selected service through the real queue and records completion', async () => {
     const jobId = await queueAdapter.enqueue('rescan-service', {
       repoRef: { repoId: 123, owner: 'test', name: 'fixture' },
-      cloneSource: '/synthetic/fixture', workdir: '/synthetic/work',
+      cloneSource: '/synthetic/fixture',
+      workdir: '/synthetic/work',
       secretType: ESecretType.GCP_SERVICE_ACCOUNT_KEY,
     });
     await waitForStatus(jobId, EJobStatus.DONE);
-    expect(rescan.execute).toHaveBeenCalledWith(expect.objectContaining({
-      repoRef: { repoId: 123, owner: 'test', name: 'fixture' },
-      secretType: ESecretType.GCP_SERVICE_ACCOUNT_KEY,
-    }));
+    expect(rescan.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoRef: { repoId: 123, owner: 'test', name: 'fixture' },
+        secretType: ESecretType.GCP_SERVICE_ACCOUNT_KEY,
+      }),
+    );
     expect(scanRepository.calls).toHaveLength(0);
     expect((await queueAdapter.getJob(jobId))?.processed).toBe(1);
   });

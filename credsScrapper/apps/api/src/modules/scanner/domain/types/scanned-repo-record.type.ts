@@ -11,6 +11,7 @@ export interface IScannedRepoRecord {
   readonly scannedAt: Date | null;
   readonly failReason: string | null;
   readonly retryCount: number;
+  readonly scanEpoch: number;
   readonly findingsCount: number;
   readonly headPhase: IScanPhaseRecord | null;
   readonly historyPhase: IScanPhaseRecord | null;

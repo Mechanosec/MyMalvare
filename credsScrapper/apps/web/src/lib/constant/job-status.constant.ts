@@ -2,6 +2,8 @@
 export enum EJobStatus {
   QUEUED = 'queued',
   RUNNING = 'running',
+  STOPPING = 'stopping',
+  STOPPED = 'stopped',
   DONE = 'done',
   FAILED = 'failed',
 }

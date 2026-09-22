@@ -38,6 +38,110 @@ function worker(result = { status: 'done' as const, headSha: sha }) {
 describe('ScanRepositoryPhaseUseCase', () => {
   const ref = { repoId: 1, owner: 'local', name: 'fixture' };
 
+  it('returns cancelled before phase scheduling, cache acquisition or worker for a pre-aborted signal', async () => {
+    const state = new FakeStateRepository();
+    await state.startRepoScan(ref.repoId, ref.owner, ref.name, 7);
+    const acquire = jest.fn();
+    const run = jest.fn();
+    const scanner = new ScanRepositoryPhaseUseCase(
+      { run } as unknown as HeadScanWorkerPort,
+      { run } as unknown as HistoryScanWorkerPort,
+      state,
+      new FakeLogger(),
+      { remove: async () => {} },
+      { acquire } as never,
+    );
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      scanner.execute({
+        repoRef: ref,
+        phase: EScanPhase.HEAD,
+        cloneSource: 'local',
+        workdir: '/work/repo-1',
+        scanEpoch: 7,
+        signal: controller.signal,
+      }),
+    ).resolves.toMatchObject({
+      status: 'cancelled',
+      failReason: 'scan_cancelled',
+    });
+    expect(await state.getPhase(1, EScanPhase.HEAD)).toBeNull();
+    expect(acquire).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('propagates a control-read failure even when the phase signal is aborted', async () => {
+    const state = new FakeStateRepository();
+    const controller = new AbortController();
+    controller.abort();
+    const scanner = new ScanRepositoryPhaseUseCase(
+      worker() as unknown as HeadScanWorkerPort,
+      worker() as unknown as HistoryScanWorkerPort,
+      state,
+      new FakeLogger(),
+      { remove: async () => {} },
+      { acquire: jest.fn() } as never,
+    );
+
+    await expect(
+      scanner.execute({
+        repoRef: ref,
+        phase: EScanPhase.HEAD,
+        cloneSource: 'local',
+        workdir: '/work/repo-1',
+        signal: controller.signal,
+        shouldStop: async () => {
+          throw new Error('scan_control_unavailable');
+        },
+      }),
+    ).rejects.toThrow('scan_control_unavailable');
+    expect(await state.getPhase(1, EScanPhase.HEAD)).toBeNull();
+  });
+
+  it('keeps the admitted epoch on HEAD and skips HISTORY scheduling after Stop', async () => {
+    const state = new FakeStateRepository();
+    await state.startRepoScan(ref.repoId, ref.owner, ref.name, 7);
+    let stopped = false;
+    const head = {
+      run: async () => {
+        stopped = true;
+        return { status: 'done' as const, headSha: sha };
+      },
+    };
+    const scanner = new ScanRepositoryPhaseUseCase(
+      head as unknown as HeadScanWorkerPort,
+      worker() as unknown as HistoryScanWorkerPort,
+      state,
+      new FakeLogger(),
+      { remove: async () => {} },
+      {
+        acquire: async () => ({
+          repoPath: '/cache/head',
+          scannerVersion: 'v2',
+          release: async () => {},
+        }),
+      },
+    );
+
+    await expect(
+      scanner.execute({
+        repoRef: ref,
+        phase: EScanPhase.HEAD,
+        cloneSource: 'local',
+        workdir: '/work/repo-1',
+        scanEpoch: 7,
+        shouldStop: async () => stopped,
+      }),
+    ).resolves.toMatchObject({ status: 'done', headSha: sha });
+    expect(await state.getPhase(1, EScanPhase.HEAD)).toMatchObject({
+      status: EScanPhaseStatus.DONE,
+      scanEpoch: 7,
+    });
+    expect(await state.getPhase(1, EScanPhase.HISTORY)).toBeNull();
+  });
+
   it('persists HEAD findings and coverage before scheduling history', async () => {
     const state = new FakeStateRepository();
     await state.startRepoScan(ref.repoId, ref.owner, ref.name);

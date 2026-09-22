@@ -40,12 +40,13 @@ export abstract class StateRepositoryPort {
    * requeued stale scanned_repos row) and marks it in_progress.
    * Returns null if nothing is pending.
    */
-  abstract claimNext(): Promise<IRepoRef | null>;
+  abstract claimNext(scanEpoch?: number): Promise<IRepoRef | null>;
 
   abstract markDone(
     repoId: number,
     lastCommitSha: string,
     scannerVersion?: string,
+    scanEpoch?: number,
   ): Promise<void>;
 
   abstract getScanCheckpoint(repoId: number): Promise<IScanCheckpoint | null>;
@@ -54,12 +55,14 @@ export abstract class StateRepositoryPort {
     repoId: number,
     phase: EScanPhase,
     targetSha: string,
+    scanEpoch?: number,
   ): Promise<void>;
 
   abstract claimPhase(
     repoId: number,
     phase: EScanPhase,
     targetSha: string,
+    scanEpoch?: number,
   ): Promise<boolean>;
 
   abstract getPhase(
@@ -93,19 +96,28 @@ export abstract class StateRepositoryPort {
     result: IInterruptedScanPhase,
   ): Promise<void>;
 
-  abstract markFailed(repoId: number, reason: string): Promise<void>;
+  abstract markFailed(
+    repoId: number,
+    reason: string,
+    scanEpoch?: number,
+  ): Promise<void>;
 
   /**
    * Directly (re)starts a scan for a specific repo, bypassing the shared
    * candidate queue - creates or resets its ScannedRepo row to
    * in_progress. Used for a user-triggered scan of their own approved
    * repo, which must never grab an unrelated queued repo via claimNext().
+   * Reopening a same-epoch cancellation requires an admitted explicit retry.
    */
   abstract startRepoScan(
     repoId: number,
     owner: string,
     name: string,
+    scanEpoch?: number,
+    restartCancelled?: boolean,
   ): Promise<void>;
+
+  abstract cancelScansBefore(epoch: number): Promise<void>;
 
   /** Resets in_progress rows older than timeoutSeconds back to pending. Returns count changed. */
   abstract requeueStale(timeoutSeconds: number): Promise<number>;

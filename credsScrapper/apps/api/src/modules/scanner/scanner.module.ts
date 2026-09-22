@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 import { ScanCachePort } from './application/ports/scan-cache.port';
 import { FsScanCacheAdapter } from './infrastructure/fs/fs-scan-cache.adapter';
 import { provideUseCase } from '../../shared/di/provide-use-case';
@@ -37,6 +38,9 @@ import { RunScanLoopUseCase } from './application/use-cases/run-scan-loop.use-ca
 import { ScanRepositoryUseCase } from './application/use-cases/scan-repository.use-case';
 import { ScanRepositoryPhaseUseCase } from './application/use-cases/scan-repository-phase.use-case';
 import { ReconcileScanPhasesUseCase } from './application/use-cases/reconcile-scan-phases.use-case';
+import { ReconcileScanStopUseCase } from './application/use-cases/reconcile-scan-stop.use-case';
+import { StopAllScansUseCase } from './application/use-cases/stop-all-scans.use-case';
+import { ScanControlExceptionFilter } from './presentation/scan-control-exception.filter';
 import { SetFindingStatusUseCase } from './application/use-cases/set-finding-status.use-case';
 import { GhArchiveHttpAdapter } from './infrastructure/discovery/gharchive-http-adapter';
 import { GithubApiRepoLookupAdapter } from './infrastructure/discovery/github-api-repo-lookup.adapter';
@@ -96,7 +100,18 @@ import { ScanController } from './presentation/scan.controller';
     { provide: WorkdirCleanerPort, useClass: FsWorkdirCleanerAdapter },
     { provide: WorkdirJoinerPort, useClass: FsWorkdirJoinerAdapter },
     { provide: JobQueuePort, useClass: BullmqJobQueueAdapter },
+    { provide: APP_FILTER, useClass: ScanControlExceptionFilter },
     BullmqJobWorker,
+    provideUseCase(
+      ReconcileScanStopUseCase,
+      [StateRepositoryPort, JobQueuePort],
+      (state, jobs) => new ReconcileScanStopUseCase(state, jobs),
+    ),
+    provideUseCase(
+      StopAllScansUseCase,
+      [JobQueuePort],
+      (jobs) => new StopAllScansUseCase(jobs),
+    ),
     provideUseCase(
       RescanRepositoryServiceUseCase,
       [
@@ -203,8 +218,8 @@ import { ScanController } from './presentation/scan.controller';
     ),
     provideUseCase(
       GetScanStatusUseCase,
-      [StateRepositoryPort],
-      (state) => new GetScanStatusUseCase(state),
+      [StateRepositoryPort, JobQueuePort],
+      (state, jobs) => new GetScanStatusUseCase(state, jobs),
     ),
     provideUseCase(
       GetScannedReposUseCase,

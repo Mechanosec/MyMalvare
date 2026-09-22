@@ -11,7 +11,7 @@ const TONE_BY_STATUS: Record<IRepoAuthorization['status'], string> = {
   rejected: 'text-critical border-critical/50 bg-critical/10',
 };
 
-export function MyReposPanel() {
+export function MyReposPanel({ scansStopping = false }: { readonly scansStopping?: boolean }) {
   const [requests, setRequests] = useState<IRepoAuthorization[]>([]);
   const [owner, setOwner] = useState('');
   const [name, setName] = useState('');
@@ -25,14 +25,17 @@ export function MyReposPanel() {
   }
 
   async function scan(request: IRepoAuthorization) {
+    if (scansStopping) return;
     setScanningRequestId(request.id);
     setScanJobId(null);
     setScanError(null);
     try {
       const { jobId } = await scanMyRepo(request.owner, request.name);
       setScanJobId(jobId);
-    } catch {
-      setScanError({ id: request.id, text: 'Failed to start scan — see server logs for details.' });
+    } catch (error) {
+      setScanError({ id: request.id, text: error instanceof Error && error.message.includes('Scan stopping (409)')
+        ? error.message
+        : 'Failed to start scan — check the API and retry.' });
       setScanningRequestId(null);
     }
   }
@@ -135,7 +138,7 @@ export function MyReposPanel() {
                     <button
                       type="button"
                       onClick={() => scan(r)}
-                      disabled={scanningRequestId === r.id && scanJobId === null}
+                      disabled={scansStopping || (scanningRequestId === r.id && scanJobId === null)}
                       className="shrink-0 whitespace-nowrap border border-accent-dim bg-accent/10 px-3 py-1 text-xs font-medium text-accent hover:bg-accent/20 disabled:opacity-40"
                     >
                       {scanningRequestId === r.id && scanJobId === null ? 'Starting…' : 'Scan'}

@@ -4,6 +4,9 @@ import { TScanJobResult } from '../../../../../src/modules/scanner/application/u
 import { EJobStatus } from '../../../../../src/modules/scanner/domain/constant/job-status.constant';
 import { FakeStateRepository } from '../../fakes/fake-state-repository';
 import { FakeLogger } from '../../fakes/fake-logger';
+import { FakeScanJobQueue } from '../../fakes/fake-scan-job-queue';
+import { JobQueuePort } from '../../../../../src/modules/scanner/application/ports/job-queue.port';
+import { EScanControlState } from '../../../../../src/modules/scanner/domain/constant/scan-control.constant';
 
 describe('BullMQ result mapping with real scan orchestrator (no Redis)', () => {
   it.each(['done', 'failed'] as const)(
@@ -22,6 +25,14 @@ describe('BullMQ result mapping with real scan orchestrator (no Redis)', () => {
         { remove: async () => {} },
       );
       const events: Array<{ status: EJobStatus; processed?: number }> = [];
+      const jobs = new FakeScanJobQueue();
+      jest.spyOn(jobs as JobQueuePort, 'readScanControl').mockResolvedValue({
+        epoch: 0,
+        state: EScanControlState.READY,
+        stopEpoch: null,
+        requestedAt: null,
+        finishedAt: null,
+      });
       const worker = new BullmqJobWorker(
         {} as never,
         {} as never,
@@ -31,7 +42,11 @@ describe('BullMQ result mapping with real scan orchestrator (no Redis)', () => {
             events.push(event);
           },
         },
-        {} as never,
+        jobs,
+        undefined,
+        undefined,
+        undefined,
+        state,
       );
       const job = {
         id: 'unit',

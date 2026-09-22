@@ -5,6 +5,7 @@ const TONE_BY_STATUS: Record<EScanStatus, string> = {
   [EScanStatus.FAILED]: 'text-critical border-critical/50 bg-critical/10',
   [EScanStatus.IN_PROGRESS]: 'text-warning border-warning/50 bg-warning/10',
   [EScanStatus.PENDING]: 'text-text-dim border-line bg-surface-2',
+  [EScanStatus.CANCELLED]: 'text-text-dim border-line bg-surface-2',
 };
 
 interface IStatusBadgeProps {

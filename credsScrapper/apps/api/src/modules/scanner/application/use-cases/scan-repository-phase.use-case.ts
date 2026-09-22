@@ -19,6 +19,8 @@ export interface IScanRepositoryPhaseOptions {
   readonly cloneSource: string;
   readonly workdir: string;
   readonly targetSha?: string;
+  readonly scanEpoch?: number;
+  readonly shouldStop?: () => Promise<boolean>;
   readonly signal?: AbortSignal;
   readonly onProgress?: (message: string) => void;
 }
@@ -36,7 +38,7 @@ export class ScanRepositoryPhaseUseCase {
   ) {}
 
   async execute(options: IScanRepositoryPhaseOptions): Promise<TScanJobResult> {
-    const key = `${options.repoRef.repoId}:${options.phase}`;
+    const key = `${options.repoRef.repoId}:${options.phase}:${options.scanEpoch ?? 0}`;
     const existing = this.active.get(key);
     if (existing) return existing;
     const pending = this.run(options);
@@ -52,12 +54,30 @@ export class ScanRepositoryPhaseUseCase {
     options: IScanRepositoryPhaseOptions,
   ): Promise<TScanJobResult> {
     const requestedTarget = options.targetSha ?? 'latest';
+    const scanEpoch = options.scanEpoch ?? 0;
+    let stopCheckFailed = false;
+    const isStopped = async (): Promise<boolean> => {
+      try {
+        const requested = (await options.shouldStop?.()) ?? false;
+        return requested || options.signal?.aborted === true;
+      } catch (error) {
+        stopCheckFailed = true;
+        throw error;
+      }
+    };
+    const cancelled = (): TScanJobResult => ({
+      status: 'cancelled',
+      failReason: 'scan_cancelled',
+      targetSha: requestedTarget,
+    });
+    if (await isStopped()) return cancelled();
     const current = await this.state.getPhase(
       options.repoRef.repoId,
       options.phase,
     );
     if (
       current?.status === 'done' &&
+      current.scanEpoch === scanEpoch &&
       options.phase === EScanPhase.HISTORY &&
       current.completedSha === requestedTarget
     ) {
@@ -69,26 +89,44 @@ export class ScanRepositoryPhaseUseCase {
     }
     if (
       current?.status !== 'pending' ||
-      current.targetSha !== requestedTarget
+      current.targetSha !== requestedTarget ||
+      current.scanEpoch !== scanEpoch
     ) {
       await this.state.schedulePhase(
         options.repoRef.repoId,
         options.phase,
         requestedTarget,
+        scanEpoch,
       );
     }
+    if (await isStopped()) return cancelled();
     if (
       !(await this.state.claimPhase(
         options.repoRef.repoId,
         options.phase,
         requestedTarget,
+        scanEpoch,
       ))
     ) {
+      if (await isStopped()) return cancelled();
       return {
         status: 'failed',
         failReason: 'scan_phase_already_claimed',
         targetSha: requestedTarget,
       };
+    }
+
+    if (await isStopped()) {
+      await this.state.markPhaseCancelled(
+        options.repoRef.repoId,
+        options.phase,
+        {
+          targetSha: requestedTarget,
+          reason: 'scan_cancelled',
+          scanEpoch,
+        },
+      );
+      return cancelled();
     }
 
     const findings: IFindingInput[] = [];
@@ -99,6 +137,18 @@ export class ScanRepositoryPhaseUseCase {
         options.cloneSource,
         options.phase,
       );
+      if (await isStopped()) {
+        await this.state.markPhaseCancelled(
+          options.repoRef.repoId,
+          options.phase,
+          {
+            targetSha: requestedTarget,
+            reason: 'scan_cancelled',
+            scanEpoch,
+          },
+        );
+        return cancelled();
+      }
       const checkpoint =
         options.phase === EScanPhase.HISTORY &&
         current?.completedSha &&
@@ -158,12 +208,14 @@ export class ScanRepositoryPhaseUseCase {
           targetSha,
           completedSha: result.headSha,
           scannerVersion: lease.scannerVersion,
+          scanEpoch,
         });
-        if (options.phase === EScanPhase.HEAD) {
+        if (options.phase === EScanPhase.HEAD && !(await isStopped())) {
           await this.state.schedulePhase(
             options.repoRef.repoId,
             EScanPhase.HISTORY,
             result.headSha,
+            scanEpoch,
           );
         }
       } else if (result.status === 'incomplete') {
@@ -173,6 +225,7 @@ export class ScanRepositoryPhaseUseCase {
           {
             targetSha,
             reason: result.failReason,
+            scanEpoch,
           },
         );
       } else if (result.status === 'cancelled') {
@@ -182,6 +235,7 @@ export class ScanRepositoryPhaseUseCase {
           {
             targetSha,
             reason: result.failReason,
+            scanEpoch,
           },
         );
       } else {
@@ -191,15 +245,18 @@ export class ScanRepositoryPhaseUseCase {
           {
             targetSha,
             reason: result.failReason,
+            scanEpoch,
           },
         );
       }
       return result;
     } catch (error) {
+      if (stopCheckFailed) throw error;
       const reason = error instanceof Error ? error.message : String(error);
       await this.state.markPhaseFailed(options.repoRef.repoId, options.phase, {
         targetSha: requestedTarget,
         reason,
+        scanEpoch,
       });
       return {
         status: 'failed',

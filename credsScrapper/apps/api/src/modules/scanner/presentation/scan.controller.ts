@@ -4,6 +4,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Post,
   Query,
@@ -15,7 +17,9 @@ import { GetScanStatusUseCase } from '../application/use-cases/get-scan-status.u
 import { AdminScanRepoUseCase } from '../application/use-cases/admin-scan-repo.use-case';
 import { JobQueuePort } from '../application/ports/job-queue.port';
 import { EJobType } from '../domain/constant/job-status.constant';
-import { IQueueStatus } from '../domain/types/queue-status.type';
+import { IScanStatus } from '../domain/types/queue-status.type';
+import { IScanControlState } from '../domain/types/scan-control.type';
+import { StopAllScansUseCase } from '../application/use-cases/stop-all-scans.use-case';
 import { IScannedRepoRecord } from '../domain/types/scanned-repo-record.type';
 import { StartScanDto } from './dto/start-scan.dto';
 import { ScanRepoDto } from './dto/scan-repo.dto';
@@ -32,7 +36,15 @@ export class ScanController {
     private readonly getScannedRepos: GetScannedReposUseCase,
     private readonly jobQueue: JobQueuePort,
     private readonly adminScanRepo: AdminScanRepoUseCase,
+    private readonly stopAllScans: StopAllScansUseCase,
   ) {}
+
+  @Post('stop')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(AdminGuard)
+  stopAll(): Promise<IScanControlState> {
+    return this.stopAllScans.execute();
+  }
 
   // Admin-only: this drains the shared candidate queue (arbitrary
   // third-party repos discovered via GH Archive) - a regular user's scope
@@ -55,7 +67,7 @@ export class ScanController {
   // keeps out of unauthenticated/non-admin view entirely.
   @Get('status')
   @UseGuards(AdminGuard)
-  async status(): Promise<IQueueStatus> {
+  async status(): Promise<IScanStatus> {
     return this.getScanStatus.execute();
   }
 

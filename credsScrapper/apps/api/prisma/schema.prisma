@@ -35,7 +35,8 @@ model ScannedRepo {
   name          String
   lastCommitSha String?   @map("last_commit_sha")
   scannerVersion String?  @map("scanner_version")
-  status        String // EScanStatus: pending | in_progress | done | failed
+  status        String // EScanStatus: pending | in_progress | done | failed | cancelled
+  scanEpoch     Int      @default(0) @map("scan_epoch")
   startedAt     DateTime? @map("started_at")
   scannedAt     DateTime? @map("scanned_at")
   failReason    String?   @map("fail_reason")
@@ -55,6 +56,7 @@ model ScanPhase {
   completedAt    DateTime? @map("completed_at")
   reason         String?
   retryCount     Int       @default(0) @map("retry_count")
+  scanEpoch      Int       @default(0) @map("scan_epoch")
 
   @@id([repoId, phase])
   @@map("scan_phases")

@@ -3,6 +3,8 @@ export enum EJobStatus {
   RUNNING = 'running',
   DONE = 'done',
   FAILED = 'failed',
+  STOPPING = 'stopping',
+  STOPPED = 'stopped',
 }
 
 export enum EJobType {

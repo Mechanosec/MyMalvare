@@ -32,8 +32,17 @@ export class RescanRepositoryServiceUseCase {
     const secretTypes = options.secretType.startsWith('aws_')
       ? [ESecretType.AWS_ACCESS_KEY_ID, ESecretType.AWS_SECRET_ACCESS_KEY]
       : [options.secretType];
+    const isStopped = async () =>
+      (await options.shouldStop?.()) === true ||
+      options.signal?.aborted === true;
+    const cancelled = (targetSha?: string): TScanJobResult => ({
+      status: 'cancelled',
+      failReason: 'scan_cancelled',
+      targetSha,
+    });
     let targetSha: string | undefined;
     for (const phase of [EScanPhase.HEAD, EScanPhase.HISTORY]) {
+      if (await isStopped()) return cancelled(targetSha);
       const lease = await this.cache.acquire(
         options.workdir,
         options.cloneSource,
@@ -41,6 +50,7 @@ export class RescanRepositoryServiceUseCase {
       );
       const findings: IFindingInput[] = [];
       try {
+        if (await isStopped()) return cancelled(targetSha);
         const result = await (
           phase === EScanPhase.HEAD ? this.head : this.history
         ).run(
@@ -82,6 +92,7 @@ export class RescanRepositoryServiceUseCase {
         await lease.release();
       }
     }
+    if (await isStopped()) return cancelled(targetSha);
     await this.state.resetTestResults(options.repoRef.repoId, secretTypes);
     return { status: 'done', headSha: targetSha!, targetSha };
   }

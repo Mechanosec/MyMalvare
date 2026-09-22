@@ -105,4 +105,41 @@ describe('authorized service rescan', () => {
     expect(s.state.resetTestResults).not.toHaveBeenCalled();
     expect(s.release).toHaveBeenCalledTimes(1);
   });
+
+  it('stops between HEAD and HISTORY without resetting test results', async () => {
+    const s = setup();
+    let stopped = false;
+    s.head.run.mockImplementation(async () => {
+      stopped = true;
+      return { status: 'done', headSha: s.sha };
+    });
+
+    expect(
+      await s.useCase.execute({
+        ...s.options,
+        scanEpoch: 7,
+        shouldStop: async () => stopped,
+      }),
+    ).toMatchObject({ status: 'cancelled', failReason: 'scan_cancelled' });
+    expect(s.history.run).not.toHaveBeenCalled();
+    expect(s.state.resetTestResults).not.toHaveBeenCalled();
+    expect(s.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not hide a control-read failure behind an aborted service signal', async () => {
+    const s = setup();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      s.useCase.execute({
+        ...s.options,
+        signal: controller.signal,
+        shouldStop: async () => {
+          throw new Error('scan_control_unavailable');
+        },
+      }),
+    ).rejects.toThrow('scan_control_unavailable');
+    expect(s.head.run).not.toHaveBeenCalled();
+    expect(s.history.run).not.toHaveBeenCalled();
+  });
 });

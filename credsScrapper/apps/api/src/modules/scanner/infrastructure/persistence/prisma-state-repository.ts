@@ -82,7 +82,7 @@ export class PrismaStateRepository extends StateRepositoryPort {
     return candidate !== null || scanned !== null;
   }
 
-  async claimNext(): Promise<IRepoRef | null> {
+  async claimNext(scanEpoch = 0): Promise<IRepoRef | null> {
     return this.prisma.$transaction(async (tx) => {
       const candidate = await tx.candidate.findFirst({
         where: { status: ECandidateStatus.PENDING },
@@ -101,13 +101,14 @@ export class PrismaStateRepository extends StateRepositoryPort {
             status: EScanStatus.IN_PROGRESS,
             startedAt: new Date(),
             retryCount: 0,
+            scanEpoch,
           },
         });
         return toRepoRef(candidate);
       }
 
       const stalePending = await tx.scannedRepo.findFirst({
-        where: { status: EScanStatus.PENDING },
+        where: { status: EScanStatus.PENDING, scanEpoch: { lte: scanEpoch } },
         orderBy: { repoId: 'asc' },
       });
       if (!stalePending) {
@@ -115,7 +116,11 @@ export class PrismaStateRepository extends StateRepositoryPort {
       }
       await tx.scannedRepo.update({
         where: { repoId: stalePending.repoId },
-        data: { status: EScanStatus.IN_PROGRESS, startedAt: new Date() },
+        data: {
+          status: EScanStatus.IN_PROGRESS,
+          startedAt: new Date(),
+          scanEpoch,
+        },
       });
       return toRepoRef(stalePending);
     });
@@ -135,22 +140,54 @@ export class PrismaStateRepository extends StateRepositoryPort {
     repoId: number,
     phase: EScanPhase,
     targetSha: string,
+    scanEpoch = 0,
   ): Promise<void> {
-    await this.prisma.scanPhase.upsert({
-      where: { repoId_phase: { repoId, phase } },
-      create: {
-        repoId,
-        phase,
-        status: EScanPhaseStatus.PENDING,
-        targetSha,
-      },
-      update: {
-        status: EScanPhaseStatus.PENDING,
-        targetSha,
-        startedAt: null,
-        completedAt: null,
-        reason: null,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      const repo = await tx.scannedRepo.findUnique({
+        where: { repoId },
+        select: { scanEpoch: true, status: true },
+      });
+      if (
+        repo &&
+        (repo.scanEpoch > scanEpoch ||
+          (repo.scanEpoch === scanEpoch &&
+            repo.status === EScanStatus.CANCELLED))
+      )
+        return;
+      const existing = await tx.scanPhase.findUnique({
+        where: { repoId_phase: { repoId, phase } },
+        select: { scanEpoch: true, status: true },
+      });
+      if (existing) {
+        if (
+          existing.scanEpoch === scanEpoch &&
+          existing.status === EScanPhaseStatus.CANCELLED &&
+          (repo?.scanEpoch !== scanEpoch ||
+            repo.status !== EScanStatus.IN_PROGRESS)
+        )
+          return;
+        await tx.scanPhase.updateMany({
+          where: { repoId, phase, scanEpoch: { lte: scanEpoch } },
+          data: {
+            status: EScanPhaseStatus.PENDING,
+            scanEpoch,
+            targetSha,
+            startedAt: null,
+            completedAt: null,
+            reason: null,
+          },
+        });
+      } else {
+        await tx.scanPhase.create({
+          data: {
+            repoId,
+            phase,
+            status: EScanPhaseStatus.PENDING,
+            scanEpoch,
+            targetSha,
+          },
+        });
+      }
     });
   }
 
@@ -158,22 +195,22 @@ export class PrismaStateRepository extends StateRepositoryPort {
     repoId: number,
     phase: EScanPhase,
     targetSha: string,
+    scanEpoch = 0,
   ): Promise<boolean> {
-    const result = await this.prisma.scanPhase.updateMany({
-      where: {
-        repoId,
-        phase,
-        targetSha,
-        status: EScanPhaseStatus.PENDING,
-      },
-      data: {
-        status: EScanPhaseStatus.RUNNING,
-        startedAt: new Date(),
-        completedAt: null,
-        reason: null,
-      },
-    });
-    return result.count === 1;
+    const changed = await this.prisma.$executeRaw`
+      UPDATE scan_phases
+      SET status = ${EScanPhaseStatus.RUNNING}, started_at = ${new Date()},
+          completed_at = NULL, reason = NULL
+      WHERE repo_id = ${repoId} AND phase = ${phase}
+        AND target_sha = ${targetSha} AND status = ${EScanPhaseStatus.PENDING}
+        AND scan_epoch = ${scanEpoch}
+        AND EXISTS (
+          SELECT 1 FROM scanned_repos
+          WHERE repo_id = ${repoId} AND scan_epoch = ${scanEpoch}
+            AND status <> ${EScanStatus.CANCELLED}
+        )
+    `;
+    return changed === 1;
   }
 
   async getPhase(
@@ -206,6 +243,7 @@ export class PrismaStateRepository extends StateRepositoryPort {
           repoId,
           phase,
           status: EScanPhaseStatus.RUNNING,
+          scanEpoch: result.scanEpoch ?? 0,
           OR: [
             { targetSha: result.targetSha },
             ...(phase === EScanPhase.HEAD ? [{ targetSha: 'latest' }] : []),
@@ -221,8 +259,12 @@ export class PrismaStateRepository extends StateRepositoryPort {
         },
       });
       if (updated.count === 1 && phase === EScanPhase.HEAD) {
-        await tx.scannedRepo.update({
-          where: { repoId },
+        await tx.scannedRepo.updateMany({
+          where: {
+            repoId,
+            scanEpoch: result.scanEpoch ?? 0,
+            status: { not: EScanStatus.CANCELLED },
+          },
           data: {
             status: EScanStatus.DONE,
             lastCommitSha: result.completedSha,
@@ -293,6 +335,7 @@ export class PrismaStateRepository extends StateRepositoryPort {
           repoId,
           phase,
           status: EScanPhaseStatus.RUNNING,
+          scanEpoch: result.scanEpoch ?? 0,
           OR: [
             { targetSha: result.targetSha },
             ...(phase === EScanPhase.HEAD ? [{ targetSha: 'latest' }] : []),
@@ -307,11 +350,20 @@ export class PrismaStateRepository extends StateRepositoryPort {
         },
       });
       if (updated.count === 1 && phase === EScanPhase.HEAD) {
-        await tx.scannedRepo.update({
-          where: { repoId },
+        await tx.scannedRepo.updateMany({
+          where: {
+            repoId,
+            scanEpoch: result.scanEpoch ?? 0,
+            status: { not: EScanStatus.CANCELLED },
+          },
           data: {
-            status: EScanStatus.FAILED,
-            failReason: result.reason,
+            status:
+              status === EScanPhaseStatus.CANCELLED
+                ? EScanStatus.CANCELLED
+                : EScanStatus.FAILED,
+            ...(status === EScanPhaseStatus.CANCELLED
+              ? {}
+              : { failReason: result.reason }),
             ...(incrementRetry ? { retryCount: { increment: 1 } } : {}),
           },
         });
@@ -330,6 +382,7 @@ export class PrismaStateRepository extends StateRepositoryPort {
     completedAt: Date | null;
     reason: string | null;
     retryCount: number;
+    scanEpoch: number;
   }): IScanPhaseRecord {
     return {
       ...row,
@@ -342,9 +395,10 @@ export class PrismaStateRepository extends StateRepositoryPort {
     repoId: number,
     lastCommitSha: string,
     scannerVersion?: string,
+    scanEpoch = 0,
   ): Promise<void> {
-    await this.prisma.scannedRepo.update({
-      where: { repoId },
+    await this.prisma.scannedRepo.updateMany({
+      where: { repoId, scanEpoch, status: { not: EScanStatus.CANCELLED } },
       data: {
         status: EScanStatus.DONE,
         lastCommitSha,
@@ -355,9 +409,13 @@ export class PrismaStateRepository extends StateRepositoryPort {
     });
   }
 
-  async markFailed(repoId: number, reason: string): Promise<void> {
-    await this.prisma.scannedRepo.update({
-      where: { repoId },
+  async markFailed(
+    repoId: number,
+    reason: string,
+    scanEpoch = 0,
+  ): Promise<void> {
+    await this.prisma.scannedRepo.updateMany({
+      where: { repoId, scanEpoch, status: { not: EScanStatus.CANCELLED } },
       data: {
         status: EScanStatus.FAILED,
         failReason: reason,
@@ -370,8 +428,22 @@ export class PrismaStateRepository extends StateRepositoryPort {
     repoId: number,
     owner: string,
     name: string,
+    scanEpoch = 0,
+    restartCancelled = false,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.scannedRepo.findUnique({
+        where: { repoId },
+        select: { scanEpoch: true, status: true },
+      });
+      if (
+        existing &&
+        (existing.scanEpoch > scanEpoch ||
+          (existing.scanEpoch === scanEpoch &&
+            existing.status === EScanStatus.CANCELLED &&
+            !restartCancelled))
+      )
+        return;
       await tx.scannedRepo.upsert({
         where: { repoId },
         create: {
@@ -381,14 +453,42 @@ export class PrismaStateRepository extends StateRepositoryPort {
           status: EScanStatus.IN_PROGRESS,
           startedAt: new Date(),
           retryCount: 0,
+          scanEpoch,
         },
-        update: { status: EScanStatus.IN_PROGRESS, startedAt: new Date() },
+        update: {
+          status: EScanStatus.IN_PROGRESS,
+          startedAt: new Date(),
+          scanEpoch,
+        },
       });
       // A directly scheduled repo must not remain pending in the discovery
       // queue: claimNext would otherwise attempt a duplicate scannedRepo create.
       await tx.candidate.updateMany({
         where: { repoId },
         data: { status: ECandidateStatus.CLAIMED },
+      });
+    });
+  }
+
+  async cancelScansBefore(epoch: number): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.scanPhase.updateMany({
+        where: {
+          scanEpoch: { lt: epoch },
+          status: { in: [EScanPhaseStatus.PENDING, EScanPhaseStatus.RUNNING] },
+        },
+        data: {
+          status: EScanPhaseStatus.CANCELLED,
+          completedAt: new Date(),
+          reason: 'scan_cancelled',
+        },
+      });
+      await tx.scannedRepo.updateMany({
+        where: {
+          scanEpoch: { lt: epoch },
+          status: { in: [EScanStatus.PENDING, EScanStatus.IN_PROGRESS] },
+        },
+        data: { status: EScanStatus.CANCELLED },
       });
     });
   }

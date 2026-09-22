@@ -34,6 +34,7 @@ interface CandidateRow extends IRepoRef {
 
 interface ScannedRow extends IRepoRef {
   status: EScanStatus;
+  scanEpoch?: number;
   startedAt?: Date;
   scannedAt?: Date;
   lastCommitSha?: string;
@@ -73,8 +74,21 @@ export class FakeStateRepository extends StateRepositoryPort {
     repoId: number,
     phase: EScanPhase,
     targetSha: string,
+    scanEpoch = 0,
   ): Promise<void> {
     const previous = this.phases.get(this.phaseKey(repoId, phase));
+    const repo = this.scanned.get(repoId);
+    if (
+      (repo?.scanEpoch ?? 0) > scanEpoch ||
+      (repo?.scanEpoch === scanEpoch &&
+        repo.status === EScanStatus.CANCELLED) ||
+      (previous?.scanEpoch ?? 0) > scanEpoch ||
+      (previous?.scanEpoch === scanEpoch &&
+        previous.status === EScanPhaseStatus.CANCELLED &&
+        (repo?.scanEpoch !== scanEpoch ||
+          repo.status !== EScanStatus.IN_PROGRESS))
+    )
+      return;
     this.phases.set(this.phaseKey(repoId, phase), {
       repoId,
       phase,
@@ -86,6 +100,7 @@ export class FakeStateRepository extends StateRepositoryPort {
       completedAt: null,
       reason: null,
       retryCount: previous?.retryCount ?? 0,
+      scanEpoch,
     });
   }
 
@@ -93,13 +108,19 @@ export class FakeStateRepository extends StateRepositoryPort {
     repoId: number,
     phase: EScanPhase,
     targetSha: string,
+    scanEpoch = 0,
   ): Promise<boolean> {
     const key = this.phaseKey(repoId, phase);
     const record = this.phases.get(key);
+    const repo = this.scanned.get(repoId);
     if (
       !record ||
+      !repo ||
+      repo.scanEpoch !== scanEpoch ||
+      repo.status === EScanStatus.CANCELLED ||
       record.status !== EScanPhaseStatus.PENDING ||
-      record.targetSha !== targetSha
+      record.targetSha !== targetSha ||
+      record.scanEpoch !== scanEpoch
     )
       return false;
     this.phases.set(key, {
@@ -126,6 +147,15 @@ export class FakeStateRepository extends StateRepositoryPort {
     phase: EScanPhase,
     result: ICompletedScanPhase,
   ): Promise<void> {
+    const previous = this.phases.get(this.phaseKey(repoId, phase));
+    if (
+      !previous ||
+      previous.status !== EScanPhaseStatus.RUNNING ||
+      previous.scanEpoch !== (result.scanEpoch ?? 0) ||
+      (previous.targetSha !== result.targetSha &&
+        !(phase === EScanPhase.HEAD && previous.targetSha === 'latest'))
+    )
+      return;
     this.phases.set(this.phaseKey(repoId, phase), {
       repoId,
       phase,
@@ -136,9 +166,16 @@ export class FakeStateRepository extends StateRepositoryPort {
       startedAt: null,
       completedAt: new Date(),
       reason: null,
-      retryCount: 0,
+      retryCount: previous.retryCount,
+      scanEpoch: previous.scanEpoch,
     });
-    if (phase === EScanPhase.HEAD) await this.markDone(repoId);
+    if (phase === EScanPhase.HEAD)
+      await this.markDone(
+        repoId,
+        result.completedSha,
+        result.scannerVersion,
+        result.scanEpoch ?? 0,
+      );
   }
 
   async markPhaseIncomplete(
@@ -182,6 +219,14 @@ export class FakeStateRepository extends StateRepositoryPort {
     status: EScanPhaseStatus,
   ): void {
     const previous = this.phases.get(this.phaseKey(repoId, phase));
+    if (
+      !previous ||
+      previous.status !== EScanPhaseStatus.RUNNING ||
+      previous.scanEpoch !== (result.scanEpoch ?? 0) ||
+      (previous.targetSha !== result.targetSha &&
+        !(phase === EScanPhase.HEAD && previous.targetSha === 'latest'))
+    )
+      return;
     this.phases.set(this.phaseKey(repoId, phase), {
       repoId,
       phase,
@@ -192,8 +237,27 @@ export class FakeStateRepository extends StateRepositoryPort {
       startedAt: previous?.startedAt ?? null,
       completedAt: new Date(),
       reason: result.reason,
-      retryCount: previous?.retryCount ?? 0,
+      retryCount:
+        previous.retryCount + (status === EScanPhaseStatus.FAILED ? 1 : 0),
+      scanEpoch: previous.scanEpoch,
     });
+    if (phase === EScanPhase.HEAD) {
+      const row = this.scanned.get(repoId);
+      if (
+        row &&
+        (row.scanEpoch ?? 0) === previous.scanEpoch &&
+        row.status !== EScanStatus.CANCELLED
+      ) {
+        row.status =
+          status === EScanPhaseStatus.CANCELLED
+            ? EScanStatus.CANCELLED
+            : EScanStatus.FAILED;
+        if (status !== EScanPhaseStatus.CANCELLED)
+          row.failReason = result.reason;
+        if (status === EScanPhaseStatus.FAILED)
+          row.retryCount = (row.retryCount ?? 0) + 1;
+      }
+    }
   }
 
   async addCandidate(
@@ -217,7 +281,7 @@ export class FakeStateRepository extends StateRepositoryPort {
     return this.candidates.has(repoId) || this.scanned.has(repoId);
   }
 
-  async claimNext(): Promise<IRepoRef | null> {
+  async claimNext(scanEpoch = 0): Promise<IRepoRef | null> {
     for (const candidate of this.candidates.values()) {
       if (candidate.status === ECandidateStatus.PENDING) {
         candidate.status = ECandidateStatus.CLAIMED;
@@ -227,6 +291,7 @@ export class FakeStateRepository extends StateRepositoryPort {
           name: candidate.name,
           status: EScanStatus.IN_PROGRESS,
           startedAt: new Date(),
+          scanEpoch,
         });
         return {
           repoId: candidate.repoId,
@@ -236,25 +301,48 @@ export class FakeStateRepository extends StateRepositoryPort {
       }
     }
     for (const row of this.scanned.values()) {
-      if (row.status === EScanStatus.PENDING) {
+      if (
+        row.status === EScanStatus.PENDING &&
+        (row.scanEpoch ?? 0) <= scanEpoch
+      ) {
         row.status = EScanStatus.IN_PROGRESS;
         row.startedAt = new Date();
+        row.scanEpoch = scanEpoch;
         return { repoId: row.repoId, owner: row.owner, name: row.name };
       }
     }
     return null;
   }
 
-  async markDone(repoId: number): Promise<void> {
+  async markDone(
+    repoId: number,
+    lastCommitSha?: string,
+    scannerVersion?: string,
+    scanEpoch = 0,
+  ): Promise<void> {
     const row = this.scanned.get(repoId);
-    if (row) {
+    if (
+      row &&
+      (row.scanEpoch ?? 0) === scanEpoch &&
+      row.status !== EScanStatus.CANCELLED
+    ) {
       row.status = EScanStatus.DONE;
+      if (lastCommitSha !== undefined) row.lastCommitSha = lastCommitSha;
+      row.scannedAt = new Date();
     }
   }
 
-  async markFailed(repoId: number, reason: string): Promise<void> {
+  async markFailed(
+    repoId: number,
+    reason: string,
+    scanEpoch = 0,
+  ): Promise<void> {
     const row = this.scanned.get(repoId);
-    if (row) {
+    if (
+      row &&
+      (row.scanEpoch ?? 0) === scanEpoch &&
+      row.status !== EScanStatus.CANCELLED
+    ) {
       row.status = EScanStatus.FAILED;
       row.failReason = reason;
       row.retryCount = (row.retryCount ?? 0) + 1;
@@ -265,10 +353,20 @@ export class FakeStateRepository extends StateRepositoryPort {
     repoId: number,
     owner: string,
     name: string,
+    scanEpoch = 0,
+    restartCancelled = false,
   ): Promise<void> {
+    const existing = this.scanned.get(repoId);
+    if (
+      existing &&
+      ((existing.scanEpoch ?? 0) > scanEpoch ||
+        (existing.scanEpoch === scanEpoch &&
+          existing.status === EScanStatus.CANCELLED &&
+          !restartCancelled))
+    )
+      return;
     const candidate = this.candidates.get(repoId);
     if (candidate) candidate.status = ECandidateStatus.CLAIMED;
-    const existing = this.scanned.get(repoId);
     this.scanned.set(repoId, {
       ...existing,
       repoId,
@@ -276,7 +374,33 @@ export class FakeStateRepository extends StateRepositoryPort {
       name,
       status: EScanStatus.IN_PROGRESS,
       startedAt: new Date(),
+      scanEpoch,
     });
+  }
+
+  async cancelScansBefore(epoch: number): Promise<void> {
+    for (const [key, phase] of this.phases) {
+      if (
+        phase.scanEpoch < epoch &&
+        [EScanPhaseStatus.PENDING, EScanPhaseStatus.RUNNING].includes(
+          phase.status,
+        )
+      ) {
+        this.phases.set(key, {
+          ...phase,
+          status: EScanPhaseStatus.CANCELLED,
+          completedAt: new Date(),
+          reason: 'scan_cancelled',
+        });
+      }
+    }
+    for (const row of this.scanned.values()) {
+      if (
+        (row.scanEpoch ?? 0) < epoch &&
+        [EScanStatus.PENDING, EScanStatus.IN_PROGRESS].includes(row.status)
+      )
+        row.status = EScanStatus.CANCELLED;
+    }
   }
 
   async requeueStale(): Promise<number> {
@@ -596,6 +720,7 @@ export class FakeStateRepository extends StateRepositoryPort {
       scannedAt: row.scannedAt ?? null,
       failReason: row.failReason ?? null,
       retryCount: row.retryCount ?? 0,
+      scanEpoch: row.scanEpoch ?? 0,
       findingsCount: this.findings.filter((f) => f.repoId === row.repoId)
         .length,
       headPhase:

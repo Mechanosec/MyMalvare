@@ -11,7 +11,7 @@ const SCAN_WORKDIR = process.env.SCAN_WORKDIR ?? 'workdir';
 // AdminGuard): resolve owner/name to a GitHub repoId, then enqueue the
 // same 'scan-repo' BullMQ job the worker already knows how to run.
 export async function enqueueRepoScan(
-  state: StateRepositoryPort,
+  _state: StateRepositoryPort,
   githubLookup: GithubRepoLookupPort,
   jobQueue: JobQueuePort,
   workdirJoiner: WorkdirJoinerPort,
@@ -24,7 +24,6 @@ export async function enqueueRepoScan(
     return 'not-found';
   }
 
-  if (!secretType) await state.startRepoScan(repoId, owner, name);
   await workdirJoiner.ensureDir(SCAN_WORKDIR);
   const workdir = workdirJoiner.join(SCAN_WORKDIR, `repo-${repoId}`);
   const jobId = await jobQueue.enqueue(

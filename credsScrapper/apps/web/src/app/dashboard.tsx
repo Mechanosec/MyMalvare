@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AdminPanel } from '../components/admin-panel';
 import { FindingsTable } from '../components/findings-table';
 import { LandingPage } from '../components/landing-page';
@@ -11,7 +11,7 @@ import { ScanControls } from '../components/scan-controls';
 import { StatTile } from '../components/stat-tile';
 import { Tabs } from '../components/tabs';
 import { TestingPanel } from '../components/testing-panel';
-import { fetchMyScannedRepos, fetchQueueStatus, fetchScannedRepos } from '../lib/api-client';
+import { fetchMyScannedRepos, fetchQueueStatus, fetchScannedRepos, stopAllScans } from '../lib/api-client';
 import { useAuth } from '../lib/auth-context';
 import { EScanStatus } from '../lib/constant/scan-status.constant';
 import { IQueueStatus } from '../lib/types/queue-status.type';
@@ -89,6 +89,11 @@ export function Dashboard() {
 
   const [scannedRepos, setScannedRepos] = useState<IScannedRepo[]>([]);
   const [queueStatus, setQueueStatus] = useState<IQueueStatus | null>(null);
+  const [statusError, setStatusError] = useState(false);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [stopPending, setStopPending] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
+  const statusRevision = useRef(0);
 
   useEffect(() => {
     if (!user) {
@@ -98,12 +103,70 @@ export function Dashboard() {
     }
     const fetchRepos = user.role === 'admin' ? fetchScannedRepos : fetchMyScannedRepos;
     fetchRepos().then(setScannedRepos).catch(() => setScannedRepos([]));
-    if (user.role === 'admin') {
-      fetchQueueStatus().then(setQueueStatus).catch(() => setQueueStatus(null));
-    }
   }, [user, refreshKey]);
 
+  useEffect(() => {
+    if (user?.role !== 'admin') {
+      statusRevision.current += 1;
+      return;
+    }
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    queueMicrotask(() => {
+      if (!active) return;
+      setStatusLoading(true);
+      setStatusError(false);
+      setQueueStatus(null);
+    });
+    async function pollStatus() {
+      const revision = statusRevision.current;
+      try {
+        const status = await fetchQueueStatus();
+        if (active && revision === statusRevision.current) {
+          setQueueStatus(status);
+          setStatusError(false);
+          setStatusLoading(false);
+        }
+      } catch {
+        if (active && revision === statusRevision.current) {
+          setQueueStatus(null);
+          setStatusError(true);
+          setStatusLoading(false);
+        }
+      } finally {
+        if (active) timer = setTimeout(pollStatus, 2000);
+      }
+    }
+    void pollStatus();
+    return () => {
+      active = false;
+      statusRevision.current += 1;
+      clearTimeout(timer);
+    };
+  }, [user]);
+
+  async function handleStopAll() {
+    statusRevision.current += 1;
+    setStopPending(true);
+    setStopError(null);
+    try {
+      const control = await stopAllScans();
+      statusRevision.current += 1;
+      setQueueStatus((previous) => previous ? {
+        ...previous,
+        runtime: { ...previous.runtime, ...control },
+      } : previous);
+    } catch (error) {
+      setStopError(error instanceof Error ? error.message : 'Stop request failed.');
+    } finally {
+      setStopPending(false);
+    }
+  }
+
   const totalFindings = scannedRepos.reduce((sum, r) => sum + r.findingsCount, 0);
+  const runtime = user?.role === 'admin' ? queueStatus?.runtime : undefined;
+  const scansStopping = runtime?.state === 'stopping';
+  const activeScanJobs = runtime ? Object.values(runtime.queues).reduce((total, queue) => total + queue.active + queue.queued, 0) : 0;
 
   // While the stored token is still being verified (getMe() in-flight),
   // render nothing rather than flashing the landing page for an
@@ -139,6 +202,40 @@ export function Dashboard() {
       <div className="mx-auto max-w-6xl px-6 py-6">
         <Tabs tabs={tabs} activeId={activeTab} onChange={(id) => setActiveTab(id)} />
 
+        {user.role === 'admin' && (
+          <section className="mt-4 space-y-3 border border-line bg-surface p-4" aria-label="Scan runtime">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-sm font-semibold">Global scan control</h2>
+              {statusLoading && <span className="text-sm text-text-dim">Loading scan status…</span>}
+              {statusError && <span role="alert" className="text-sm text-critical">Scan status unavailable. Check the API.</span>}
+              {runtime?.state === 'stopping' && <span role="status" className="text-sm text-warning">Stopping…</span>}
+              {runtime?.state === 'stopped' && <span role="status" className="text-sm text-text-dim">Stopped</span>}
+              {runtime?.state === 'ready' && activeScanJobs === 0 && <span className="text-sm text-text-dim">No scan jobs active.</span>}
+              {runtime?.state === 'ready' && activeScanJobs > 0 && (
+                <button
+                  type="button"
+                  onClick={handleStopAll}
+                  disabled={stopPending}
+                  className="border border-critical/50 px-3 py-1.5 text-sm font-medium text-critical hover:bg-critical/10 disabled:opacity-40"
+                >
+                  {stopPending ? 'Requesting stop…' : 'Stop all scans'}
+                </button>
+              )}
+            </div>
+            {stopError && <p role="alert" className="text-sm text-critical">Stop request failed: {stopError}</p>}
+            {runtime && (
+              <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+                {(['control', 'head', 'history'] as const).map((queue) => (
+                  <p key={queue} className="border border-line bg-surface-2 px-3 py-2">
+                    <span className="font-medium">{queue === 'control' ? 'Control' : queue.toUpperCase()} jobs</span>
+                    <span className="ml-2 font-mono text-text-dim">{runtime.queues[queue].active} active · {runtime.queues[queue].queued} queued</span>
+                  </p>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         <div className="mt-6 space-y-6">
           {activeTab === 'overview' && (
             <>
@@ -147,12 +244,12 @@ export function Dashboard() {
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
                     <StatTile label="Pending" value={queueStatus.pendingCandidates} />
                     <StatTile
-                      label="Scanning"
+                      label="Repo HEAD in progress"
                       value={queueStatus.scannedByStatus[EScanStatus.IN_PROGRESS] ?? 0}
                       tone="warning"
                     />
                     <StatTile
-                      label="Done"
+                      label="HEAD done"
                       value={queueStatus.scannedByStatus[EScanStatus.DONE] ?? 0}
                       tone="accent"
                     />
@@ -161,12 +258,15 @@ export function Dashboard() {
                       value={queueStatus.scannedByStatus[EScanStatus.FAILED] ?? 0}
                       tone="critical"
                     />
+                    <StatTile label="Cancelled" value={queueStatus.scannedByStatus[EScanStatus.CANCELLED] ?? 0} />
                     <StatTile label="Findings" value={totalFindings} tone={totalFindings > 0 ? 'critical' : 'default'} />
                   </div>
-                ) : (
+                ) : statusError ? (
                   <p className="border border-critical/50 bg-critical/10 px-4 py-3 text-sm text-critical">
                     Could not reach the API at {process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000'}.
                   </p>
+                ) : (
+                  <p className="border border-line bg-surface px-4 py-3 text-sm text-text-dim">Loading scan status…</p>
                 )
               ) : (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -181,8 +281,8 @@ export function Dashboard() {
 
               {user.role === 'admin' ? (
                 <>
-                  <ScanControls onJobStarted={handleJobStarted} />
-                  <ProgressPanel key={jobId} jobId={jobId} showStopButton />
+                  <ScanControls onJobStarted={handleJobStarted} scansStopping={scansStopping} />
+                  <ProgressPanel key={jobId} jobId={jobId} showStopButton onDone={() => setRefreshKey((key) => key + 1)} />
                 </>
               ) : (
                 <p className="border border-line bg-surface px-4 py-3 text-sm text-text-dim">
@@ -199,9 +299,9 @@ export function Dashboard() {
 
           {activeTab === 'repositories' && <ScannedReposTable repos={scannedRepos} />}
 
-          {activeTab === 'testing' && <TestingPanel isAdmin={user.role === 'admin'} />}
+          {activeTab === 'testing' && <TestingPanel isAdmin={user.role === 'admin'} scansStopping={scansStopping} />}
 
-          {activeTab === 'my-repos' && <MyReposPanel />}
+          {activeTab === 'my-repos' && <MyReposPanel scansStopping={scansStopping} />}
 
           {activeTab === 'admin' && user.role === 'admin' && <AdminPanel />}
         </div>

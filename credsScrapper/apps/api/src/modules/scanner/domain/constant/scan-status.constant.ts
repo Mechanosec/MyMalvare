@@ -3,4 +3,5 @@ export enum EScanStatus {
   IN_PROGRESS = 'in_progress',
   DONE = 'done',
   FAILED = 'failed',
+  CANCELLED = 'cancelled',
 }

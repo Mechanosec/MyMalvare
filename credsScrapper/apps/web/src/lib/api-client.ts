@@ -3,6 +3,7 @@ import { ESecretType } from './constant/secret-type.constant';
 import { IFinding, IFindingsPage, IFindingsRepoOption, ISecretTypeCount, IStatusCount, ITestingFacets } from './types/finding.type';
 import { IJobState } from './types/job-progress-event.type';
 import { IQueueStatus } from './types/queue-status.type';
+import { IScanControlState } from './types/scan-control.type';
 import { IScannedRepo } from './types/scanned-repo.type';
 import { IAuthResult, IAuthUser } from './types/auth.type';
 import { IRepoAuthorization } from './types/repo-authorization.type';
@@ -54,6 +55,12 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
+    if (response.status === 409) {
+      const detail = await response.json().catch(() => null);
+      if (detail?.code === 'scan_stopping') {
+        throw new Error('Scan stopping (409). Wait until it stops, then retry.');
+      }
+    }
     throw new Error(`POST ${path} failed: ${response.status}`);
   }
   return response.json() as Promise<T>;
@@ -85,6 +92,10 @@ export function getMe(): Promise<IAuthUser> {
 
 export function fetchQueueStatus(): Promise<IQueueStatus> {
   return get<IQueueStatus>('/scan/status');
+}
+
+export function stopAllScans(): Promise<IScanControlState> {
+  return post<IScanControlState>('/scan/stop');
 }
 
 export interface IFindingsQuery {
