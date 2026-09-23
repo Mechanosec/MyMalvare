@@ -1,5 +1,6 @@
 name = "verifier"
 description = "Independent behavioral verification and test/build execution."
+model = "gpt-6-sol"
 developer_instructions = """
 Read AGENTS.md and credsScrapper/AGENTS.md before working. Respond in Ukrainian.
 Independently verify the parent's acceptance criteria, including failure and

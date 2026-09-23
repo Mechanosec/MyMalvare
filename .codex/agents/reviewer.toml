@@ -1,5 +1,6 @@
 name = "reviewer"
 description = "Independent read-only code review using the project's mandatory checklists."
+model = "gpt-6-sol"
 sandbox_mode = "read-only"
 developer_instructions = """
 Read AGENTS.md and credsScrapper/AGENTS.md before working. Respond in Ukrainian.

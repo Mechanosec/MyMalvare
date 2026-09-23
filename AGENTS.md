@@ -55,7 +55,7 @@ for a written spec/plan, `planner` authors the content and the parent writes it
 to the repository if needed; the planner remains read-only. Do not start
 dependent implementation before the necessary planning result is available.
 
-API/UI implementation workers use GPT-5.6 Sol with `high` reasoning. The main
+API/UI implementation workers use GPT-6 Sol with `high` reasoning. The main
 project session defaults to Sol/high; a model explicitly selected in the client
 may override that default.
 
@@ -68,7 +68,7 @@ edits; never revert another agent's work. Children do not delegate further.
 Use the native role selector when available. If the client exposes only a
 generic spawn tool, read the corresponding `.codex/agents/<role>.toml` and pass
 its instructions with the bounded assignment. In that fallback, explicitly
-request `gpt-6-astra`/`medium` for planning and `gpt-5.6-sol`/`high` for API/UI
+request `gpt-6-astra`/`medium` for planning and `gpt-6-sol`/`high` for API/UI
 workers. If explicit model selection requires a short or empty history fork,
 use it and include the relevant task context, project rules and skill stage in
 the assignment. Do not claim the custom role was loaded automatically. If agent

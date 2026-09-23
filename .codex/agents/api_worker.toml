@@ -1,6 +1,6 @@
 name = "api_worker"
 description = "NestJS implementation worker for assigned API files."
-model = "gpt-5.6-sol"
+model = "gpt-6-sol"
 model_reasoning_effort = "high"
 developer_instructions = """
 Read AGENTS.md and credsScrapper/AGENTS.md before working. Respond in Ukrainian.
