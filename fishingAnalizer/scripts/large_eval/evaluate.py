@@ -2,12 +2,15 @@
 
 import argparse
 import json
+import os
 import statistics
 import sys
 import tempfile
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 from scripts.evaluate_local import STATUS, preflight, sha256, start_core
@@ -59,14 +62,30 @@ def aggregate(rows: list[dict]) -> dict:
     return output
 
 
+def laya_root() -> str:
+    endpoint = urlsplit(os.environ.get("LAYA_URL", "http://127.0.0.1:8000/v1/systemone"))
+    if (endpoint.scheme != "http" or endpoint.hostname not in ("127.0.0.1", "localhost", "::1")
+            or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
+            or endpoint.path != "/v1/systemone" or not endpoint.port):
+        raise ValueError("LAYA_URL must be a loopback /v1/systemone endpoint with an explicit port")
+    return f"http://{endpoint.netloc}"
+
+
 def _model_identity(root: Path, checkpoint: str) -> dict:
-    with urlopen("http://127.0.0.1:8000/health", timeout=5) as response:
+    endpoint = laya_root()
+    with urlopen(endpoint + "/health", timeout=5) as response:
         health = json.load(response)
     if health.get("status") != "ok" or "multilingual" not in health.get("loaded", []):
         raise RuntimeError("Laya Multilingual is not ready")
     if health.get("device") != "cuda":
         raise RuntimeError("GPU benchmark requires Laya on CUDA")
     if checkpoint == "base":
+        try:
+            with urlopen(endpoint + "/checkpoint", timeout=5):
+                raise RuntimeError("Active Laya is tuned; base benchmark cannot use it")
+        except HTTPError as error:
+            if error.code != 404:
+                raise
         revision_path = root / "localModel/.cache/huggingface/hub/models--convaiinnovations--laya/refs/main"
         if not revision_path.is_file():
             raise RuntimeError("Base checkpoint revision is unavailable")
@@ -78,10 +97,10 @@ def _model_identity(root: Path, checkpoint: str) -> dict:
     weights = Path(checkpoint).resolve() / "model.safetensors"
     if not weights.is_file():
         raise RuntimeError("Requested checkpoint weights are unavailable")
-    with urlopen("http://127.0.0.1:8000/checkpoint", timeout=5) as response:
+    with urlopen(endpoint + "/checkpoint", timeout=5) as response:
         active = json.load(response)
     digest = file_hash(weights)
-    if active.get("sha256") != digest:
+    if active.get("kind") != "tuned" or active.get("device") != "cuda" or active.get("sha256") != digest:
         raise RuntimeError("Active Laya checkpoint does not match requested weights")
     return {"kind": "tuned", "sha256": digest, "device": "cuda"}
 

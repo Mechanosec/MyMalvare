@@ -49,7 +49,8 @@ def build_app(checkpoint: Path, device: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("checkpoint", type=Path)
+    parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     device = os.environ.get("LAYA_DEVICE", "cuda")
     app = build_app(args.checkpoint, device)
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning", access_log=False)
+    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning", access_log=False)
