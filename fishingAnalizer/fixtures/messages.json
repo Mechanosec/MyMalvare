@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Звичайне повідомлення",
+    "sender": { "name": "Колега", "email": "colleague@example.org" },
+    "subject": "Зустріч команди",
+    "text": "Привіт! Зустрінемось у п'ятницю о 10:00.",
+    "links": [],
+    "attachments": [],
+    "truncated": false
+  },
+  {
+    "name": "Невідповідність видимої і фактичної адреси",
+    "sender": { "name": "Підтримка", "email": "support@example.org" },
+    "subject": "Перевірте обліковий запис",
+    "text": "Перейдіть за посиланням і введіть пароль для перевірки.",
+    "links": [{ "text": "https://example.org/login", "url": "https://signin.example.invalid/login" }],
+    "attachments": [],
+    "truncated": false
+  }
+]

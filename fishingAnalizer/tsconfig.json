@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node", "chrome"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["shared/**/*.ts", "extection/**/*.ts", "backend/**/*.ts", "scripts/**/*.mts", "test/**/*.ts"]
+}

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="uk">
+<head><meta charset="utf-8"><title>Fishing Analizer — налаштування</title>
+<style>
+  body{font:16px/1.5 system-ui,sans-serif;max-width:620px;margin:32px auto;padding:0 16px;color:#17212f}
+  label{display:block;margin:18px 0} input,select{display:block;width:100%;box-sizing:border-box;padding:8px;font:inherit}
+  button{padding:8px 13px;margin-right:8px;cursor:pointer} #status{min-height:1.5em}
+</style></head>
+<body>
+  <h1>Fishing Analizer</h1>
+  <p>Сервер має працювати на цьому комп’ютері. Вміст відкритого листа надсилається лише після окремої згоди у Gmail.</p>
+  <form id="settings">
+    <label>Адреса сервера <input id="server" type="url" required placeholder="http://127.0.0.1:8787"></label>
+    <label>Модель <select id="mode"><option value="jev">TypeSafe Jev через OpenRouter</option><option value="local">Локальна Laya Multilingual</option></select></label>
+    <button type="submit">Зберегти</button>
+    <button type="button" id="revoke">Відкликати всі згоди</button>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+  <script src="options.js"></script>
+</body></html>

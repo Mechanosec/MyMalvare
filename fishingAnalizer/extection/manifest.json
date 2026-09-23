@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Fishing Analizer — Gmail",
+  "version": "0.1.0",
+  "description": "Перевіряє лише відкриті листи Gmail на ознаки фішингу після згоди користувача.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["https://mail.google.com/*"],
+    "js": ["content.js"],
+    "css": ["styles.css"],
+    "run_at": "document_idle"
+  }],
+  "options_page": "options.html"
+}

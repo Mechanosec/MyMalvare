@@ -4,6 +4,8 @@
   виявлення витоків секретів у Git-репозиторіях.
 - [`searchDorking`](searchDorking/README.md) — CLI для побудови пошукових
   запитів і опційного пошуку через Google Custom Search API.
+- [`fishingAnalizer`](fishingAnalizer/README.md) — Chrome-розширення й локальний backend
+  для перевірки відкритих листів Gmail на ознаки фішингу.
 
 ## Робота з Codex
 

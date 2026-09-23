@@ -1,0 +1,20 @@
+{
+  "name": "fishing-analizer",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "test": "npm run build && node --test test/*.test.ts",
+    "build": "tsc --noEmit && node scripts/build.mts",
+    "start": "node dist/backend/index.js",
+    "start:backend": "node dist/backend/index.js",
+    "start:local": "bash localModel/start.sh"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.0",
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^26.6.2",
+    "esbuild": "^0.28.2",
+    "jsdom": "^26.1.0",
+    "typescript": "^7.0.2"
+  }
+}
