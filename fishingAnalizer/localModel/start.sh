@@ -31,5 +31,15 @@ export LAYA_PRELOAD=1
 export LAYA_MODELS=multilingual
 export LAYA_LOG_LEVEL=warning
 export USE_TF=0
-echo "Запускаю Laya Multilingual на $LAYA_DEVICE."
-exec "$model_dir/.venv/bin/laya-serve"
+checkpoint="${LAYA_CHECKPOINT:-base}"
+if [[ "$checkpoint" == base ]]; then
+  echo "Запускаю базову Laya Multilingual на $LAYA_DEVICE."
+  exec "$model_dir/.venv/bin/laya-serve"
+fi
+if [[ "$checkpoint" != /* ]]; then
+  echo 'LAYA_CHECKPOINT має бути base або абсолютним шляхом до checkpoint.' >&2
+  exit 1
+fi
+echo "Запускаю навчений checkpoint Laya Multilingual на $LAYA_DEVICE."
+cd "$model_dir/.."
+exec "$model_dir/.venv/bin/python" -m localModel.serve_checkpoint "$checkpoint"

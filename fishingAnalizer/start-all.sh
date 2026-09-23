@@ -51,6 +51,23 @@ laya_device() {
     python3 -c 'import json,sys; print(json.load(sys.stdin).get("device", "unknown"))' 2>/dev/null
 }
 
+checkpoint_matches() {
+  local requested="${LAYA_CHECKPOINT:-base}"
+  if [[ "$requested" == base ]]; then
+    ! curl -fsS --max-time 2 http://127.0.0.1:8000/checkpoint >/dev/null 2>&1
+    return
+  fi
+  if [[ "$requested" != /* || ! -f "$requested/model.safetensors" ]]; then
+    echo 'LAYA_CHECKPOINT має бути base або абсолютним шляхом до наявного checkpoint.' >&2
+    return 1
+  fi
+  local digest
+  digest="$(sha256sum "$requested/model.safetensors")"
+  digest="${digest%% *}"
+  curl -fsS --max-time 2 http://127.0.0.1:8000/checkpoint 2>/dev/null |
+    python3 -c 'import json,sys; active=json.load(sys.stdin); sys.exit(0 if active.get("sha256") == sys.argv[1] else 1)' "$digest" 2>/dev/null
+}
+
 torch_cuda_ready() {
   [[ -x localModel/.venv/bin/python ]] &&
     localModel/.venv/bin/python -I -c 'import pathlib,sys,sysconfig,torch; headers=(pathlib.Path(sysconfig.get_path("include"))/"Python.h").is_file(); sys.exit(0 if torch.cuda.is_available() and headers else 1)' >/dev/null 2>&1
@@ -100,6 +117,10 @@ echo 'Збираю Chrome-розширення й backend…'
 npm run build
 
 if laya_ready; then
+  if ! checkpoint_matches; then
+    echo 'На порту 8000 працює інший checkpoint Laya. Зупини старий процес і запусти скрипт знову.' >&2
+    exit 1
+  fi
   active_device="$(laya_device)"
   if [[ "$gpu_requested" == true && "$active_device" != cuda ]]; then
     echo 'Laya на порту 8000 працює на CPU. Зупини старий процес і запусти скрипт знову для GPU.' >&2
