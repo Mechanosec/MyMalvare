@@ -21,6 +21,25 @@ class LargeSplitTest(unittest.TestCase):
         self.assertEqual(split_for("spamassassin-easy_ham", True), "train")
         self.assertEqual(split_for("nazario-2024", False), "test")
 
+    def test_when_trec_is_unavailable_ham_stays_in_each_split(self):
+        records = [
+            SourceMail("nazario-2015", "phishing", "train", mail("A", "Invoice account update")),
+            SourceMail("nazario-2022", "phishing", "valid", mail("B", "Password reset alert")),
+            SourceMail("nazario-2024", "phishing", "test", mail("C", "Delivery notice action")),
+            SourceMail("spamassassin-easy_ham", "ham", "train", mail("D", "Team agenda next week")),
+            SourceMail("spamassassin-easy_ham_2", "ham", "valid", mail("E", "Holiday office closure")),
+            SourceMail("spamassassin-hard_ham", "ham", "test", mail("F", "Conference paper attached")),
+        ]
+        paths = CorpusPaths({}, Path("/unused"), {}, {})
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("scripts.large_eval.prepare.iter_sources", return_value=iter(records)):
+                result = prepare(paths, Path(temporary))
+            self.assertEqual(result["split_policy"], "spamassassin_only")
+            for split in ("train", "validation", "test"):
+                labels = {json.loads(line)["label"] for line in
+                          (Path(temporary) / f"{split}.jsonl").read_text().splitlines()}
+                self.assertEqual(labels, {"phishing", "ham"})
+
     def test_prepare_is_stable_and_prevents_cross_split_leakage(self):
         records = [
             SourceMail("nazario-2015", "phishing", "train-copy", mail("Urgent", "Verify your account today")),

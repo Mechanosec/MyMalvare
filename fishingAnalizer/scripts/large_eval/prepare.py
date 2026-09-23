@@ -119,7 +119,8 @@ class Candidate:
     message: dict
 
 
-def choose_unique(candidates: list[Candidate], trec07_in_test: bool) -> tuple[list[tuple[Candidate, str]], Counter]:
+def choose_unique(candidates: list[Candidate], trec07_in_test: bool,
+                  spamassassin_only: bool = False) -> tuple[list[tuple[Candidate, str]], Counter]:
     parent = list(range(len(candidates)))
     buckets: dict[tuple[int, int], list[int]] = defaultdict(list)
     exact: dict[str, int] = {}
@@ -152,6 +153,9 @@ def choose_unique(candidates: list[Candidate], trec07_in_test: bool) -> tuple[li
     for index, candidate in enumerate(candidates):
         groups[root(index)].append(candidate)
     rank = {"test": 0, "validation": 1, "train": 2}
+    def assigned(source: str) -> str:
+        return split_for(source, trec07_in_test, spamassassin_only)
+
     kept = []
     excluded = Counter()
     for group in groups.values():
@@ -159,8 +163,8 @@ def choose_unique(candidates: list[Candidate], trec07_in_test: bool) -> tuple[li
             excluded["conflicting_label"] += len(group)
             continue
         candidate = min(group, key=lambda item: (
-            rank[split_for(item.source, trec07_in_test)], item.source, item.source_id))
-        kept.append((candidate, split_for(candidate.source, trec07_in_test)))
+            rank[assigned(item.source)], item.source, item.source_id))
+        kept.append((candidate, assigned(candidate.source)))
         excluded["duplicate"] += len(group) - 1
     kept.sort(key=lambda pair: (rank[pair[1]], pair[0].source, pair[0].id))
     return kept, excluded
@@ -197,11 +201,13 @@ def prepare(paths: CorpusPaths, out_dir: Path, seed: int = 20260924) -> dict:
         candidates.append(Candidate(exact, simhash, source_mail.source,
                                     source_mail.source_id, source_mail.label, message))
 
-    kept, dedup_excluded = choose_unique(candidates, False)
+    spamassassin_only = (not any(candidate.source.startswith("trec") for candidate in candidates)
+                         and any(candidate.source.startswith("spamassassin-") for candidate in candidates))
+    kept, dedup_excluded = choose_unique(candidates, False, spamassassin_only)
     trec07_in_test = (sum(split == "test" for _, split in kept) < 50_000
                       and any(candidate.source == "trec07" for candidate in candidates))
     if trec07_in_test:
-        kept, dedup_excluded = choose_unique(candidates, True)
+        kept, dedup_excluded = choose_unique(candidates, True, spamassassin_only)
     excluded.update(dedup_excluded)
 
     rows_by_split: dict[str, list[dict]] = {split: [] for split in ("train", "validation", "test")}
@@ -210,7 +216,8 @@ def prepare(paths: CorpusPaths, out_dir: Path, seed: int = 20260924) -> dict:
                                      "label": candidate.label, "message": candidate.message})
     manifest = {
         "seed": seed,
-        "split_policy": "trec07_in_test" if trec07_in_test else "trec07_in_train",
+        "split_policy": ("spamassassin_only" if spamassassin_only else
+                         "trec07_in_test" if trec07_in_test else "trec07_in_train"),
         "source_sha256": source_hashes(paths),
         "source_urls": source_urls(paths),
         "source_formats": {name: ("curated_csv" if path.suffix == ".csv" else "original_archive")

@@ -5,7 +5,7 @@ import re
 import unicodedata
 
 
-def split_for(source: str, trec07_in_test: bool) -> str:
+def split_for(source: str, trec07_in_test: bool, spamassassin_only: bool = False) -> str:
     if source in {"nazario-2024", "nazario-2025", "phishing-pot", "trec05", "trec06"}:
         return "test"
     if source in {"nazario-2022", "nazario-2023"}:
@@ -13,6 +13,10 @@ def split_for(source: str, trec07_in_test: bool) -> str:
     if source == "trec07":
         return "test" if trec07_in_test else "train"
     if source.startswith("spamassassin-"):
+        if spamassassin_only:
+            return {"spamassassin-easy_ham": "train",
+                    "spamassassin-easy_ham_2": "validation",
+                    "spamassassin-hard_ham": "test"}[source]
         if trec07_in_test and source != "spamassassin-hard_ham":
             return "train"
         return "validation"
