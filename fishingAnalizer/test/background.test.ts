@@ -5,8 +5,8 @@ const { createMessageHandler } = require('../dist/test/background.js');
 function fakeChrome(consented = true) {
   return {
     storage: {
-      sync: { get: async () => ({ serverUrl: 'http://127.0.0.1:8787', mode: 'jev' }) },
-      local: { get: async () => ({ consents: consented ? { 'http://127.0.0.1:8787|jev': true } : {} }) }
+      sync: { get: async (): Promise<{ serverUrl?: string; mode?: string }> => ({ serverUrl: 'http://127.0.0.1:8787', mode: 'jev' }) },
+      local: { get: async (): Promise<{ consents: Record<string, boolean> }> => ({ consents: consented ? { 'http://127.0.0.1:8787|jev': true } : {} }) }
     }
   };
 }
@@ -75,4 +75,21 @@ test('never sends mail after revocation even if an earlier grant finishes last',
   const result = await handler(request, sender);
   assert.equal(sent, false);
   assert.equal(result.error.code, 'CONSENT_REQUIRED');
+});
+
+test('fresh installation uses local Laya without an OpenRouter key', async () => {
+  const chromeApi = fakeChrome();
+  chromeApi.storage.sync.get = async () => ({});
+  chromeApi.storage.local.get = async () => ({ consents: { 'http://127.0.0.1:8787|local': true } });
+  let sentMode;
+  const handler = createMessageHandler({ chromeApi, fetcher: async (_url: string, init: RequestInit) => {
+    sentMode = JSON.parse(String(init.body)).mode;
+    return { ok: true, json: async () => ({
+      requestId: 'abc', mode: 'local', model: 'synthetic', status: 'review',
+      observations: [], limitations: [], elapsedMs: 1,
+    }) };
+  } });
+  const result = await handler({ ...request, mode: 'local' }, sender);
+  assert.equal(sentMode, 'local');
+  assert.equal(result.status, 'review');
 });

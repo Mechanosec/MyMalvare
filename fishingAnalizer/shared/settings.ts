@@ -1,7 +1,7 @@
 import type { Mode } from './contracts';
 
 export type Settings = { serverUrl: string; mode: Mode };
-export const DEFAULT_SETTINGS: Settings = { serverUrl: 'http://127.0.0.1:8787', mode: 'jev' };
+export const DEFAULT_SETTINGS: Settings = { serverUrl: 'http://127.0.0.1:8787', mode: 'local' };
 
 export function serverEndpoint(value: string): string | null {
   try {

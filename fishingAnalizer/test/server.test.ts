@@ -173,6 +173,13 @@ test('rejects a non-extension Origin on the health route', async () => {
   });
 });
 
+test('health response identifies this backend for the launcher', async () => {
+  await withServer(async () => { throw Error('model should not be called'); }, async base => {
+    const response = await fetch(`${base}/health`);
+    assert.deepEqual(await response.json(), { ok: true, service: 'fishingAnalizer' });
+  });
+});
+
 test('rejects malformed JSON without a verdict', async () => {
   await withServer(async () => { throw Error('model should not be called'); }, async base => {
     const response = await fetch(`${base}/analyze`, {

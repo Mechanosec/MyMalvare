@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "test": "npm run build && node --test test/*.test.ts",
+    "test": "npm run build && node --test test/*.test.ts && python3 -m unittest discover -s test -p 'evaluate_local_test.py'",
     "build": "tsc --noEmit && node scripts/build.mts",
     "start": "node dist/backend/index.js",
     "start:backend": "node dist/backend/index.js",

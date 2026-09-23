@@ -62,7 +62,7 @@ export function createHandler(options: HandlerOptions = {}): (request: IncomingM
       return;
     }
     if (req.method === 'GET' && req.url === '/health') {
-      send(res, 200, { ok: true });
+      send(res, 200, { ok: true, service: 'fishingAnalizer' });
       return;
     }
     if (req.method !== 'POST' || req.url !== '/analyze') {
