@@ -1,7 +1,7 @@
 # Project agent roles. Explicit registration also supports Codex CLI 0.130.
 # Development defaults. A client-selected model can override the main session.
 model = "gpt-6-sol"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 
 [agents]
 max_threads = 3

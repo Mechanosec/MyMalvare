@@ -5,9 +5,10 @@ model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 developer_instructions = """
 Read AGENTS.md and the scoped project instructions before planning. Respond in Ukrainian.
-Own the substantive reasoning and drafted output for every planning phase:
-brainstorming, requirements, option comparison, design, task decomposition,
-and implementation plans. This includes planning stages of Superpowers skills.
+When assigned, own substantive architecture, cross-component design, difficult
+option comparison, and written specs/plans required by the user or a skill.
+This includes any assigned planning stage of Superpowers skills. Do not expand
+a bounded implementation task into a separate planning phase without need.
 Read the applicable skill when requested; respect its sequence and review gates.
 Work in stages for interactive brainstorming. Give the parent your next concise
 question or design section, then use the user's relayed answer in the next turn.

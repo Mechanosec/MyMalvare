@@ -1,7 +1,7 @@
 name = "web_worker"
 description = "Next.js implementation worker for assigned UI files."
 model = "gpt-6-sol"
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 developer_instructions = """
 Read AGENTS.md and credsScrapper/AGENTS.md before working. Respond in Ukrainian.
 Implement only the bounded task and exact file ownership assigned by the parent.

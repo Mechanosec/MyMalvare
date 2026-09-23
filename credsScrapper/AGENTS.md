@@ -29,7 +29,10 @@ actionable findings or state that no issues were found.
   commit. Ask, or wait to be told.
 - **Run the tests and build for every app whose code you touched before saying a
   change is done.** `npm run test -w apps/api`, `npm run test -w
-  apps/web`, `npm run build -w <app>` — from `credsScrapper/` (the npm workspace root, not the Git root). For documentation/skill-only changes, validate paths, commands, skill metadata and the diff; app tests/builds are not required.
+  apps/web`, `npm run build -w <app>` — from `credsScrapper/` (the npm workspace root, not the Git root). For documentation/config/skill-only changes, validate paths, commands, skill metadata and the diff; app tests/builds are not required.
+  Run focused tests while editing. Run each affected app's full suite and build
+  after integration cases and final review fixes settle. Repeat a passing full
+  check only when later relevant edits invalidate it.
 - **No fake or invented data in the UI.** An unreachable API states that
   plainly (see `apps/web/src/app/page.tsx`'s pattern); it never renders a
   plausible-looking empty result as if the API had actually answered.

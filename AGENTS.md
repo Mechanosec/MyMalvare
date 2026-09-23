@@ -23,12 +23,11 @@ There is no root `package.json`. Run npm commands in the relevant project.
 
 ## Agent delegation
 
-The user wants useful agent delegation as the normal project workflow. Delegate
-bounded independent work when it can run alongside useful parent work; do not
-ask for delegation permission on every task. Handle tiny or tightly coupled
-changes locally. Use the smallest useful team, normally 1–2 children, at most
-3 concurrently. Do not spawn an agent just to wait for it, except for the
-required planner handoff described below.
+Delegate bounded independent work only when it can run alongside useful parent
+work and has a clear output worth the extra agent context. Do not ask for
+delegation permission on every task. Handle tiny or tightly coupled changes
+locally. Use the smallest useful team, normally 1–2 children, at most 3
+concurrently. Do not spawn an agent just to wait for it.
 
 Project roles are registered in `.codex/config.toml`:
 
@@ -39,25 +38,28 @@ Project roles are registered in `.codex/config.toml`:
 - `verifier`: independent reproduction, behavioral tests and builds.
 - `reviewer`: read-only correctness, architecture, secret-handling and simplicity review.
 
-For every actual planning phase, hand off its substantive reasoning and authored
-output to `planner`: brainstorming, requirements exploration, option comparison,
-architecture/design, task decomposition, implementation plans, and planning
-stages of Superpowers skills. This includes small plans when the user asks for
-one. Routine implementation choices and the parent's coordination do not need
-a separate plan. The parent may read code and gather facts in parallel, but
-must not present a Sol-authored plan as though Astra wrote it.
+Use `planner` for substantive architecture, cross-component design, difficult
+option comparison, or a written spec/implementation plan required by the user
+or an applicable skill. For a bounded change with an already approved approach,
+the parent handles routine implementation choices and short task decomposition
+without a planning agent. Do not turn every small plan into a separate agent
+handoff. The parent may read code and gather facts in parallel, but must not
+present a Sol-authored plan as though Astra wrote it.
 
-For interactive brainstorming, keep `planner` active across turns: relay the
-user's answers and relevant constraints to it, bring its next question/design
-back to the user, and continue until the planning workflow is complete. Follow
-any applicable skill stages or required review gates. If a planning skill calls
-for a written spec/plan, `planner` authors the content and the parent writes it
-to the repository if needed; the planner remains read-only. Do not start
-dependent implementation before the necessary planning result is available.
+When substantive interactive brainstorming needs `planner`, keep it active
+across turns and relay only decisions and relevant constraints, not the entire
+transcript. Follow applicable skill stages and required review gates, but do
+not add project-specific approval gates or ask again for a decision already
+made at the same stage. If a skill requires a written spec/plan, `planner`
+authors it and the parent writes it if needed; the planner remains read-only.
+Do not start dependent implementation before a required approval.
 
-API/UI implementation workers use GPT-6 Sol with `high` reasoning. The main
-project session defaults to Sol/high; a model explicitly selected in the client
-may override that default.
+The main project session defaults to GPT-6 Sol/`medium`. API workers use
+Sol/`high` for scanner, authorization, and concurrency-sensitive changes;
+web workers use Sol/`medium`, and verifier uses `medium`. Reviewer uses
+Sol/`high` for correctness and security. Raise effort for a specific complex
+assignment when justified; a model explicitly selected in the client may
+override the main default.
 
 The parent owns requirements, shared API contracts, integration and the final
 report. Each delegation must give the goal, acceptance criteria, exact writable
@@ -67,20 +69,20 @@ edits; never revert another agent's work. Children do not delegate further.
 
 Use the native role selector when available. If the client exposes only a
 generic spawn tool, read the corresponding `.codex/agents/<role>.toml` and pass
-its instructions with the bounded assignment. In that fallback, explicitly
-request `gpt-6-astra`/`medium` for planning and `gpt-6-sol`/`high` for API/UI
-workers. If explicit model selection requires a short or empty history fork,
-use it and include the relevant task context, project rules and skill stage in
-the assignment. Do not claim the custom role was loaded automatically. If agent
-tools or the required model are unavailable, disclose the limitation; do not
-silently substitute Sol for Astra planning.
+its instructions and configured model/effort with the bounded assignment. Use
+a short or empty history fork with the relevant task context to avoid copying
+the whole conversation. Do not claim the custom role loaded automatically.
+If a required agent/model is unavailable, disclose the limitation.
 
-Workers may run focused checks while implementing. Give the verifier exclusive
-ownership of full tests/builds after the relevant edits settle. Serialize checks
-that share build artifacts, a database or browser. Use isolated test data, never
-real leaked keys, and never include secret values in inter-agent messages.
-An independent reviewer is useful for substantial or security-sensitive changes;
-mandatory project review checklists still apply when the parent reviews locally.
+Workers may run focused checks while implementing. Give one verifier exclusive
+ownership of full tests/builds after code, integration cases and review fixes
+for that app settle; repeat a passing full check only after relevant changes.
+Serialize checks that share build artifacts, a database or browser. Use isolated
+test data, never real leaked keys, and never include secret values in
+inter-agent messages. For substantial or security-sensitive changes, use one
+integrated final review; apply all mandatory project checklists in that pass,
+including when the parent reviews locally. Request an earlier review only for
+a concrete risk that cannot wait until integration.
 
 The parent must inspect agent results and resolve findings before completion.
 Only the parent publishes, and only with user authorization for that action.
@@ -89,25 +91,34 @@ See [the setup guide](docs/codex-agents.md) for examples and verification.
 
 ## Task orchestration
 
-For work that needs a plan, let `planner` prepare it and satisfy any applicable
-design or plan review gate before implementation. Once the required plan is
-approved, the parent carries the task through implementation, verification,
-review and fixes without asking to proceed at each handoff. For work that does
-not need a plan, start at implementation. Respect skill-specific gates; this
-workflow does not bypass them.
+For work that needs a substantive plan, let `planner` prepare it and satisfy
+applicable design/plan review gates. Once the required stage is approved, carry
+the task through implementation, verification, review and fixes without asking
+to proceed at each handoff. For already scoped work that needs no new plan,
+start at implementation. Respect skill-specific gates; do not invent extra
+ones or re-open an approved decision without a scope change.
 
-Before assigning work, the parent records the task's acceptance criteria,
-dependencies, file ownership and required checks in the agent assignment or
-current task context. Spawn only agents with useful, bounded work. Parallelize
-independent edits only after shared contracts and file ownership are settled.
-After edits settle, one verifier owns full checks and their shared resources.
-Use an independent reviewer for substantial or security-sensitive changes;
-apply mandatory project review checklists even when reviewing locally.
+Before assigning work, the parent records acceptance criteria, dependencies,
+file ownership and required checks in the assignment or current task context.
+Spawn only agents with useful, bounded work. Once a shared API contract is
+stable, start independent UI work while backend implementation continues; the
+endpoint need not be finished first. One file has one writer. Batch related
+feedback to a worker at meaningful milestones instead of sending a message
+after every small result. While agents work, do independent local work; if none
+is available, wait for a milestone with a bounded wait rather than repeated
+30-second polls, keeping user updates within 60 seconds.
 
-If a check fails or review finds an actionable issue, send the evidence to the
-responsible worker, integrate the fix and rerun the affected checks plus any
-required full checks. The parent decides whether acceptance criteria are met;
-an agent's completion message alone is not proof. Continue until the task is
+Run focused tests during implementation and high-risk integration scenarios
+before the final full suites. After final review fixes settle, one verifier
+owns full checks and shared resources. Do not repeat green full checks for
+unchanged code. Apply mandatory project review checklists in the integrated
+review even when reviewing locally.
+
+If a check fails or review finds an actionable issue, send grouped evidence to
+the responsible worker, integrate the fix and rerun affected focused checks
+plus any full checks invalidated by the change. The parent decides whether
+acceptance criteria are met; an agent's completion message alone is not proof.
+Continue until the task is
 ready or a real blocker remains. Ask the user only for essential missing input,
 a change of scope or an external decision that cannot be made from the task.
 Keep the current stage and next action clear in task updates so interrupted work
