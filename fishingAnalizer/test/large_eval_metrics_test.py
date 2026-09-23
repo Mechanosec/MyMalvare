@@ -7,10 +7,18 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.large_eval.metrics import summarize, wilson_interval
-from scripts.large_eval.evaluate import _model_identity, aggregate, laya_root
+from scripts.large_eval.evaluate import _model_identity, _verify_training_manifest, aggregate, laya_root
 
 
 class BenchmarkMetricsTest(unittest.TestCase):
+    def test_tuned_checkpoint_must_match_frozen_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            checkpoint = Path(temporary)
+            (checkpoint / "training.json").write_text('{"manifest_sha256":"expected"}')
+            _verify_training_manifest(str(checkpoint), "expected")
+            with self.assertRaises(RuntimeError):
+                _verify_training_manifest(str(checkpoint), "different")
+
     def test_model_endpoint_stays_on_loopback_and_supports_alternate_port(self):
         with patch.dict("os.environ", {"LAYA_URL": "http://127.0.0.1:8010/v1/systemone"}):
             self.assertEqual(laya_root(), "http://127.0.0.1:8010")

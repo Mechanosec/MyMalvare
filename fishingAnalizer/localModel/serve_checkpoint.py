@@ -35,6 +35,9 @@ def checkpoint_info(checkpoint: Path, device: str) -> dict:
 def build_app(checkpoint: Path, device: str):
     info = checkpoint_info(checkpoint, device)
     agent = Agent(str(checkpoint.resolve()), device=device)
+    if device == "cuda" and (agent.device.type != "cuda" or
+                             next(agent.model.parameters()).device.type != "cuda"):
+        raise RuntimeError("Laya checkpoint did not stay on CUDA")
     router = Router(device=device)
     router.attach("multilingual", agent)
     app = create_app(router)

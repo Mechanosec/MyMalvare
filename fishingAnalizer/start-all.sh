@@ -54,8 +54,9 @@ laya_device() {
 checkpoint_matches() {
   local requested="${LAYA_CHECKPOINT:-base}"
   if [[ "$requested" == base ]]; then
-    ! curl -fsS --max-time 2 http://127.0.0.1:8000/checkpoint >/dev/null 2>&1
-    return
+    [[ "$(curl -sS --max-time 2 -o /dev/null -w '%{http_code}' \
+      http://127.0.0.1:8000/checkpoint 2>/dev/null)" == 404 ]]
+    return $?
   fi
   if [[ "$requested" != /* || ! -f "$requested/model.safetensors" ]]; then
     echo 'LAYA_CHECKPOINT має бути base або абсолютним шляхом до наявного checkpoint.' >&2

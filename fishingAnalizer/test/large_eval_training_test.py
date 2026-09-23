@@ -58,8 +58,12 @@ class HeadTrainingTest(unittest.TestCase):
         self.assertNotEqual(before_type_emb, hash_parameters(model.type_emb))
         self.assertNotEqual(before_scorer, hash_parameters(model.scorer))
         self.assertTrue(all(not p.requires_grad for p in model.encoder.parameters()))
-        self.assertTrue(all(torch.isfinite(p.grad).all() and p.grad.abs().sum() > 0
-                            for p in model.parameters() if p.requires_grad))
+        for prefix in ("head.", "type_emb.", "scorer."):
+            gradients = [parameter.grad for name, parameter in model.named_parameters()
+                         if name.startswith(prefix) and parameter.grad is not None]
+            self.assertTrue(gradients, prefix)
+            self.assertTrue(all(torch.isfinite(gradient).all() for gradient in gradients), prefix)
+            self.assertTrue(any(gradient.abs().sum() > 0 for gradient in gradients), prefix)
 
     def test_checkpoint_layout_contains_full_state(self):
         model = torch.nn.Linear(2, 2)

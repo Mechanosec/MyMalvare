@@ -120,11 +120,21 @@ def _worker_result(worker, message: dict) -> dict:
     }
 
 
+def _verify_training_manifest(checkpoint: str, manifest_hash: str) -> None:
+    if checkpoint == "base":
+        return
+    metadata = json.loads((Path(checkpoint) / "training.json").read_text())
+    if metadata.get("manifest_sha256") != manifest_hash:
+        raise RuntimeError("Tuned checkpoint was trained on a different frozen manifest")
+
+
 def run(data_dir: Path, split: str, checkpoint: str, out: Path) -> dict:
     root = Path(__file__).resolve().parents[2]
     manifest_path = data_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     expected_ids = manifest["ids_by_split"][split]
+    manifest_hash = sha256(manifest_path)
+    _verify_training_manifest(checkpoint, manifest_hash)
     model = _model_identity(root, checkpoint)
     rows = []
     started = time.monotonic()
@@ -151,7 +161,7 @@ def run(data_dir: Path, split: str, checkpoint: str, out: Path) -> dict:
     report = {
         "split": split,
         "checkpoint": model,
-        "manifest_sha256": sha256(manifest_path),
+        "manifest_sha256": manifest_hash,
         "adapter_sha256": sha256(root / "backend/adapters.ts"),
         "source_sha256": manifest["source_sha256"],
         "sample_count": len(rows),

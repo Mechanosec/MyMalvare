@@ -100,6 +100,32 @@ python3 scripts/evaluate_local.py --download --all > /tmp/fishing-laya-evaluatio
 
 Режим `core` (за замовчуванням) використовує справжню функцію аналізу backend і одним запитом до локальної Laya отримує обидва результати: початковий вибір моделі та підсумок після серверних правил. Для окремої перевірки HTTP-інтеграції доступний `--transport http`; він робить два запити на лист і працює повільніше. `--per-source 30` замість `--all` дає малий пілот. Це перевірка сирих публічних листів після наближеного перетворення до видимих полів Gmail, а не перевірка роботи Gmail DOM на реальних сторінках. Мітки корпусів можуть містити помилки; старий ham і новіший phishing створюють зміщення. Статус `review` означає потребу ручної перевірки, а не вдале виявлення. Результати CPU, GPU і таблиці за джерелами є в [звіті бенчмарка](docs/local-model-evaluation.md).
 
+### Розширений бенчмарк і навчання ваг
+
+[Окремий звіт](docs/laya-large-benchmark.md) містить джерела, розділення даних, таблицю п'яти епох, контрольний прогін п'ятої та межі висновку. Код бенчмарку — `scripts/large_eval/`, навчання — `localModel/train_head.py`. Корпуси завантажуйте лише в `localModel/.cache/corpora/`: `phishing-2015` … `phishing-2025`, ранні Nazario `.mbox`, каталог `phishing_pot/email/` та три архіви `20030228_easy_ham.tar.bz2`, `20030228_easy_ham_2.tar.bz2`, `20030228_hard_ham.tar.bz2`. Посилання на першоджерела є у звіті. Оригінальні TREC архіви на момент прогону були недоступні; перероблені CSV не замінюють їх автоматично.
+
+```bash
+python3 -m scripts.large_eval.prepare \
+  --data-dir localModel/.cache/corpora \
+  --out-dir localModel/.cache/evaluation
+localModel/.venv/bin/python -m localModel.train_head --smoke
+localModel/.venv/bin/python -m localModel.train_head \
+  --data-dir localModel/.cache/evaluation \
+  --out-dir localModel/.cache/checkpoints
+```
+
+Для перевірки конкретних ваг на GPU запустіть в одному терміналі `LAYA_DEVICE=cuda localModel/.venv/bin/python -m localModel.serve_checkpoint "$PWD/localModel/.cache/checkpoints/epoch-05" --port 8010`, а в іншому:
+
+```bash
+LAYA_URL=http://127.0.0.1:8010/v1/systemone \
+  python3 -m scripts.large_eval.evaluate \
+  --split validation \
+  --checkpoint "$PWD/localModel/.cache/checkpoints/epoch-05" \
+  --out localModel/.cache/evaluation/results/validation-epoch-05.json
+```
+
+Для `test` змініть `--split test` і вихідний файл **лише після** фіксації вибору за валідацією. Повторне навчання потребує нового порожнього `--out-dir`: контрольні точки не перезаписуються. `LAYA_CHECKPOINT="$PWD/localModel/.cache/checkpoints/epoch-05" ./start-all.sh` запускає цю версію для розширення, якщо порт `8000` не зайнятий іншою Laya. Повні листи й ваги лишаються в ignored `.cache/`.
+
 ## Обмеження
 
 Gmail може змінити DOM-класи, і тоді доведеться оновити селектори в `extection/dom.ts`. Розширення читає тільки видимі розгорнуті листи: приховані цитати, вміст вкладень, заголовки SPF/DKIM, репутація доменів і вся скринька не перевіряються. Посилання не відкриваються. Текст листа не записується в лог чи на диск; у пам’яті розширення зберігаються лише хеш і результат на час роботи вкладки.

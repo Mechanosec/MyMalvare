@@ -2,6 +2,7 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 try:
@@ -10,12 +11,20 @@ except ImportError:
     laya = None
 
 if laya is not None:
+    import torch
     from fastapi.testclient import TestClient
     from localModel import serve_checkpoint
 
 
 @unittest.skipIf(laya is None, "Laya serving tests use localModel/.venv/bin/python")
 class CheckpointServerTest(unittest.TestCase):
+    def test_cuda_request_rejects_an_agent_that_landed_on_cpu(self):
+        fake = SimpleNamespace(device=SimpleNamespace(type="cpu"), model=torch.nn.Linear(1, 1))
+        with patch.object(serve_checkpoint, "checkpoint_info", return_value={"kind": "tuned"}), \
+             patch.object(serve_checkpoint, "Agent", return_value=fake):
+            with self.assertRaises(RuntimeError):
+                serve_checkpoint.build_app(Path("/synthetic"), "cuda")
+
     def test_invalid_checkpoint_fails_before_agent_load(self):
         with patch.object(serve_checkpoint, "Agent") as agent:
             with self.assertRaises(FileNotFoundError):
