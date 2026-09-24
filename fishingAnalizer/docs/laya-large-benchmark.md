@@ -2,6 +2,8 @@
 
 Дата: 24 вересня 2026 року. Це вимірювання локальної Laya Multilingual і правил нашого backend на публічних листах після перетворення MIME на видимі поля Gmail. TypeSafe Jev тут не викликався.
 
+Це перший, менший експеримент. Пізніше оригінальні TREC-архіви знайшлися у публічних копіях; [новий звіт](laya-trec-original-benchmark.md) містить окремий тест на 51 447 листах. Поділи даних змінилися, тож наведені тут цифри не є прямим «до/після» для нового звіту.
+
 ## Дані та межі вибірки
 
 Використано [оригінальні Nazario mbox](https://monkey.org/~jose/phishing/) 2005–2025 років ([умови CC BY 4.0](https://monkey.org/~jose/phishing/README.txt)), публічні 8 614 `.eml` із [Phishing Pot](https://github.com/rf-peixoto/phishing_pot) ([CC BY-NC 4.0](https://github.com/rf-peixoto/phishing_pot/blob/main/LICENSE), commit `49f63777126b0bdb9eb1f6e770a5c3f9df2b0306`) і три [SpamAssassin ham архіви](https://spamassassin.apache.org/old/publiccorpus/readme.html). Усі дані й контрольні точки лежать лише в ignored `localModel/.cache/`; повний текст, адреси та URL листів у Git або звіт не потрапляють. У Phishing Pot число 10 362 в README включає приватні зразки, тому ми його не використовуємо як кількість доступних листів. У комерційному дослідженні або продукті використання Phishing Pot потребує окремої перевірки прав.

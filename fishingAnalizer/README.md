@@ -102,7 +102,7 @@ python3 scripts/evaluate_local.py --download --all > /tmp/fishing-laya-evaluatio
 
 ### Розширений бенчмарк і навчання ваг
 
-[Окремий звіт](docs/laya-large-benchmark.md) містить джерела, розділення даних, таблицю п'яти епох, контрольний прогін п'ятої та межі висновку. Код бенчмарку — `scripts/large_eval/`, навчання — `localModel/train_head.py`. Корпуси завантажуйте лише в `localModel/.cache/corpora/`: `phishing-2015` … `phishing-2025`, ранні Nazario `.mbox`, каталог `phishing_pot/email/` та три архіви `20030228_easy_ham.tar.bz2`, `20030228_easy_ham_2.tar.bz2`, `20030228_hard_ham.tar.bz2`. Посилання на першоджерела є у звіті. Оригінальні TREC архіви на момент прогону були недоступні; перероблені CSV не замінюють їх автоматично.
+[Перший звіт](docs/laya-large-benchmark.md) описує початкову вибірку; [новий бенчмарк](docs/laya-trec-original-benchmark.md) охоплює 51 447 незалежних тестових листів з оригінальними TREC-архівами. Код бенчмарку — `scripts/large_eval/`, навчання — `localModel/train_head.py`. Корпуси завантажуйте лише в `localModel/.cache/corpora/`: `phishing-2015` … `phishing-2025`, ранні Nazario `.mbox`, каталог `phishing_pot/email/`, три архіви SpamAssassin та `trec05p-1.tgz`, `trec06p.tgz`, `trec07p.tgz`. Джерела й контрольні суми є у звітах. Наведені нижче команди відтворюють перший протокол; точний протокол нового бенчмарку описаний в окремому звіті.
 
 ```bash
 python3 -m scripts.large_eval.prepare \

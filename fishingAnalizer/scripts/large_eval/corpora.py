@@ -45,24 +45,32 @@ def iter_phishing_pot(root: Path) -> Iterator[SourceMail]:
 
 def iter_trec_ham(path: Path, source: str) -> Iterator[SourceMail]:
     with tarfile.open(path, "r:*") as archive:
-        members = {member.name: member for member in archive.getmembers()}
-        index_names = [name for name in members if name.endswith("/full/index")]
-        if len(index_names) != 1:
+        indexes = [member for member in archive.getmembers()
+                   if member.name.endswith("/full/index")]
+        if len(indexes) != 1:
             raise ValueError("TREC full index is missing or ambiguous")
-        prefix = index_names[0][:-len("full/index")]
-        index_file = archive.extractfile(members[index_names[0]])
+        prefix = indexes[0].name[:-len("full/index")]
+        index_file = archive.extractfile(indexes[0])
         if index_file is None:
             raise ValueError("TREC index is unreadable")
+        ham_names = set()
         for line in index_file.read().decode("ascii", errors="replace").splitlines():
-            match = re.fullmatch(r"(ham|spam) \.\./data/(inmail\.\d+)", line.strip())
-            if match is None or match.group(1) != "ham":
+            match = re.fullmatch(r"(ham|spam) \.\./data/(inmail\.\d+|\d{3}/\d{3})", line.strip())
+            if match is not None and match.group(1) == "ham":
+                ham_names.add(match.group(2))
+
+    # Gzip tar seeks decompress from the beginning. Read files once in archive order.
+    with tarfile.open(path, "r|*") as archive:
+        for member in archive:
+            if not member.name.startswith(prefix + "data/"):
                 continue
-            member = members.get(prefix + "data/" + match.group(2))
-            if member is None or not member.isfile() or member.size > MAX_MAIL_BYTES:
+            source_id = member.name[len(prefix + "data/"):]
+            if source_id not in ham_names or not member.isfile() or member.size > MAX_MAIL_BYTES:
                 continue
+            ham_names.remove(source_id)
             stream = archive.extractfile(member)
             if stream is not None:
-                yield SourceMail(source, "ham", match.group(2), stream.read())
+                yield SourceMail(source, "ham", source_id, stream.read())
 
 
 def iter_trec_csv_ham(path: Path, source: str, *, expected_sha256: str,

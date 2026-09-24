@@ -102,7 +102,7 @@ def source_urls(paths: CorpusPaths) -> dict[str, str]:
     if paths.phishing_pot.is_dir():
         urls["phishing-pot"] = "https://github.com/rf-peixoto/phishing_pot"
     urls.update({name: ("https://zenodo.org/records/8339691" if path.suffix == ".csv"
-                        else "https://trec.nist.gov/data/spam.html")
+                        else f"https://www.kaggle.com/datasets/bayes2003/emails-for-spam-or-ham-classification-trec-20{name[-2:]}")
                  for name, path in paths.trec.items()})
     urls.update({name: "https://spamassassin.apache.org/old/publiccorpus/"
                  for name in paths.spamassassin})

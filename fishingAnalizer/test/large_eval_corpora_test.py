@@ -21,6 +21,14 @@ def write_trec(path, index, entries):
             archive.addfile(info, io.BytesIO(content))
 
 
+def write_trec_index_last(path, index, entries):
+    with tarfile.open(path, "w:gz") as archive:
+        for name, content in {**entries, "trec06p/full/index": index.encode()}.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+
+
 class CorpusReadersTest(unittest.TestCase):
     def test_trec_reads_only_indexed_ham_and_never_extracts_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -35,6 +43,31 @@ class CorpusReadersTest(unittest.TestCase):
             self.assertEqual([(r.label, r.source_id) for r in rows], [("ham", "inmail.1")])
             self.assertEqual(rows[0].raw, MAIL)
             self.assertFalse((Path(temporary) / "escape").exists())
+
+    def test_trec_2005_2006_numeric_paths_keep_only_ham(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "trec.tgz"
+            write_trec(path,
+                       "ham ../data/000/000\nspam ../data/000/001\n"
+                       "ham ../data/000/002\nham ../data/000/../003\n",
+                       {"trec05p-1/data/000/000": MAIL,
+                        "trec05p-1/data/000/001": b"spam body",
+                        "trec05p-1/data/000/002": MAIL})
+            rows = list(iter_trec_ham(path, "trec05"))
+            self.assertEqual([r.source_id for r in rows], ["000/000", "000/002"])
+            self.assertTrue(all(r.label == "ham" for r in rows))
+
+    def test_trec_reads_index_last_without_loading_unindexed_spam(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "trec.tgz"
+            write_trec_index_last(path, "ham ../data/000/000\nspam ../data/000/001\n"
+                                  "ham ../data/000/002\n",
+                                  {"trec06p/data/000/001": b"spam body",
+                                   "trec06p/data/000/002": MAIL,
+                                   "trec06p/data/000/000": MAIL})
+            rows = list(iter_trec_ham(path, "trec06"))
+            self.assertEqual([r.source_id for r in rows], ["000/002", "000/000"])
+            self.assertEqual(rows[0].raw, MAIL)
 
     def test_curated_trec_csv_requires_verified_file_and_ham_count(self):
         with tempfile.TemporaryDirectory() as temporary:

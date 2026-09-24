@@ -1,3 +1,5 @@
+import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,7 +13,8 @@ except ImportError:
     torch = None
 
 if torch is not None:
-    from localModel.train_head import freeze_encoder, hash_parameters, save_checkpoint, train_one_step
+    from localModel.train_head import (freeze_encoder, hash_parameters, resume_epoch,
+                                       save_checkpoint, train_one_step)
 
 
 class QuestionParityTest(unittest.TestCase):
@@ -83,6 +86,23 @@ class HeadTrainingTest(unittest.TestCase):
             self.assertTrue((target / "tokenizer/tokenizer_config.json").is_file())
             self.assertTrue((target / "encoder/config.json").is_file())
             self.assertNotIn("message", (target / "training.json").read_text())
+
+    def test_resume_checks_weights_and_frozen_training_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            checkpoint = Path(temporary) / "epoch-02"
+            checkpoint.mkdir()
+            weights = b"synthetic weights"
+            (checkpoint / "model.safetensors").write_bytes(weights)
+            metadata = {"epoch": 2, "seed": 20260924, "manifest_sha256": "manifest",
+                        "adapter_sha256": "adapter", "question_sha256": "question",
+                        "weights_sha256": hashlib.sha256(weights).hexdigest()}
+            (checkpoint / "training.json").write_text(json.dumps(metadata))
+            self.assertEqual(resume_epoch(checkpoint, "manifest", "adapter", "question"), 3)
+            with self.assertRaisesRegex(RuntimeError, "manifest"):
+                resume_epoch(checkpoint, "changed", "adapter", "question")
+            (checkpoint / "model.safetensors").write_bytes(b"changed")
+            with self.assertRaisesRegex(RuntimeError, "weights"):
+                resume_epoch(checkpoint, "manifest", "adapter", "question")
 
 
 if __name__ == "__main__":

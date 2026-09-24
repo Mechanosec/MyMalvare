@@ -137,10 +137,11 @@ def _load_training(data_dir: Path) -> tuple[list[dict], str]:
     return rows, file_hash(manifest_path)
 
 
-def _agent() -> Agent:
+def _agent(checkpoint: Path | None = None) -> Agent:
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for this training run")
-    agent = Agent("convaiinnovations/laya", subfolder="multilingual", device="cuda")
+    agent = (Agent(str(checkpoint), device="cuda") if checkpoint is not None else
+             Agent("convaiinnovations/laya", subfolder="multilingual", device="cuda"))
     if agent.device.type != "cuda":
         raise RuntimeError("Laya did not stay on CUDA")
     freeze_encoder(agent.model)
@@ -180,18 +181,42 @@ def smoke(out_dir: Path) -> dict:
             "device": loaded.device.type}
 
 
-def train(data_dir: Path, out_dir: Path) -> list[dict]:
+def resume_epoch(checkpoint: Path, manifest_hash: str, adapter_hash: str,
+                 question_hash: str) -> int:
+    metadata = json.loads((checkpoint / "training.json").read_text())
+    epoch = metadata.get("epoch")
+    if not isinstance(epoch, int) or not 1 <= epoch < 5 or checkpoint.name != f"epoch-{epoch:02d}":
+        raise RuntimeError("Resume checkpoint epoch is invalid")
+    if metadata.get("manifest_sha256") != manifest_hash:
+        raise RuntimeError("Resume checkpoint manifest differs from prepared data")
+    if metadata.get("adapter_sha256") != adapter_hash or metadata.get("question_sha256") != question_hash:
+        raise RuntimeError("Resume checkpoint question or adapter differs from production")
+    if metadata.get("seed") != SEED:
+        raise RuntimeError("Resume checkpoint seed differs from this run")
+    if file_hash(checkpoint / "model.safetensors") != metadata.get("weights_sha256"):
+        raise RuntimeError("Resume checkpoint weights checksum mismatch")
+    return epoch + 1
+
+
+def train(data_dir: Path, out_dir: Path, resume_from: Path | None = None) -> list[dict]:
     random.seed(SEED)
     np.random.seed(SEED)
     torch.manual_seed(SEED)
     torch.cuda.manual_seed_all(SEED)
     rows, manifest_hash = _load_training(data_dir)
+    adapter_hash = file_hash(Path(__file__).resolve().parents[1] / "backend/adapters.ts")
+    question_hash = hashlib.sha256(json.dumps(QUESTION, sort_keys=True).encode()).hexdigest()
+    start_epoch = 1
+    if resume_from is not None:
+        if resume_from.parent.resolve() != out_dir.resolve():
+            raise RuntimeError("Resume checkpoint must be inside the output directory")
+        start_epoch = resume_epoch(resume_from, manifest_hash, adapter_hash, question_hash)
     counts = {label: sum(row["label"] == label for row in rows)
               for label in ("phishing", "ham")}
     if not all(counts.values()):
         raise RuntimeError("Both phishing and ham are required for training")
     class_weight = {label: len(rows) / (2 * count) for label, count in counts.items()}
-    agent = _agent()
+    agent = _agent(resume_from)
     model = agent.model
     model.head_checkpointing = True
     params = [p for name, p in model.named_parameters()
@@ -200,7 +225,7 @@ def train(data_dir: Path, out_dir: Path) -> list[dict]:
     base = base_checkpoint_dir()
     out_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     metadata = []
-    for epoch in range(1, 6):
+    for epoch in range(start_epoch, 6):
         model.train()
         model.encoder.eval()
         order = list(range(len(rows)))
@@ -227,11 +252,13 @@ def train(data_dir: Path, out_dir: Path) -> list[dict]:
             raise RuntimeError("Decision head weights did not change")
         info = {"epoch": epoch, "train_count": len(rows), "class_counts": counts,
                 "mean_loss": sum(losses) / len(losses), "manifest_sha256": manifest_hash,
-                "question_sha256": hashlib.sha256(json.dumps(QUESTION, sort_keys=True).encode()).hexdigest(),
-                "adapter_sha256": file_hash(Path(__file__).resolve().parents[1] / "backend/adapters.ts"),
+                "question_sha256": question_hash,
+                "adapter_sha256": adapter_hash,
                 "seed": SEED, "learning_rate": 1e-4, "weight_decay": 0.01,
                 "gradient_accumulation": 8, "device": torch.cuda.get_device_name(0),
                 "torch_version": torch.__version__}
+        if resume_from is not None:
+            info["optimizer_reset_after_epoch"] = start_epoch - 1
         digest = save_checkpoint(model, base, out_dir / f"epoch-{epoch:02d}", info)
         metadata.append({**info, "weights_sha256": digest})
         print(f"epoch {epoch}: mean_loss={info['mean_loss']:.4f}; checkpoint_sha256={digest}",
@@ -244,8 +271,9 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", type=Path, default=MODEL_DIR / ".cache/evaluation")
     parser.add_argument("--out-dir", type=Path, default=MODEL_DIR / ".cache/checkpoints")
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--resume-from", type=Path)
     args = parser.parse_args()
     if args.smoke:
         print(json.dumps(smoke(args.out_dir), sort_keys=True))
     else:
-        print(json.dumps({"epochs": len(train(args.data_dir, args.out_dir))}))
+        print(json.dumps({"epochs": len(train(args.data_dir, args.out_dir, args.resume_from))}))
