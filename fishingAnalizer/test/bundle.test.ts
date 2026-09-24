@@ -49,7 +49,7 @@ test('built content script works without globals and does not resend after its o
       requestId: requests[0].request.requestId, mode: 'jev', model: 'synthetic',
       status: 'review', observations: [], limitations: [], elapsedMs: 1,
     });
-    await waitFor(() => window.document.querySelector('.fishing-analizer')?.textContent.includes('потрібна перевірка'));
+    await waitFor(() => window.document.querySelector('.fishing-analizer')?.textContent.includes('Зверніть увагу'));
     window.document.querySelector('.a3s').append(window.document.createTextNode(''));
     await new Promise(resolve => setTimeout(resolve, 450));
     assert.equal(requests.length, 1);

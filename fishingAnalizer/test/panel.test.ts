@@ -16,7 +16,8 @@ test('panel replaces an error with a verdict and keeps mail text inert', () => {
     requestId: 'r1', mode: 'jev', model: 'synthetic', status: 'review', elapsedMs: 1,
     observations: [{ code: 'test', text: '<img src=x onerror=alert(1)>' }], limitations: [],
   } });
-  assert.match(panel.textContent, /потрібна перевірка/);
+  assert.match(panel.textContent, /Зверніть увагу/);
+  assert.doesNotMatch(panel.textContent, /ручн/i);
   assert.equal(panel.querySelector('img'), null);
   assert.equal(panel.querySelector('button'), null);
   window.close();

@@ -15,7 +15,7 @@ function collectObservations(message: MailMessage): Observation[] {
     const host = target.hostname.toLowerCase();
     if (senderDomain && host !== senderDomain && !host.endsWith(`.${senderDomain}`) &&
         !found.some(x => x.code === 'sender_link_domain_mismatch')) {
-      found.push({ code: 'sender_link_domain_mismatch', text: `Домен відправника ${senderDomain} відрізняється від домену посилання ${host}.` });
+      found.push({ code: 'sender_link_domain_mismatch', text: `Домен відправника ${senderDomain} відрізняється від домену посилання ${host}; саме по собі це не доводить фішинг.` });
     }
     const shown = link.text.trim();
     if (/^https?:\/\//i.test(shown)) {
@@ -32,17 +32,19 @@ function collectObservations(message: MailMessage): Observation[] {
 
 function resolveStatus(choice: Status, signs: Observation[], truncated: boolean): Status {
   let status = choice;
+  // Cross-domain links are common in legitimate mail; show them without overriding the model.
   if (signs.some(x => x.code === 'link_label_mismatch')) status = 'suspicious';
-  else if (signs.length && status === 'no_signals') status = 'review';
+  else if (signs.some(x => x.code === 'credential_request') && status === 'no_signals') status = 'review';
   if (truncated && status === 'no_signals') status = 'review';
   return status;
 }
 
-function buildLimitations(mode: Mode, signs: Observation[], truncated: boolean): string[] {
+function buildLimitations(mode: Mode, choice: Status, signs: Observation[], truncated: boolean): string[] {
   const limitations = ['Оцінка стосується лише видимих даних листа і не гарантує безпеки.'];
   if (mode === 'local') limitations.push('Laya Multilingual має контекст 1024 токени; довший лист може бути охоплений не повністю.');
   if (truncated) limitations.push('Текст листа було скорочено перед аналізом.');
-  if (!signs.length) limitations.push('Конкретних ознак у доступних полях не виявлено; оцінка моделі потребує людської перевірки.');
+  if (choice === 'review') limitations.push('Модель дала невизначену відповідь; зверніть увагу на цей лист.');
+  if (!signs.length) limitations.push('Конкретних ознак у доступних полях не виявлено; це не доводить безпечність листа.');
   return limitations;
 }
 
@@ -54,7 +56,7 @@ export async function analyze(mode: Mode, message: MailMessage, options: Handler
     model: decision.model,
     status: resolveStatus(decision.choice, signs, message.truncated),
     observations: signs,
-    limitations: buildLimitations(mode, signs, message.truncated),
+    limitations: buildLimitations(mode, decision.choice, signs, message.truncated),
     elapsedMs: Math.round(performance.now() - start),
   };
 }

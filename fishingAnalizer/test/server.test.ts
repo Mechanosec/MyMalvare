@@ -110,6 +110,37 @@ test('truncated text never gets a no-signals verdict', async () => {
   });
 });
 
+test('a different link domain alone does not override a no-signals model answer', async () => {
+  await withServer(async () => new Response(JSON.stringify({ answers: { phishing_risk: { type: 'choice', choice: 'no_signals' } } }), { status: 200 }), async base => {
+    const [code, body] = await post(base, { requestId: 'domain-only', mode: 'local', message: {
+      ...message, text: 'Here is the document.',
+      links: [{ text: 'Open document', url: 'https://documents.example.net/file' }],
+    } });
+    assert.equal(code, 200);
+    assert.equal(body.status, 'no_signals');
+    assert.ok(body.observations?.some(x => x.code === 'sender_link_domain_mismatch'));
+  });
+});
+
+test('a password request still promotes a no-signals model answer to review', async () => {
+  await withServer(async () => new Response(JSON.stringify({ answers: { phishing_risk: { type: 'choice', choice: 'no_signals' } } }), { status: 200 }), async base => {
+    const [code, body] = await post(base, { requestId: 'password', mode: 'local', message: {
+      ...message, text: 'Please send your password now.', links: [],
+    } });
+    assert.equal(code, 200);
+    assert.equal(body.status, 'review');
+  });
+});
+
+test('uncertain model decision stays distinct from suspicious and explains uncertainty', async () => {
+  await withServer(async () => new Response(JSON.stringify({ answers: { phishing_risk: { type: 'choice', choice: 'review' } } }), { status: 200 }), async base => {
+    const [code, body] = await post(base, { requestId: 'uncertain', mode: 'local', message: { ...message, links: [], text: 'Hello.' } });
+    assert.equal(code, 200);
+    assert.equal(body.status, 'review');
+    assert.ok(body.limitations?.some(text => /невизначен/i.test(text)));
+  });
+});
+
 test('preserves a suspicious model decision for a credential request without links', async () => {
   await withServer(async () => new Response(JSON.stringify({ answers: { phishing_risk: { type: 'choice', choice: 'suspicious' } } }), { status: 200 }), async base => {
     const [code, body] = await post(base, {

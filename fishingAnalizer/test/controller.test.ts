@@ -43,7 +43,7 @@ test('asks consent before transmission and sends one request per expanded messag
   assert.equal(ctx.requests.length, 0);
   assert.equal(ctx.window.document.querySelectorAll('.fishing-analizer button').length, 2);
   ctx.window.document.querySelector('.fishing-analizer button').click();
-  await new Promise(resolve => setTimeout(resolve, 20));
+  await waitFor(() => ctx.requests.length === 2);
   assert.equal(ctx.requests.length, 2);
   await ctx.controller.scan();
   assert.equal(ctx.requests.length, 2);
@@ -63,10 +63,10 @@ test('out-of-order response never appears on another or replaced message', async
   assert.doesNotMatch(first.querySelector('.fishing-analizer').textContent, /Old result/);
   ctx.requests[2].callback(verdict(ctx.requests[2].request, 'review'));
   ctx.requests[1].callback(verdict(ctx.requests[1].request, 'no_signals'));
-  await waitFor(() => first.querySelector('.fishing-analizer').textContent.includes('потрібна перевірка') &&
-    ctx.window.document.querySelector('[data-legacy-message-id="two"] .fishing-analizer').textContent.includes('явних ознак не знайдено'));
-  assert.match(first.querySelector('.fishing-analizer').textContent, /потрібна перевірка/);
-  assert.match(ctx.window.document.querySelector('[data-legacy-message-id="two"] .fishing-analizer').textContent, /явних ознак не знайдено/);
+  await waitFor(() => first.querySelector('.fishing-analizer').textContent.includes('Зверніть увагу') &&
+    ctx.window.document.querySelector('[data-legacy-message-id="two"] .fishing-analizer').textContent.includes('Все ок'));
+  assert.match(first.querySelector('.fishing-analizer').textContent, /Зверніть увагу/);
+  assert.match(ctx.window.document.querySelector('[data-legacy-message-id="two"] .fishing-analizer').textContent, /Все ок/);
 });
 
 test('route change prevents a late verdict from appearing in the old thread', async () => {

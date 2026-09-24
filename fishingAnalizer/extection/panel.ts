@@ -7,9 +7,9 @@ export type PanelState =
   | { kind: 'error'; message: string; onRetry: () => void };
 
 const labels = {
-  suspicious: 'підозрілий',
-  review: 'потрібна перевірка',
-  no_signals: 'явних ознак не знайдено',
+  suspicious: 'Підозрілий',
+  review: 'Зверніть увагу',
+  no_signals: 'Все ок',
 } as const;
 
 export function createPanel(document: Document): HTMLElement {
@@ -52,6 +52,7 @@ export function renderPanel(panel: HTMLElement, state: PanelState): void {
       break;
     case 'success':
       addText(panel, `Результат: ${labels[state.result.status]}`, 'strong');
+      if (state.result.status === 'review') addText(panel, 'Ознаки неоднозначні або даних недостатньо для однозначного висновку.');
       for (const observation of state.result.observations) addText(panel, observation.text);
       for (const limitation of state.result.limitations) addText(panel, limitation);
       addText(panel, 'Це попередня оцінка, а не гарантія безпеки.', 'small');
